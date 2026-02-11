@@ -1,3 +1,4 @@
+cloud\google\GoogleDriveCloudProvider.class
 jgit\GitUtils.class
 jgit\TokenStore.class
 view\MainFrame$1.class
@@ -6,8 +7,11 @@ minecraftServerManagement\ForgeUtils.class
 jgit\GitUtils$2.class
 view\MainFrame$2.class
 vpn\DiscoveryResponder.class
+cloud\ZipUtils.class
 view\GitWindows.class
+cloud\CloudStorageProvider.class
 view\MainFrame$3.class
 jgit\GitUtils$1.class
 vpn\NetworkDiscoverClient.class
+view\GoogleWindows.class
 view\ThemeManager.class

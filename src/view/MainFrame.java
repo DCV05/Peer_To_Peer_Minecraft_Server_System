@@ -189,7 +189,7 @@ public class MainFrame {
 		JMenu cloudMenu = new JMenu("Cloud");
 		JMenu saveBackupsToCloudMenu = new JMenu("Save backups to cloud...");
 		JMenu gitMenu = new JMenu("GitHub");
-		gitMenu.setIcon(new ImageIcon(MainFrame.class.getResource("/icons/GitHub_invertocat_White_Clearspace.png")));
+		gitMenu.setIcon(new ImageIcon(MainFrame.class.getResource("/icons/github.png")));
 		JMenu googleDriveMenu = new JMenu("Google Drive");
 		googleDriveMenu.setIcon(new ImageIcon(MainFrame.class.getResource("/icons/google-drive.png")));
 		cloudInUseReminderText = new String[]{"<html><span style=' color: rgb(177, 177, 177);'>%s.</span></html>", "Currently saving backups in ", "No cloud provider configured yet", "%s choosen for saving backups, but you are not logged in"};
@@ -204,7 +204,7 @@ public class MainFrame {
 		cloudMenu.add(cloudInUseReminderMenuText);
 		
 		JRadioButtonMenuItem gitMenuItem = new JRadioButtonMenuItem("GitHub");
-		gitMenuItem.setIcon(new ImageIcon(MainFrame.class.getResource("/icons/GitHub_invertocat_White_Clearspace.png")));
+		gitMenuItem.setIcon(new ImageIcon(MainFrame.class.getResource("/icons/github.png")));
 		gitMenuItem.addActionListener(ghList -> {
 			radioBtnListener(cloudMenu, saveBackupsToCloudMenu, gitMenuItem);
 		});
