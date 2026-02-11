@@ -5,7 +5,7 @@ import java.net.*;
 public class DiscoveryResponder {
 
 	private final String myNetworkName;
-	private DatagramSocket socket;
+	private volatile DatagramSocket socket;
 	
 	public DiscoveryResponder(String name) {
 		this.myNetworkName = name;

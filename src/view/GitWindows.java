@@ -36,7 +36,7 @@ public class GitWindows {
 	
 	private static boolean hasErrors;
 	
-	public static void signIntoGitHubWnd() {
+	public static void signIntoGitHubWnd(Runnable doAfterSignIn) {
 		//Dialog creation and configurations.
 		JDialog githubSignInDialog  = new JDialog();
 		githubSignInDialog.setTitle("Sign into GitHub");
@@ -120,6 +120,7 @@ public class GitWindows {
 			if(hasErrors) return;
 			else {
 				TokenStore.saveUserData(nicknameInput.getText(), emailInput.getText(), tokenInput.getText());
+				doAfterSignIn.run();
 			}
 			
 			githubSignInDialog.dispose();

@@ -12,12 +12,16 @@ import java.awt.Toolkit;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.JTextPane;
 import javax.swing.SwingUtilities;
 
+import cloud.CloudStorageProvider;
+import cloud.ZipUtils;
+import cloud.google.GoogleDriveCloudProvider;
 import jgit.GitUtils;
 import jgit.TokenStore;
 import minecraftServerManagement.ForgeUtils;
@@ -32,26 +36,37 @@ import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JMenu;
+import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
+import javax.swing.ButtonGroup;
+import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 
+import java.awt.event.ActionListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -70,22 +85,31 @@ public class MainFrame {
 	private static JTextArea consoleArea = null;
 	private static Thread consoleThread = null;
 	private static JTextField comandInput = null;
-	private static String networkName = null;
-	private static int actualServerPort = 0;
-	private static DiscoveryResponder responder = null;
 	private static JMenu recentServersMenu = null;
-	private static JPanel contentPane = null;
 	private static JMenuItem addHostingUserBtn = null;
 	private static JMenuItem repoInvitationsBtn = null;
 	private static JMenuItem gitSignOutBtn = null;
 	private static JMenuItem gitHubProfileBtn = null;
 	private static JMenuItem cloneRepoBtn = null;
-	
+	private static JMenuItem GoogleAddHostingUserBtn = null;
+	private static ActionListener crbckfldcld;	
+
+	public static String networkName = null;
+	public static int actualServerPort = 0;
+	public static DiscoveryResponder responder = null;
+	public static JPanel contentPane = null;
+	public static JButton createServerBackupsFolderInCloud = null;
+	public static final Path CLOUD_PROVIDER_IN_USE_PATH = Path.of("data/cloudProviderInUse.properties");
 	public static File serverOpenedDirectory = null;
 	public static BufferedWriter serverWriter = null;
 	public static Process serverProcess = null;
 	public static boolean serverIsOn = false;
-
+	public static CloudStorageProvider cloudProvider = null;
+	public static String cloudProviderInUse = null;
+	public static String cloudInUseReminderText[];
+	public static JMenuItem cloudInUseReminderMenuText;
+	public static MainFrame window = null;
+	
 	private JFrame frame;
 
 	/**
@@ -98,7 +122,7 @@ public class MainFrame {
 		EventQueue.invokeLater(new Runnable() {
 			public void run() {
 				try {
-					MainFrame window = new MainFrame();
+					window = new MainFrame();
 					window.frame.setVisible(true);
 				} catch (Exception e) {
 					e.printStackTrace();
@@ -121,6 +145,12 @@ public class MainFrame {
 		checkIfExistsDataFolder();
 		//Initialize networkName
 		networkName = ForgeUtils.getNetworkName();
+		if(ZipUtils.existsDirectory(Path.of("data/google_tokens/StoredCredential"))) {
+			cloudProvider = new GoogleDriveCloudProvider();
+			cloudProvider.authenticate();
+		}
+		cloudProviderInUse = ZipUtils.getDataFromPropertiesFile("cloudProviderInUse", CLOUD_PROVIDER_IN_USE_PATH);
+			
 		
 		frame = new JFrame();
 		int frameWidht = 750;
@@ -156,9 +186,124 @@ public class MainFrame {
 		frame.setJMenuBar(menuBar);
 		
 		JMenu fileMenu = new JMenu("File");
-		JMenu gitMenu = new JMenu("Git");
+		JMenu cloudMenu = new JMenu("Cloud");
+		JMenu saveBackupsToCloudMenu = new JMenu("Save backups to cloud...");
+		JMenu gitMenu = new JMenu("GitHub");
+		gitMenu.setIcon(new ImageIcon(MainFrame.class.getResource("/icons/GitHub_invertocat_White_Clearspace.png")));
+		JMenu googleDriveMenu = new JMenu("Google Drive");
+		googleDriveMenu.setIcon(new ImageIcon(MainFrame.class.getResource("/icons/google-drive.png")));
+		cloudInUseReminderText = new String[]{"<html><span style=' color: rgb(177, 177, 177);'>%s.</span></html>", "Currently saving backups in ", "No cloud provider configured yet", "%s choosen for saving backups, but you are not logged in"};
+		cloudInUseReminderMenuText = new JMenuItem(cloudInUseReminderText[0].formatted(cloudProviderInUse != null ? ( cloudProviderInUse.equals("GitHub") && !TokenStore.sessionIsOpened() ? cloudInUseReminderText[3].formatted(cloudProviderInUse) : ( cloudProvider == null ? cloudInUseReminderText[3].formatted(cloudProviderInUse) : cloudInUseReminderText[1] + cloudProviderInUse)) : cloudInUseReminderText[2]));
+		cloudInUseReminderMenuText.setEnabled(false);
+		
 		menuBar.add(fileMenu);
-		menuBar.add(gitMenu);
+		menuBar.add(cloudMenu);
+		cloudMenu.add(saveBackupsToCloudMenu);
+		cloudMenu.add(gitMenu);
+		cloudMenu.add(googleDriveMenu);
+		cloudMenu.add(cloudInUseReminderMenuText);
+		
+		JRadioButtonMenuItem gitMenuItem = new JRadioButtonMenuItem("GitHub");
+		gitMenuItem.setIcon(new ImageIcon(MainFrame.class.getResource("/icons/GitHub_invertocat_White_Clearspace.png")));
+		gitMenuItem.addActionListener(ghList -> {
+			radioBtnListener(cloudMenu, saveBackupsToCloudMenu, gitMenuItem);
+		});
+		
+		JRadioButtonMenuItem googleDriveMenuItem = new JRadioButtonMenuItem("Google Drive");
+		googleDriveMenuItem.setIcon(new ImageIcon(MainFrame.class.getResource("/icons/google-drive.png")));
+		googleDriveMenuItem.addActionListener(gglList -> {
+			radioBtnListener(cloudMenu, saveBackupsToCloudMenu, googleDriveMenuItem);
+		});
+		
+		ButtonGroup group = new ButtonGroup();
+		group.add(gitMenuItem);
+		group.add(googleDriveMenuItem);
+		
+		Iterator<AbstractButton> it = group.getElements().asIterator();
+		while(it.hasNext()) {
+			JRadioButtonMenuItem radioBtn = (JRadioButtonMenuItem) it.next();
+			if(radioBtn.getText().replaceAll(" ", "").equals(cloudProviderInUse)) radioBtn.setSelected(true);
+		}
+		
+		saveBackupsToCloudMenu.add(gitMenuItem);
+		saveBackupsToCloudMenu.add(googleDriveMenuItem);
+		
+		JMenuItem installInvitedServerBtn = new JMenuItem("Install invited server folder");
+		installInvitedServerBtn.addActionListener(insInviServBtn -> {
+			GoogleWindows.cloneServerFolderWnd(frame);
+		});
+		
+		JMenuItem signOutDriveBtn = new JMenuItem("Sign out");
+		JMenuItem loggedInGoogleDriveText = new JMenuItem("<html><span style='color: rgb(177, 177, 177);'>Logged in Google Drive</span></html>");
+		loggedInGoogleDriveText.setEnabled(false);
+		
+		JMenuItem googleProfileBtn = new JMenuItem("Profile");
+		googleProfileBtn.addActionListener(gglprf -> {
+			GoogleWindows.googleProfileWnd();
+		});
+		
+		GoogleAddHostingUserBtn = new JMenuItem("Add hosting user");
+		GoogleAddHostingUserBtn.addActionListener(gglhtusrBtn -> {
+			GoogleWindows.addHostingUser();
+		});
+	
+		JMenuItem signIntoDriveBtn = new JMenuItem("Sign into Google Drive");
+		signIntoDriveBtn.addActionListener(sgnggldr -> {
+			cloudProvider = new GoogleDriveCloudProvider();
+			new Thread(() -> {
+				cloudProvider.authenticate();
+			}).start();
+			SwingUtilities.invokeLater(() -> {
+				if(cloudProvider != null || cloudProvider.isSessionOpened()) {
+					signIntoDriveBtn.setVisible(false);
+					signOutDriveBtn.setVisible(true);
+					loggedInGoogleDriveText.setVisible(true);
+					googleProfileBtn.setVisible(true);
+					installInvitedServerBtn.setVisible(true);
+					if(cloudProvider.getProviderName().equals(cloudProviderInUse)) {
+						cloudInUseReminderMenuText.setText(cloudInUseReminderText[0].formatted(cloudInUseReminderText[1] + cloudProviderInUse));
+					}
+				}
+			});
+		});
+		
+		signOutDriveBtn.addActionListener(sgntDrvBtn -> {
+			String savedProviderName = cloudProvider.getProviderName();
+			cloudProvider.closeSession();
+			if(cloudProvider == null || !cloudProvider.isSessionOpened()) {
+				signOutDriveBtn.setVisible(false);
+				loggedInGoogleDriveText.setVisible(false);
+				googleProfileBtn.setVisible(false);
+				GoogleAddHostingUserBtn.setVisible(false);
+				installInvitedServerBtn.setVisible(false);
+				signIntoDriveBtn.setVisible(true);
+				if(cloudProviderInUse.equals(savedProviderName)) {
+					cloudInUseReminderMenuText.setText(cloudInUseReminderText[0].formatted(cloudInUseReminderText[3].formatted(cloudProviderInUse)));
+				}
+			}
+		});
+		
+		if(cloudProvider == null || !cloudProvider.isSessionOpened() && cloudProvider instanceof GoogleDriveCloudProvider) {
+			loggedInGoogleDriveText.setVisible(false);
+			signIntoDriveBtn.setVisible(true);
+			signOutDriveBtn.setVisible(false);
+			googleProfileBtn.setVisible(false);
+			GoogleAddHostingUserBtn.setVisible(false);
+			installInvitedServerBtn.setVisible(false);
+		}
+		else {
+			loggedInGoogleDriveText.setVisible(true);
+			signIntoDriveBtn.setVisible(false);
+			googleProfileBtn.setVisible(true);
+			installInvitedServerBtn.setVisible(true);
+		}
+		
+		googleDriveMenu.add(signIntoDriveBtn);
+		googleDriveMenu.add(loggedInGoogleDriveText);
+		googleDriveMenu.add(googleProfileBtn);
+		googleDriveMenu.add(GoogleAddHostingUserBtn);
+		googleDriveMenu.add(installInvitedServerBtn);
+		googleDriveMenu.add(signOutDriveBtn);
 		
 		addHostingUserBtn = new JMenuItem("Add hosting user");
 		addHostingUserBtn.addActionListener(addhstngUsrBtn -> {
@@ -167,29 +312,37 @@ public class MainFrame {
 		
 		JMenuItem gitSignInBtn = new JMenuItem("Sign into GitHub");
 		gitSignInBtn.addActionListener(gitLis ->{
-			GitWindows.signIntoGitHubWnd();
-			gitSignOutBtn.setVisible(true);
-			repoInvitationsBtn.setVisible(true);
-			gitHubProfileBtn.setVisible(true);
-			cloneRepoBtn.setVisible(true);
-			if(serverOpenedDirectory != null) {
-				if(!GitUtils.repoExistInPath(serverOpenedDirectory.toPath())) {
-					addHostingUserBtn.setVisible(false);
+			GitWindows.signIntoGitHubWnd(() -> {
+				gitSignOutBtn.setVisible(true);
+				repoInvitationsBtn.setVisible(true);
+				gitHubProfileBtn.setVisible(true);
+				cloneRepoBtn.setVisible(true);
+				if(cloudProviderInUse.equals("GitHub")) {
+					cloudInUseReminderMenuText.setText(cloudInUseReminderText[0].formatted(cloudInUseReminderText[1] + cloudProviderInUse));
 				}
-				else {
-					addHostingUserBtn.setVisible(true);
+				if(serverOpenedDirectory != null) {
+					if(!GitUtils.repoExistInPath(serverOpenedDirectory.toPath())) {
+						addHostingUserBtn.setVisible(false);
+					}
+					else {
+						addHostingUserBtn.setVisible(true);
+					}
 				}
-			}
+			});
 		});
 		
 		gitSignOutBtn = new JMenuItem("Sign out");
 		gitSignOutBtn.addActionListener(gitOut -> {
 			TokenStore.clear();
+			if(cloudProviderInUse.equals("GitHub")) {
+				cloudInUseReminderMenuText.setText(cloudInUseReminderText[0].formatted(cloudInUseReminderText[3].formatted(cloudProviderInUse)));
+			}
 			gitSignOutBtn.setVisible(false);
 			repoInvitationsBtn.setVisible(false);
 			gitHubProfileBtn.setVisible(false);
 			addHostingUserBtn.setVisible(false);
 			cloneRepoBtn.setVisible(false);
+			addHostingUserBtn.setVisible(false);
 		});
 		
 		repoInvitationsBtn = new JMenuItem("Server Invitations");
@@ -213,6 +366,7 @@ public class MainFrame {
 			gitHubProfileBtn.setVisible(false);
 			addHostingUserBtn.setVisible(false);
 			cloneRepoBtn.setVisible(false);
+			addHostingUserBtn.setVisible(false);
 		}
 		
 		gitMenu.add(gitSignInBtn);
@@ -221,6 +375,8 @@ public class MainFrame {
 		gitMenu.add(addHostingUserBtn);
 		gitMenu.add(repoInvitationsBtn);
 		gitMenu.add(gitSignOutBtn);
+		
+		createServerBackupsFolderInCloud = new JButton("Create backups folder in %s".formatted(cloudProviderInUse));
 		
 		contentPane = new JPanel(new FlowLayout(FlowLayout.CENTER));
 		openServerOptions(contentPane);
@@ -375,7 +531,7 @@ public class MainFrame {
 			if(result == JFileChooser.CANCEL_OPTION) newMinecraftServerDirectory = null;
 		});
 		
-		JMenuItem openServerFolderBtn = new JMenuItem("Open Server Folder"); //20
+		JMenuItem openServerFolderBtn = new JMenuItem("Open Server Folder");
 		openServerFolderBtn.setHorizontalAlignment(SwingConstants.LEFT);
 		openServerFolderBtn.addActionListener(opSer -> {
 			JFileChooser fileChooser = new JFileChooser();
@@ -385,7 +541,7 @@ public class MainFrame {
 				serverOpenedDirectory = fileChooser.getSelectedFile();
 				actualServerPort = ForgeUtils.getServerPort(serverOpenedDirectory.toPath());
 				if(serverOpenedDirectory.isDirectory()) {
-					if(Files.exists(Paths.get(serverOpenedDirectory.toPath().toString()+"/run.bat"))) {
+					if(Files.exists(Paths.get(serverOpenedDirectory.toPath().toString()+"/run.bat")) || Files.exists(Paths.get(serverOpenedDirectory.toPath().toString()+"/start.bat"))) {
 						openServerOptions(contentPane);
 						Properties props = new Properties();
 						if(!(Files.exists(Paths.get("data/recentServers.properties")))) {
@@ -430,7 +586,7 @@ public class MainFrame {
 		fileMenu.add(recentServersMenu);
 	}
 	
-	private void checkServerStatus() {
+	public void checkServerStatus() {
 		String networkDiscoveryResult = NetworkDiscoverClient.surroundDiscoverIOException(networkName, actualServerPort, 3000);
 		if(networkDiscoveryResult != "NotFound") {
 			ipServerHostingPane.setText("Server ip: " + networkDiscoveryResult);
@@ -443,7 +599,7 @@ public class MainFrame {
 		ipServerHostingPane.setVisible(true);
 	}
 	
-	private void openServerOptions(JPanel fatherFrame) {
+	public void openServerOptions(JPanel fatherFrame) {
 		fatherFrame.removeAll();
 		if(serverOpenedDirectory == null) {
 			Properties props = new Properties();
@@ -474,13 +630,32 @@ public class MainFrame {
 				}
 			}
 		}
-		if(!GitUtils.repoExistInPath(serverOpenedDirectory.toPath())) {
-			addHostingUserBtn.setVisible(false);
+		
+		if(cloudProviderInUse.equals("GitHub")) {
+			if(!GitUtils.repoExistInPath(serverOpenedDirectory.toPath())) {
+				addHostingUserBtn.setVisible(false);
+			}
+			else {
+				if(TokenStore.sessionIsOpened()) addHostingUserBtn.setVisible(true);
+				if(TokenStore.sessionIsOpened() && GitUtils.isRemoteRepoHeadFordward(serverOpenedDirectory.toPath()) && cloudProviderInUse != null && cloudProviderInUse == "GitHub")
+					new Thread(() -> {
+						GitUtils.pull(serverOpenedDirectory.toPath());
+					}).start();
+			}
 		}
-		else {
-			addHostingUserBtn.setVisible(true);
-			if(TokenStore.sessionIsOpened() && GitUtils.isRemoteRepoHeadFordward(serverOpenedDirectory.toPath()))
-				GitUtils.pull(serverOpenedDirectory.toPath());
+		if(cloudProvider != null && cloudProvider.getProviderName().equals(cloudProviderInUse) && cloudProvider.isSessionOpened()) {
+			if(cloudProvider.hasRemoteServerFolder()) {
+				GoogleAddHostingUserBtn.setVisible(true);
+				createServerBackupsFolderInCloud.setVisible(false);
+			}
+			else {
+				GoogleAddHostingUserBtn.setVisible(false);
+				createServerBackupsFolderInCloud.setVisible(true);
+			}
+				
+			new Thread(() -> {
+				cloudProvider.downloadServerBackup(serverOpenedDirectory.toPath());
+			}).start();
 		}
 		
 		JPanel content = new JPanel(new BorderLayout());
@@ -515,7 +690,6 @@ public class MainFrame {
 				new Thread(() -> {
 					try {
 						serverProcess = ForgeUtils.executeMinecraftServer(serverOpenedDirectory.toPath());
-						responder = new DiscoveryResponder(networkName).listenAsync(actualServerPort);
 						//If is done...
 						if(serverProcess != null) {
 							fatherFrame.setCursor(Cursor.getDefaultCursor());
@@ -539,7 +713,6 @@ public class MainFrame {
 							content.add(consoleContent, BorderLayout.SOUTH);
 							consoleContent.revalidate();
 							consoleContent.repaint();
-							checkServerStatus();
 						}
 					}catch(Exception e) {} 
 				}).start();
@@ -549,7 +722,13 @@ public class MainFrame {
 				ForgeUtils.sendCommand("/stop", serverProcess, serverWriter);
 				new Thread(() ->{
 					try { serverProcess.waitFor();} catch (InterruptedException e) {}
-					if(TokenStore.sessionIsOpened() && GitUtils.repoExistInPath(serverOpenedDirectory.toPath())) GitUtils.autoCommitAndPush(true);
+					if(TokenStore.sessionIsOpened() && GitUtils.repoExistInPath(serverOpenedDirectory.toPath())  && cloudProviderInUse != null && cloudProviderInUse == "GitHub") GitUtils.autoCommitAndPush(true);
+					if(cloudProvider != null && cloudProvider.getProviderName().equals(cloudProviderInUse) && cloudProvider.isSessionOpened()) {
+						if(cloudProvider.hasRemoteServerFolder()) {
+							ZipUtils.createZip(serverOpenedDirectory.toPath(), ZipUtils.BACKUPS_ZIPS_FOLDER);
+							cloudProvider.uploadServerBackup(ZipUtils.BACKUPS_ZIPS_FOLDER);
+						}
+					}
 					
 					consoleThread.interrupt();
 					serverProcess = null;
@@ -573,6 +752,7 @@ public class MainFrame {
 		
 		JButton openServerModsFolderBtn = new JButton("Open Mods Folder");
 		openServerModsFolderBtn.addActionListener(mds -> {
+			if(!ZipUtils.existsDirectory(serverOpenedDirectory.toPath().resolve("mods"))) ZipUtils.createDirectory(serverOpenedDirectory.toPath().resolve("mods"));
 			ForgeUtils.openModsFolder(serverOpenedDirectory.toPath());
 		});
 		
@@ -580,6 +760,15 @@ public class MainFrame {
 		serverConfigBtn.addActionListener(conf -> {
 			serverConfigsFrame(fatherFrame);
 		});
+		
+		crbckfldcld = crbckfldcld -> {
+			new Thread(() -> {
+				frame.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+				cloudProvider.createSavingFolder();
+				frame.setCursor(Cursor.getDefaultCursor());
+			}).start();
+		};
+		createServerBackupsFolderInCloud.addActionListener(crbckfldcld);
 		
 		JButton createServerRepoBtn = new JButton("Create repository");
 		createServerRepoBtn.addActionListener(repo -> {
@@ -641,8 +830,10 @@ public class MainFrame {
 		rightContent.add(ipServerHostingPane);
 		rightContent.add(refreshBtn);
 		rightContent.add(openServerModsFolderBtn);
-		if(!GitUtils.repoExistInPath(serverOpenedDirectory.toPath()))
+		if(!GitUtils.repoExistInPath(serverOpenedDirectory.toPath()) && TokenStore.sessionIsOpened() && cloudProviderInUse.equals("GitHub"))
 			rightContent.add(createServerRepoBtn);
+		if(cloudProviderInUse != null && cloudProvider != null && cloudProvider.getProviderName().equals(cloudProviderInUse) && cloudProvider.isSessionOpened())
+			rightContent.add(createServerBackupsFolderInCloud);
 		rightContent.add(serverConfigBtn);
 		checkServerStatus();
 		fatherFrame.revalidate();
@@ -748,7 +939,9 @@ public class MainFrame {
 						ForgeUtils.setServerRAMAlloc(serverOpenedDirectory.toPath(), Integer.parseInt(serverRamAllocInput.getText().replaceAll("[-Xmx|G|M]", "")));
 					}
 					catch(Exception ramExpection) {
-						serverRamAllocLabel.setText("<html>RAM (GB or MB) <span style='color:#fa4545'>Memoria libre insuficiente</span></html>");
+						if(ramExpection.getMessage().equalsIgnoreCase("Ram exceeded"))
+							serverRamAllocLabel.setText("<html>RAM (GB or MB) <span style='color:#fa4545'>Memoria libre insuficiente</span></html>");
+						else ramExpection.printStackTrace();
 						return;
 					}
 				}
@@ -784,6 +977,7 @@ public class MainFrame {
 					item.addActionListener(itm -> {
 						serverOpenedDirectory = new File(serverDirectory);
 						SwingUtilities.invokeLater(() -> {
+							createServerBackupsFolderInCloud.removeActionListener(crbckfldcld);
 							openServerOptions(contentPane);
 						});
 					});
@@ -804,6 +998,33 @@ public class MainFrame {
 	
 	public static String getServerName() {
 	   return serverOpenedDirectory.toString().substring(serverOpenedDirectory.toString().lastIndexOf("\\") + 1, serverOpenedDirectory.toString().length());
+	}
+	
+	private void radioBtnListener(JMenu cloudMenu, JMenu saveBackupsToCloudMenu, JRadioButtonMenuItem radioButton) {
+	    SwingUtilities.invokeLater(() -> {
+	    	cloudProviderInUse = radioButton.getText().replaceAll(" ", "");
+	    	System.out.println(cloudProviderInUse);
+	    	if(!cloudProviderInUse.equals("GitHub")) {
+	    		if(cloudProvider == null || !cloudProvider.isSessionOpened()) 
+	    			cloudInUseReminderMenuText.setText(cloudInUseReminderText[0].formatted(cloudInUseReminderText[3].formatted(cloudProviderInUse)));
+	    		else
+	    			cloudInUseReminderMenuText.setText(cloudInUseReminderText[0].formatted(cloudInUseReminderText[1] + cloudProviderInUse));
+	    	}
+	    	else {
+	    		if(!TokenStore.sessionIsOpened())
+	    			cloudInUseReminderMenuText.setText(cloudInUseReminderText[0].formatted(cloudInUseReminderText[3].formatted(cloudProviderInUse)));
+	    		else
+	    			cloudInUseReminderMenuText.setText(cloudInUseReminderText[0].formatted(cloudInUseReminderText[1] + cloudProviderInUse));
+	    	}
+			ZipUtils.createOrModiFyPropertiesFile("cloudProviderInUse", cloudProviderInUse, CLOUD_PROVIDER_IN_USE_PATH);
+			cloudMenu.doClick();
+			saveBackupsToCloudMenu.doClick();
+			new Thread(() -> {
+				contentPane.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+				openServerOptions(contentPane);
+				contentPane.setCursor(Cursor.getDefaultCursor());
+			}).start();
+	    });
 	}
 
 }

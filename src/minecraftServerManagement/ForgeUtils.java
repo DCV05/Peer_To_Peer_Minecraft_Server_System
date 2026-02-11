@@ -24,6 +24,8 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import javax.swing.JOptionPane;
@@ -38,6 +40,10 @@ import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
 import com.sun.management.OperatingSystemMXBean;
+
+import cloud.ZipUtils;
+import view.MainFrame;
+import vpn.DiscoveryResponder;
 
 
 public class ForgeUtils {
@@ -235,15 +241,9 @@ public class ForgeUtils {
 				pb.directory(serverDirectory.toFile());
 	            pb.redirectErrorStream(true);
 	            Process serverProcess = pb.start();
-
-	            BufferedReader reader = new BufferedReader(new InputStreamReader(serverProcess.getInputStream()));
-	            String line;
-	            while ((line = reader.readLine()) != null) {
-	                if (line.contains("Done")) {
-	                    return serverProcess; 
-	                }
-	            }
-
+	            
+	            return serverProcess;
+	            
 	        } catch (IOException e) {
 	            return null;
 	        }
@@ -258,6 +258,10 @@ public class ForgeUtils {
 		         String line;
 		         while ((line = reader.readLine()) != null) {
 		             String finalLine = line;
+		             if(finalLine.contains("Done")) {
+		                	MainFrame.responder = new DiscoveryResponder(MainFrame.networkName).listenAsync(MainFrame.actualServerPort);
+		                	MainFrame.window.checkServerStatus();
+		             }
 		             SwingUtilities.invokeLater(() -> {
 		                 consoleArea.append(finalLine + "\n");
 		                 consoleArea.setCaretPosition(consoleArea.getDocument().getLength());
@@ -293,12 +297,27 @@ public class ForgeUtils {
 		try {
 			lines = Files.readAllLines(path);
 		} catch (IOException e) {
+			Path serverBat = Paths.get(serverDirectory.toString() + "/run.bat");
+			if(!ZipUtils.existsDirectory(serverBat)) serverBat = Paths.get(serverDirectory.toString() + "/start.bat");
+			try (BufferedReader br = new BufferedReader(new FileReader(serverBat.toString()))) {
+	            String line;
+	            while ((line = br.readLine()) != null) {
+	                if (line.contains("java")) {
+	                	Pattern pattern = Pattern.compile("-Xmx[0-9]+[GM]");
+	                	Matcher matcher = pattern.matcher(line);
+
+	                	while (matcher.find()) {
+	                		return matcher.group();
+	                	}
+	                }
+	            }
+	        } catch (IOException ioe) {}
 			return "-Xmx1G";
 		}
         
         if (!lines.isEmpty()) {
-            String ultimaLinea = lines.get(lines.size() - 1);
-            return ultimaLinea.replaceAll("# ", "");
+            String lastLine = lines.get(lines.size() - 1);
+            return lastLine.replaceAll("# ", "");
         }
         return "-Xmx1G";
 	}
@@ -314,23 +333,48 @@ public class ForgeUtils {
 		if(gb > freeRamGB && memoryUnit == "G" || gb > freeRamGB * 1024L && memoryUnit == "M") throw new Exception("Ram exceeded");
 		
 		Path path = Path.of(serverDirectory + "/user_jvm_args.txt");
+		if(!ZipUtils.existsDirectory(path)) path = Path.of(serverDirectory + "/start.bat");
 		List<String> lines;
 		try {
 			lines = Files.readAllLines(path);
-			lines.set(lines.size() - 1, "-Xmx" + gb + memoryUnit);
-			Files.write(path, lines);
+			if(ZipUtils.existsDirectory(Path.of(serverDirectory + "/user_jvm_args.txt"))) {
+				lines.set(lines.size() - 1, "-Xmx" + gb + memoryUnit);
+				Files.write(path, lines);
+			}
+			else {
+				for(int i = 0; i < lines.size(); i++) {
+					if(lines.get(i).contains("java") && Pattern.compile("-Xmx[0-9]+[GM]").matcher(lines.get(i)).find()) {
+						String line = lines.get(i).replaceAll("-Xmx[0-9]+[GM]", "-Xmx" + gb + memoryUnit);
+						lines.set(i, line);
+						Files.write(path, lines);
+					}
+				}
+			}
 		}
 		catch(IOException e) {
-			JOptionPane.showMessageDialog(null, "File not found or inaccessible (user_jvm_args.txt)", "Error", JOptionPane.ERROR_MESSAGE);
+			JOptionPane.showMessageDialog(null, "File not found or inaccessible (user_jvm_args.txt or start.bat)", "Error", JOptionPane.ERROR_MESSAGE);
 		}
 	}
 	
+	
 	public static String getServerJarName(Path serverDirectory) {
-		try (BufferedReader br = new BufferedReader(new FileReader(serverDirectory.toString() + "/run.bat"))) {
+		Path serverBat = Paths.get(serverDirectory.toString() + "/run.bat");
+		if(!ZipUtils.existsDirectory(serverBat)) serverBat = Paths.get(serverDirectory.toString() + "/start.bat");
+		try (BufferedReader br = new BufferedReader(new FileReader(serverBat.toString()))) {
             String line;
             while ((line = br.readLine()) != null) {
                 if (line.contains("java")) {
-                    return line.replaceAll("java -jar ", "").replaceAll(" --onlyCheckJava", "").trim();
+                	if(ZipUtils.existsDirectory(Path.of(serverDirectory.toString() + "/run.bat"))) {
+                		 return line.replaceAll("java -jar ", "").replaceAll(" --onlyCheckJava", "").trim();
+                	}
+                	
+                	if(ZipUtils.existsDirectory(Path.of(serverDirectory.toString() + "/start.bat"))) {
+                       	Matcher matcher = Pattern.compile("\\b([^\\s]+\\.jar)\\b").matcher(line);
+                       	
+                    	while (matcher.find()) {
+                    		return matcher.group();
+                    	}
+                	}
                 }
             }
         } catch (IOException e) {
