@@ -42,6 +42,7 @@ import org.xml.sax.SAXException;
 import com.sun.management.OperatingSystemMXBean;
 
 import cloud.ZipUtils;
+import view.GeneralConfigurationsWindows;
 import view.MainFrame;
 import vpn.DiscoveryResponder;
 
@@ -258,9 +259,16 @@ public class ForgeUtils {
 		         String line;
 		         while ((line = reader.readLine()) != null) {
 		             String finalLine = line;
+		             if(finalLine.contains("> \\")) CustomCommands.processCustomCommand(finalLine);
 		             if(finalLine.contains("Done")) {
 		                	MainFrame.responder = new DiscoveryResponder(MainFrame.networkName).listenAsync(MainFrame.actualServerPort);
 		                	MainFrame.window.checkServerStatus();
+		                	
+							if(ZipUtils.existsDirectory(GeneralConfigurationsWindows.USER_OPS_PATH)) {
+								for(String nickname : ZipUtils.getDataFromPropertiesFile("userOps", GeneralConfigurationsWindows.USER_OPS_PATH).split(", ")) {
+									ForgeUtils.sendCommand("/op " + nickname, MainFrame.serverProcess, MainFrame.serverWriter);
+								}
+							}
 		             }
 		             SwingUtilities.invokeLater(() -> {
 		                 consoleArea.append(finalLine + "\n");

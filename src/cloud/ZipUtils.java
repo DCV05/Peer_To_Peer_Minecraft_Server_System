@@ -139,11 +139,13 @@ public class ZipUtils {
 			}
 		
 		Properties props = new Properties();
-		try(FileInputStream in = new FileInputStream(propertiesFilePath.toFile()); FileOutputStream out = new FileOutputStream(propertiesFilePath.toFile())){
+		try(FileInputStream in = new FileInputStream(propertiesFilePath.toFile())){
 			props.load(in);
 			
 			props.setProperty(property, data);
-			props.store(out, "Modify property:" + property + " with data: '" + data + "'.");
+			try(FileOutputStream out = new FileOutputStream(propertiesFilePath.toFile())){
+				props.store(out, "Modify property:" + property + " with data: '" + data + "'.");
+			}
 		} catch (IOException e) {
 			JOptionPane.showMessageDialog(null, "File " + propertiesFilePath + " not found or inaccessible or another thing went wrong, try again.", "Error", JOptionPane.ERROR_MESSAGE);
 		}

@@ -151,10 +151,7 @@ public class GoogleDriveCloudProvider implements CloudStorageProvider{
 
 	@Override
 	public boolean downloadServerBackup(Path serverDestinataryFolder) {
-		if(!hasBackUp()) {
-			System.out.print("not Downloading, updated");
-			return false;
-		}
+		if(!hasBackUp()) return false;
 		
 		if(!ZipUtils.existsDirectory(serverDestinataryFolder)) ZipUtils.createDirectory(serverDestinataryFolder);
 		

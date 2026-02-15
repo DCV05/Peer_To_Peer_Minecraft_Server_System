@@ -92,7 +92,8 @@ public class MainFrame {
 	private static JMenuItem gitHubProfileBtn = null;
 	private static JMenuItem cloneRepoBtn = null;
 	private static JMenuItem GoogleAddHostingUserBtn = null;
-	private static ActionListener crbckfldcld;	
+	private static ActionListener crbckfldcld;
+	private static JPanel consoleContent = null;
 
 	public static String networkName = null;
 	public static int actualServerPort = 0;
@@ -153,7 +154,7 @@ public class MainFrame {
 			
 		
 		frame = new JFrame();
-		int frameWidht = 750;
+		int frameWidht = 800;
 		int frameHeight = 450;
 		frame.setBounds((Toolkit.getDefaultToolkit().getScreenSize().width / 2) - (frameWidht / 2), (Toolkit.getDefaultToolkit().getScreenSize().height / 2) - (frameHeight / 2), frameWidht, frameHeight);
 		frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
@@ -581,9 +582,15 @@ public class MainFrame {
 		recentServersMenu = new JMenu("Recent files...");
 		recentServerListGenerator();
 		
+		JMenuItem generalConfigurationsMenuItem = new JMenuItem("General configurations");
+		generalConfigurationsMenuItem.addActionListener(gncnf -> {
+			GeneralConfigurationsWindows.generalConfigurations();
+		});
+		
 		fileMenu.add(openServerFolderBtn);
 		fileMenu.add(btnNewMinecraftServer);
 		fileMenu.add(recentServersMenu);
+		fileMenu.add(generalConfigurationsMenuItem);
 	}
 	
 	public void checkServerStatus() {
@@ -631,7 +638,7 @@ public class MainFrame {
 			}
 		}
 		
-		if(cloudProviderInUse.equals("GitHub")) {
+		if(cloudProvider != null && cloudProviderInUse.equals("GitHub")) {
 			if(!GitUtils.repoExistInPath(serverOpenedDirectory.toPath())) {
 				addHostingUserBtn.setVisible(false);
 			}
@@ -659,7 +666,7 @@ public class MainFrame {
 		}
 		
 		JPanel content = new JPanel(new BorderLayout());
-		JPanel consoleContent = new JPanel(new BorderLayout());
+		consoleContent = new JPanel(new BorderLayout());
 		JPanel topContent = new JPanel(new BorderLayout());
 		JPanel leftContent = new JPanel(new FlowLayout(FlowLayout.CENTER));
 		JPanel rightContent = new JPanel(new FlowLayout(FlowLayout.CENTER));
@@ -718,34 +725,7 @@ public class MainFrame {
 				}).start();
 			}
 			else {
-				fatherFrame.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
-				ForgeUtils.sendCommand("/stop", serverProcess, serverWriter);
-				new Thread(() ->{
-					try { serverProcess.waitFor();} catch (InterruptedException e) {}
-					if(TokenStore.sessionIsOpened() && GitUtils.repoExistInPath(serverOpenedDirectory.toPath())  && cloudProviderInUse != null && cloudProviderInUse == "GitHub") GitUtils.autoCommitAndPush(true);
-					if(cloudProvider != null && cloudProvider.getProviderName().equals(cloudProviderInUse) && cloudProvider.isSessionOpened()) {
-						if(cloudProvider.hasRemoteServerFolder()) {
-							ZipUtils.createZip(serverOpenedDirectory.toPath(), ZipUtils.BACKUPS_ZIPS_FOLDER);
-							cloudProvider.uploadServerBackup(ZipUtils.BACKUPS_ZIPS_FOLDER);
-						}
-					}
-					
-					consoleThread.interrupt();
-					serverProcess = null;
-					
-					SwingUtilities.invokeLater(() -> {
-						consoleContent.removeAll();
-						consoleArea = null;
-						comandInput = null;
-						serverWriter = null;
-						serverIsOn = false;
-						turnOnOffBtn.setText("On");
-						responder.closeListeningSocket();
-						checkServerStatus();
-					});
-					fatherFrame.setCursor(Cursor.getDefaultCursor());
-					
-				}).start();
+				turnOffServer();
 			}
 		});
 		
@@ -830,7 +810,7 @@ public class MainFrame {
 		rightContent.add(ipServerHostingPane);
 		rightContent.add(refreshBtn);
 		rightContent.add(openServerModsFolderBtn);
-		if(!GitUtils.repoExistInPath(serverOpenedDirectory.toPath()) && TokenStore.sessionIsOpened() && cloudProviderInUse.equals("GitHub"))
+		if(!GitUtils.repoExistInPath(serverOpenedDirectory.toPath()) && TokenStore.sessionIsOpened() && cloudProviderInUse != null && cloudProviderInUse.equals("GitHub"))
 			rightContent.add(createServerRepoBtn);
 		if(cloudProviderInUse != null && cloudProvider != null && cloudProvider.getProviderName().equals(cloudProviderInUse) && cloudProvider.isSessionOpened())
 			rightContent.add(createServerBackupsFolderInCloud);
@@ -1025,6 +1005,37 @@ public class MainFrame {
 				contentPane.setCursor(Cursor.getDefaultCursor());
 			}).start();
 	    });
+	}
+	
+	public void turnOffServer() {
+		frame.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+		ForgeUtils.sendCommand("/stop", serverProcess, serverWriter);
+		new Thread(() ->{
+			try {serverProcess.waitFor();} catch (InterruptedException e) {}
+			if(TokenStore.sessionIsOpened() && GitUtils.repoExistInPath(serverOpenedDirectory.toPath())  && cloudProviderInUse != null && cloudProviderInUse == "GitHub") GitUtils.autoCommitAndPush(true);
+			if(cloudProvider != null && cloudProvider.getProviderName().equals(cloudProviderInUse) && cloudProvider.isSessionOpened()) {
+				if(cloudProvider.hasRemoteServerFolder()) {
+					ZipUtils.createZip(serverOpenedDirectory.toPath(), ZipUtils.BACKUPS_ZIPS_FOLDER);
+					cloudProvider.uploadServerBackup(ZipUtils.BACKUPS_ZIPS_FOLDER);
+				}
+			}
+			
+			consoleThread.interrupt();
+			serverProcess = null;
+			
+			SwingUtilities.invokeLater(() -> {
+				consoleContent.removeAll();
+				consoleArea = null;
+				comandInput = null;
+				serverWriter = null;
+				serverIsOn = false;
+				turnOnOffBtn.setText("On");
+				responder.closeListeningSocket();
+				checkServerStatus();
+			});
+			frame.setCursor(Cursor.getDefaultCursor());
+			
+		}).start();
 	}
 
 }
