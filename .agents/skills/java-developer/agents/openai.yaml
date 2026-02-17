@@ -1,0 +1,28 @@
+interface:
+  display_name: "Java Developer"
+  short_description: "Modern Java, concurrency, JVM performance, and enterprise patterns."
+  default_prompt: "Analyze the task in this repository context (Java 21 + Maven + Swing), detect stack constraints, implement a minimal safe solution, and validate with appropriate tests/checks."
+
+policy:
+  allow_implicit_invocation: true
+
+dependencies:
+  notes:
+    - "jetbrains and sonarqube are optional; if disabled in .codex/config.toml, continue without blocking execution."
+    - "use references/universal-java-context.md as the default distilled meta-context for Java tasks."
+  tools:
+    - type: "mcp"
+      value: "openai_docs"
+      description: "OpenAI official docs MCP"
+    - type: "mcp"
+      value: "context7"
+      description: "Up-to-date framework/library docs"
+    - type: "mcp"
+      value: "github"
+      description: "Repository and issue/PR operations"
+    - type: "mcp"
+      value: "jetbrains"
+      description: "JetBrains IDE MCP endpoint (optional)"
+    - type: "mcp"
+      value: "sonarqube"
+      description: "Static analysis findings (optional)"

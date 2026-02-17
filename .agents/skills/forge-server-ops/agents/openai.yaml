@@ -1,0 +1,7 @@
+interface:
+  display_name: "Forge Server Ops"
+  short_description: "Work safely on server lifecycle and command flows."
+
+policy:
+  allow_implicit_invocation: false
+

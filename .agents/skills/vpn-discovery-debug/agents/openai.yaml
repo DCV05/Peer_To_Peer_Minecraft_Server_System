@@ -1,0 +1,7 @@
+interface:
+  display_name: "VPN Discovery Debug"
+  short_description: "Debug UDP host discovery over VPN/LAN."
+
+policy:
+  allow_implicit_invocation: false
+

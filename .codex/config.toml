@@ -1,0 +1,92 @@
+# Project-level Codex configuration for this repository.
+# Target environment: Codex IDE extension + local CLI.
+
+model = "gpt-5-codex"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+model_reasoning_effort = "medium"
+
+# Allow additional instruction filename fallbacks when AGENTS.md is missing.
+project_doc_fallback_filenames = [".agents.md", "AGENTS.override.md"]
+
+# Optional completion notification hook.
+notify = [
+  "powershell",
+  "-NoProfile",
+  "-ExecutionPolicy",
+  "Bypass",
+  "-File",
+  ".codex/hooks/notify.ps1"
+]
+
+[history]
+persistence = "save-all"
+
+[profiles.ide_safe]
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+model_reasoning_effort = "medium"
+
+# OpenAI Docs MCP (streamable HTTP): official OpenAI docs.
+[mcp_servers.openai_docs]
+url = "https://developers.openai.com/mcp"
+enabled = true
+required = false
+startup_timeout_sec = 20
+tool_timeout_sec = 60
+
+# Context7 MCP (stdio): up-to-date developer docs for libraries/frameworks.
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+enabled = true
+required = false
+startup_timeout_sec = 20
+tool_timeout_sec = 90
+
+# GitHub MCP (stdio via Docker): repository/issue/PR/search operations.
+[mcp_servers.github]
+command = "docker"
+args = [
+  "run",
+  "-i",
+  "--rm",
+  "-e",
+  "GITHUB_PERSONAL_ACCESS_TOKEN",
+  "ghcr.io/github/github-mcp-server"
+]
+env_vars = ["GITHUB_PERSONAL_ACCESS_TOKEN"]
+enabled = true
+required = false
+startup_timeout_sec = 30
+tool_timeout_sec = 120
+
+# Reduce risky write surfaces by default; keep common read/navigation tools.
+disabled_tools = [
+  "create_pull_request",
+  "create_repository",
+  "create_branch",
+  "create_or_update_file",
+  "delete_file",
+  "push_files",
+  "star_repository",
+  "unstar_repository"
+]
+
+# JetBrains MCP endpoint placeholder.
+# JetBrains now ships built-in MCP support in recent IDE versions.
+[mcp_servers.jetbrains]
+url = "http://127.0.0.1:63342/mcp"
+enabled = false
+required = false
+startup_timeout_sec = 20
+tool_timeout_sec = 90
+
+# SonarQube MCP endpoint placeholder (set URL/token before enabling).
+[mcp_servers.sonarqube]
+url = "http://127.0.0.1:9000/mcp"
+bearer_token_env_var = "SONARQUBE_TOKEN"
+enabled = false
+required = false
+startup_timeout_sec = 20
+tool_timeout_sec = 90

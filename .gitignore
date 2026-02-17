@@ -3,3 +3,14 @@ tokens/
 /target/classes/credentials
 /data
 /data
+/.codex/mcp.env
+
+# Env files (global)
+.env
+.env.*
+*.env
+*.env.*
+
+# Keep shareable templates
+!.env.example
+!*.env.example

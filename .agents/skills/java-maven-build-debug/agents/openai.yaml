@@ -1,0 +1,7 @@
+interface:
+  display_name: "Java Maven Build Debug"
+  short_description: "Diagnose and fix Maven build/test issues."
+
+policy:
+  allow_implicit_invocation: false
+

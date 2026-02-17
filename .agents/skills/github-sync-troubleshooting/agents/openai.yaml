@@ -1,0 +1,7 @@
+interface:
+  display_name: "GitHub Sync Troubleshooting"
+  short_description: "Diagnose JGit/GitHub auth and sync problems."
+
+policy:
+  allow_implicit_invocation: false
+

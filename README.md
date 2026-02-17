@@ -199,6 +199,81 @@ Disabling the firewall temporarily may work but is done at your own risk.
 
 ---
 
+## Codex Setup (IDE Extension / CLI)
+
+This repository is configured for the current Codex standard using:
+
+- `AGENTS.md` at repository root for persistent project instructions
+- `.codex/config.toml` for project-level Codex configuration
+- `.agents/skills/` for reusable, task-focused skills
+
+### Why `.codex` and not `.openai`?
+
+Codex currently documents project configuration around `.codex` and `AGENTS.md`.
+If you expected `.openai`, treat `.codex` as the canonical replacement.
+
+### Files Added for Codex
+
+- `AGENTS.md`: repository behavior and safety conventions for this Minecraft system
+- `.codex/config.toml`: profile defaults, approvals/sandbox policy, MCP entries, notify hook
+- `.codex/hooks/notify.ps1`: optional completion hook writing to `data/codex-notify.log`
+- `.codex/mcp.env.example`: template for MCP tokens/endpoints (no secrets committed)
+- `.agents/skills/*`: domain skills for Maven/build, Forge ops, GitHub sync, and VPN discovery
+
+### Context Strategy
+
+- This repository uses a Java-curated prompt strategy instead of importing generic multi-stack prompts literally.
+- Persistent context lives in:
+  - `AGENTS.md` (project-wide guardrails and workflow)
+  - `.agents/skills/java-developer/SKILL.md` (Java specialist execution protocol)
+  - `.agents/skills/java-developer/references/universal-java-context.md` (curated universal Java meta-context)
+- React/TypeScript/Vite-oriented guidance from generic prompt packs is treated as non-default for this Java Swing project.
+
+### `.env` Safety Guide
+
+- Keep real credentials in local untracked `.env` files.
+- Commit only template files such as `.env.example` or `*.env.example`.
+- Before committing, run `git status` and ensure no real secret file is staged.
+
+### Useful Slash Commands
+
+- `/status` to inspect active context and session state
+- `/mcp` to list configured MCP servers/tools
+- `/debug-config` to inspect effective config (if available in your Codex build)
+- `/review` to request a working-tree review
+- `/init` to scaffold/update local instructions in other folders
+
+### Java MCP Servers (Configured)
+
+| MCP Server | Purpose | Default | Prerequisites |
+| --- | --- | --- | --- |
+| `openai_docs` | Official OpenAI documentation lookup | Enabled | None |
+| `context7` | Up-to-date library/framework docs | Enabled | `npx` available |
+| `github` | Repo/issues/PR/search operations | Enabled | Docker + `GITHUB_PERSONAL_ACCESS_TOKEN` |
+| `jetbrains` | IDE-aware context and tooling | Disabled | Local JetBrains MCP endpoint |
+| `sonarqube` | Static analysis findings and quality gates | Disabled | SonarQube MCP endpoint + token |
+
+### Skills in this Repo
+
+- `java-maven-build-debug`
+- `java-developer`
+- `forge-server-ops`
+- `github-sync-troubleshooting`
+- `vpn-discovery-debug`
+
+### Quick Troubleshooting
+
+- If Codex does not load project instructions, ensure you opened the repository root and that `AGENTS.md` is present.
+- If MCP tools do not appear under `/mcp`, verify `.codex/config.toml` is loaded and the project is trusted.
+- If GitHub MCP fails to start, confirm Docker is running and `GITHUB_PERSONAL_ACCESS_TOKEN` is set.
+- If Context7 fails, verify Node.js/`npx` is available in your shell.
+- If SonarQube or JetBrains MCP is unavailable, keep them disabled until URL/token/IDE endpoint is validated.
+- Use `.codex/mcp.env.example` as the baseline for local env setup; do not commit filled secret files.
+- If the notify hook does not log events, check whether `data/codex-notify.log` can be created.
+- If skills do not show up, ensure each skill folder contains `SKILL.md` and restart the Codex session.
+
+---
+
 ## Final Notes
 
 This project is under active development and represents an evolving approach to casual multiplayer Minecraft hosting.
