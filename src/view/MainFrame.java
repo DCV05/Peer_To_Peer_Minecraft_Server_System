@@ -977,6 +977,8 @@ public class MainFrame {
 	}
 	
 	public static String getServerName() {
+		if(!(serverOpenedDirectory.toString().contains("\\")))
+			return serverOpenedDirectory.toString().substring(serverOpenedDirectory.toString().lastIndexOf("/") + 1, serverOpenedDirectory.toString().length());
 	   return serverOpenedDirectory.toString().substring(serverOpenedDirectory.toString().lastIndexOf("\\") + 1, serverOpenedDirectory.toString().length());
 	}
 	
