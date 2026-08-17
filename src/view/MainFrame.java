@@ -80,7 +80,6 @@ public class MainFrame {
 	private static File newMinecraftServerDirectory = null;
 	private static String forgeMetadata = null;
 	private static String forgeVersion = null;
-	private static JButton turnOnOffBtn = null;
 	private static JTextPane ipServerHostingPane = null;
 	private static JTextArea consoleArea = null;
 	private static Thread consoleThread = null;
@@ -95,6 +94,7 @@ public class MainFrame {
 	private static ActionListener crbckfldcld;
 	private static JPanel consoleContent = null;
 
+	public static JButton turnOnOffBtn = null;
 	public static String networkName = null;
 	public static int actualServerPort = 0;
 	public static DiscoveryResponder responder = null;
@@ -106,7 +106,7 @@ public class MainFrame {
 	public static Process serverProcess = null;
 	public static boolean serverIsOn = false;
 	public static CloudStorageProvider cloudProvider = null;
-	public static String cloudProviderInUse = null;
+	public static String cloudProviderInUse = "noCloudProvider";
 	public static String cloudInUseReminderText[];
 	public static JMenuItem cloudInUseReminderMenuText;
 	public static MainFrame window = null;
@@ -638,13 +638,13 @@ public class MainFrame {
 			}
 		}
 		
-		if(cloudProvider != null && cloudProviderInUse.equals("GitHub")) {
+		if(cloudProvider != null && cloudProviderInUse != null && cloudProviderInUse.equals("GitHub")) {
 			if(!GitUtils.repoExistInPath(serverOpenedDirectory.toPath())) {
 				addHostingUserBtn.setVisible(false);
 			}
 			else {
 				if(TokenStore.sessionIsOpened()) addHostingUserBtn.setVisible(true);
-				if(TokenStore.sessionIsOpened() && GitUtils.isRemoteRepoHeadFordward(serverOpenedDirectory.toPath()) && cloudProviderInUse != null && cloudProviderInUse == "GitHub")
+				if(TokenStore.sessionIsOpened() && cloudProviderInUse != null && cloudProviderInUse == "GitHub")
 					new Thread(() -> {
 						GitUtils.pull(serverOpenedDirectory.toPath());
 					}).start();
