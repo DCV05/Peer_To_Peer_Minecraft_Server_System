@@ -5,9 +5,12 @@ import java.io.DataOutputStream;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -20,92 +23,87 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import javax.swing.JOptionPane;
 
-import view.MainFrame;
-
 public class TokenStore {
-	private static final Path TOKEN_FILE = Path.of("data/credentials.dat");
-	private static final Path USER_DATA_FILE = Path.of("data/userData.properties");
+	private static final String DATA_DIRECTORY_PROPERTY = "p2pmss.dataDirectory";
 	
-	public static void saveUserData(String nickname, String email, String token) {
-		MainFrame.checkIfExistsDataFolder();
-		if(!Files.exists(USER_DATA_FILE)) {
-			try {
-				Files.createFile(USER_DATA_FILE);
-			}
-			catch(Exception e) {
-				JOptionPane.showMessageDialog(null, "File not found or inaccessible (userData.properties).", "Error", JOptionPane.ERROR_MESSAGE);
-			}
-		}
-		Properties props = new Properties();
-		try(FileInputStream in = new FileInputStream(USER_DATA_FILE.toFile()); FileOutputStream out = new FileOutputStream(USER_DATA_FILE.toFile())){
-			props.load(in);
-			props.setProperty("nickname", nickname);
-			props.setProperty("email", email);
-	        props.store(out, "User data updated");
-		}
-		catch(Exception e) {
-			JOptionPane.showMessageDialog(null, "File not found or inaccessible (userData.properties).", "Error", JOptionPane.ERROR_MESSAGE);
-		}
+	public static boolean saveUserData(String nickname, String email, String token) {
+		if(!ensureDataDirectory()) return false;
+		if(isBlank(nickname) || isBlank(email) || isBlank(token)) return false;
+
+		Path userDataFile = userDataFile();
+		Path tokenFile = tokenFile();
+		Path userDataTemp = userDataFile.resolveSibling(userDataFile.getFileName() + ".tmp");
+		Path tokenTemp = tokenFile.resolveSibling(tokenFile.getFileName() + ".tmp");
+		byte[] previousUserData;
+		byte[] previousToken;
 		try {
-			saveToken(token);
+			previousUserData = readExistingFile(userDataFile);
+			previousToken = readExistingFile(tokenFile);
+		} catch(IOException e) {
+			return false;
+		}
+
+		try {
+			Properties props = new Properties();
+			props.setProperty("nickname", nickname.trim());
+			props.setProperty("email", email.trim());
+			try(FileOutputStream out = new FileOutputStream(userDataTemp.toFile())) {
+				props.store(out, "User data updated");
+			}
+
+			Files.write(tokenTemp, serializeToken(token.trim()));
+			moveAtomically(userDataTemp, userDataFile);
+			moveAtomically(tokenTemp, tokenFile);
+			return true;
 		}
 		catch(Exception e) {
-			JOptionPane.showMessageDialog(null, "Error saving token, try again.", "Error", JOptionPane.ERROR_MESSAGE);
+			restoreFile(userDataFile, previousUserData);
+			restoreFile(tokenFile, previousToken);
+			try {Files.deleteIfExists(userDataTemp);} catch(IOException ignored) {}
+			try {Files.deleteIfExists(tokenTemp);} catch(IOException ignored) {}
+			return false;
 		}
 	}
 	
 	public static Map<String, String> getSavedUserData() throws Exception{
-		MainFrame.checkIfExistsDataFolder();
-		Exception invalidSignInEx = new Exception("Session closed or invalid, sign in again.");
-		if(!Files.exists(USER_DATA_FILE) || !Files.exists(TOKEN_FILE)) throw invalidSignInEx;
+		if(!ensureDataDirectory()) throw invalidSessionException();
+		Path userDataFile = userDataFile();
+		if(!Files.exists(userDataFile) || !Files.exists(tokenFile())) throw invalidSessionException();
 		Map<String, String> userData = new HashMap<>();
 		Properties props = new Properties();
-		try(FileInputStream in = new FileInputStream(USER_DATA_FILE.toFile())){
+		try(FileInputStream in = new FileInputStream(userDataFile.toFile())){
 			props.load(in);
-			if(!props.containsKey("nickname") || !props.containsKey("email")) throw invalidSignInEx;
-			userData.put("nickname", props.getProperty("nickname"));
-			userData.put("email", props.getProperty("email"));
+			String nickname = props.getProperty("nickname");
+			String email = props.getProperty("email");
+			String token = loadToken();
+			if(isBlank(nickname) || isBlank(email) || isBlank(token)) throw invalidSessionException();
+			userData.put("nickname", nickname.trim());
+			userData.put("email", email.trim());
+			userData.put("token", token.trim());
 		}
 		catch(Exception e) {
-			JOptionPane.showMessageDialog(null, "File not found or inaccessible (userData.properties).", "Error", JOptionPane.ERROR_MESSAGE);
+			throw invalidSessionException();
 		}
-		try {
-			userData.put("token", loadToken());
-		}
-		catch(IOException ioe) {
-			JOptionPane.showMessageDialog(null, "File not found or inaccessible (credentials.dat).", "Error", JOptionPane.ERROR_MESSAGE);
-		}
-		catch(SecurityException sece) {
-			throw invalidSignInEx;
-		}
-		
-		if(userData.isEmpty()) return null;
+
 		return userData;
 	}
 	
 	public static void saveToken(String token) throws Exception {
-		MainFrame.checkIfExistsDataFolder();
-		if(!Files.exists(TOKEN_FILE)) Files.createFile(TOKEN_FILE);
-		
-		SecretKey key = deriveKey();
-		
-		byte[] encrypted = encrypt(token.getBytes(StandardCharsets.UTF_8), key);
-		byte[] hmac = hmac(encrypted, key);
-		
-		try(DataOutputStream out = new DataOutputStream(Files.newOutputStream(TOKEN_FILE))) {
-			out.writeInt(encrypted.length);
-			out.write(encrypted);
-			out.writeInt(hmac.length);
-			out.write(hmac);
-		}
+		if(!ensureDataDirectory()) throw invalidSessionException();
+		if(isBlank(token)) throw invalidSessionException();
+		Path tokenFile = tokenFile();
+		Path tokenTemp = tokenFile.resolveSibling(tokenFile.getFileName() + ".tmp");
+		Files.write(tokenTemp, serializeToken(token.trim()));
+		moveAtomically(tokenTemp, tokenFile);
 	}
 	
 	public static String loadToken() throws Exception {
-		if(!Files.exists(TOKEN_FILE)) return null;
+		Path tokenFile = tokenFile();
+		if(!Files.exists(tokenFile)) return null;
 		
 		SecretKey key = deriveKey();
 		
-		try(DataInputStream in = new DataInputStream(Files.newInputStream(TOKEN_FILE))){
+		try(DataInputStream in = new DataInputStream(Files.newInputStream(tokenFile))){
 			byte[] encrypted = new byte[in.readInt()];
 			in.readFully(encrypted);
 			
@@ -125,8 +123,7 @@ public class TokenStore {
 	//If we need to sign out.
 	public static void clear() {
 		try {
-			Files.deleteIfExists(TOKEN_FILE);
-			Files.deleteIfExists(USER_DATA_FILE);
+			deleteSessionFiles();
 	        JOptionPane.showMessageDialog(
 	                null,                   
 	                "Session closed successfully",
@@ -138,11 +135,87 @@ public class TokenStore {
 			JOptionPane.showMessageDialog(null, "There is no session open.", "Error", JOptionPane.ERROR_MESSAGE);
 		}
 	}
+
+	public static void invalidateSession() {
+		try {
+			deleteSessionFiles();
+		} catch(IOException ignored) {}
+	}
 	
 	public static boolean sessionIsOpened() {
-		if(Files.exists(TOKEN_FILE)) 
+		try {
+			return !getSavedUserData().isEmpty();
+		} catch (Exception e) {
+			return false;
+		}
+	}
+
+	private static byte[] serializeToken(String token) throws Exception {
+		SecretKey key = deriveKey();
+		byte[] encrypted = encrypt(token.getBytes(StandardCharsets.UTF_8), key);
+		byte[] tokenHmac = hmac(encrypted, key);
+
+		try(ByteArrayOutputStream bytes = new ByteArrayOutputStream(); DataOutputStream out = new DataOutputStream(bytes)) {
+			out.writeInt(encrypted.length);
+			out.write(encrypted);
+			out.writeInt(tokenHmac.length);
+			out.write(tokenHmac);
+			out.flush();
+			return bytes.toByteArray();
+		}
+	}
+
+	private static void deleteSessionFiles() throws IOException {
+		Files.deleteIfExists(tokenFile());
+		Files.deleteIfExists(userDataFile());
+	}
+
+	private static Path dataDirectory() {
+		return Path.of(System.getProperty(DATA_DIRECTORY_PROPERTY, "data"));
+	}
+
+	private static Path tokenFile() {
+		return dataDirectory().resolve("credentials.dat");
+	}
+
+	private static Path userDataFile() {
+		return dataDirectory().resolve("userData.properties");
+	}
+
+	private static boolean ensureDataDirectory() {
+		try {
+			Files.createDirectories(dataDirectory());
 			return true;
-		return false;
+		} catch(IOException e) {
+			return false;
+		}
+	}
+
+	private static void moveAtomically(Path source, Path destination) throws IOException {
+		try {
+			Files.move(source, destination, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+		} catch (AtomicMoveNotSupportedException e) {
+			Files.move(source, destination, StandardCopyOption.REPLACE_EXISTING);
+		}
+	}
+
+	private static byte[] readExistingFile(Path path) throws IOException {
+		return Files.exists(path) ? Files.readAllBytes(path) : null;
+	}
+
+	private static void restoreFile(Path path, byte[] data) {
+		try {
+			if(data == null) Files.deleteIfExists(path);
+			else Files.write(path, data);
+		} catch (IOException ignored) {}
+	}
+
+	private static boolean isBlank(String value) {
+		return value == null || value.trim().isEmpty();
+	}
+
+	private static Exception invalidSessionException() {
+		return new Exception("Session closed or invalid, sign in again.");
 	}
 	
 	private static SecretKey deriveKey() throws Exception {

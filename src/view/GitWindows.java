@@ -9,9 +9,12 @@ import java.awt.GridLayout;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -25,16 +28,24 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JPasswordField;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 import javax.swing.JTextPane;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import jgit.GitUtils;
 import jgit.TokenStore;
+import view.dashboard.DashboardDialogSupport;
 
 public class GitWindows {
 	
 	private static boolean hasErrors;
+	private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(20);
+	private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder().connectTimeout(REQUEST_TIMEOUT).build();
+	private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 	
 	public static void signIntoGitHubWnd(Runnable doAfterSignIn) {
 		//Dialog creation and configurations.
@@ -47,7 +58,6 @@ public class GitWindows {
 		githubSignInDialog.setSize(widthSignInDialog, heightSignInDialog);
 		githubSignInDialog.setLocationRelativeTo(null);
 		githubSignInDialog.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-		githubSignInDialog.setVisible(true);
 		
 		//General layout for the components.
 		JPanel contentPane = new JPanel(new GridLayout(6,1));
@@ -64,7 +74,7 @@ public class GitWindows {
 		
 		String tokenLabelText = "GitHub token";
 		JLabel tokenLabel = new JLabel(tokenLabelText);
-		JTextField tokenInput = new JTextField();
+		JPasswordField tokenInput = new JPasswordField();
 		
 		JButton signInBtn = new JButton("Sign in");
 		JButton cancelBtn = new JButton("Cancel");
@@ -92,43 +102,49 @@ public class GitWindows {
 		signInBtn.addActionListener(sgbtn -> {
 			hasErrors = false;
 			String errorMessageTemplate = "<html>%s - <span style='color:#fa4545'>%s</span></html>";
+			String nickname = nicknameInput.getText().trim();
+			String email = emailInput.getText().trim();
+			String token = new String(tokenInput.getPassword()).trim();
 			
 			nicknameLabel.setText(nicknameLabelText);
 			emailLabel.setText(emailLabelText);
 			tokenLabel.setText(tokenLabelText);
 			
-			boolean nicknameIsEmpty = fieldIsEmpty(nicknameLabel, nicknameInput);
-			if(!checkNickname(nicknameInput.getText()) && !nicknameIsEmpty) {
-				nicknameLabel.setText(String.format(errorMessageTemplate, nicknameLabelText, "Nickname doesn't exists."));
-				hasErrors = true;
-			}
-			
+			fieldIsEmpty(nicknameLabel, nicknameInput);
 			boolean emailIsEmpty = fieldIsEmpty(emailLabel, emailInput);
-			Pattern pattern = Pattern.compile("[a-zA-Z0-9._]+@[a-zA-Z]+(([.][a-z]+)*)[.][a-z]{2,}");
-			Matcher matcher = pattern.matcher(emailInput.getText());
-			if(!matcher.find()  && !emailIsEmpty) {
+			Pattern pattern = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
+			Matcher matcher = pattern.matcher(email);
+			if(!matcher.matches()  && !emailIsEmpty) {
 				emailLabel.setText(String.format(errorMessageTemplate, emailLabelText, "Use a valid email format."));
 				hasErrors = true;
 			}
 			
-			boolean tokenIsEmpty = fieldIsEmpty(tokenLabel, tokenInput);
-			if(!checkTokenValidity(tokenInput.getText())  && !tokenIsEmpty) {
-				tokenLabel.setText(String.format(errorMessageTemplate, tokenLabelText, "Token is not valid."));
-				hasErrors = true;
-			}
-			
+			fieldIsEmpty(tokenLabel, tokenInput);
 			if(hasErrors) return;
-			else {
-				TokenStore.saveUserData(nicknameInput.getText(), emailInput.getText(), tokenInput.getText());
-				doAfterSignIn.run();
+
+			String authenticatedLogin = getAuthenticatedLogin(token);
+			if(authenticatedLogin == null) {
+				tokenLabel.setText(String.format(errorMessageTemplate, tokenLabelText, "Token is invalid, expired or can not reach GitHub."));
+				return;
 			}
-			
+			if(!authenticatedLogin.equalsIgnoreCase(nickname)) {
+				nicknameLabel.setText(String.format(errorMessageTemplate, nicknameLabelText, "This token belongs to '" + authenticatedLogin + "'."));
+				return;
+			}
+
+			if(!TokenStore.saveUserData(authenticatedLogin, email, token)) {
+				tokenLabel.setText(String.format(errorMessageTemplate, tokenLabelText, "The session could not be saved."));
+				return;
+			}
+
+			doAfterSignIn.run();
 			githubSignInDialog.dispose();
 		});
 		
 		cancelBtn.addActionListener(cnlBtn -> {
 			githubSignInDialog.dispose();
 		});
+		DashboardDialogSupport.show(githubSignInDialog);
 	}
 	
 	public static void addHostingUser() {
@@ -142,7 +158,6 @@ public class GitWindows {
 		addHostingUserDialog.setSize(widthSignInDialog, heightSignInDialog);
 		addHostingUserDialog.setLocationRelativeTo(null);
 		addHostingUserDialog.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-		addHostingUserDialog.setVisible(true);
 		
 		//General layout for the components.
 		JPanel contentPane = new JPanel(new GridLayout(2,1));
@@ -174,10 +189,14 @@ public class GitWindows {
 		addUserBtn.addActionListener(addUsrBtn -> {
 			hasErrors = false;
 			String errorMessageTemplate = "<html>%s - <span style='color:#fa4545'>%s</span></html>";
-			Map<String, String> userData = null;
+			Map<String, String> userData;
 			try {
 				userData = TokenStore.getSavedUserData();
-			} catch (Exception e) {}
+			} catch (Exception e) {
+				JOptionPane.showMessageDialog(null, "Session invalid, sign in again.", "Error", JOptionPane.ERROR_MESSAGE);
+				addHostingUserDialog.dispose();
+				return;
+			}
 			
 			gitHubNicknameLabel.setText(gitHubNicknameLabelText);
 			
@@ -187,7 +206,7 @@ public class GitWindows {
 			}
 			
 			boolean nicknameIsEmpty = fieldIsEmpty(gitHubNicknameLabel, gitHubNicknameInput);
-			if(!checkNickname(gitHubNicknameInput.getText()) && !nicknameIsEmpty) {
+			if(!nicknameIsEmpty && !checkNickname(gitHubNicknameInput.getText())) {
 				gitHubNicknameLabel.setText(String.format(errorMessageTemplate, gitHubNicknameLabelText, "Nickname doesn't exists."));
 				hasErrors = true;
 			}
@@ -226,6 +245,7 @@ public class GitWindows {
 		cancelBtn.addActionListener(cnlbtn -> {
 			addHostingUserDialog.dispose();
 		});
+		DashboardDialogSupport.show(addHostingUserDialog);
 	}
 	
 	public static void invitationslistWnd() {
@@ -239,16 +259,15 @@ public class GitWindows {
 		invitaitionslistDialog.setSize(widthInvitationsListDialog, heightInvitationsListDialog);
 		invitaitionslistDialog.setLocationRelativeTo(null);
 		invitaitionslistDialog.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-		invitaitionslistDialog.setVisible(true);
 		
 		//We get the invitations list.
-		List<Map<String, Object>> invitationsList = GitUtils.convertJsonStringToMapJson(GitUtils.getAllPendingInvitations());
+		List<Map<String, Object>> invitationsList = GitUtils.getAllPendingInvitations();
 		
 		//General layout for the components.
 		JPanel contentPane;
 		JScrollPane scrollPane;
 		
-		if(invitationsList.size() > 0) {
+		if(invitationsList != null && invitationsList.size() > 0) {
 			contentPane = new JPanel(new GridLayout(invitationsList.size(), 1));
 			scrollPane = new JScrollPane(contentPane);
 			contentPane.setBorder(BorderFactory.createEmptyBorder(5, 5, 0, 5));
@@ -279,6 +298,7 @@ public class GitWindows {
 		closeBtn.addActionListener(clsBtn -> {
 			invitaitionslistDialog.dispose();
 		});
+		DashboardDialogSupport.show(invitaitionslistDialog);
 	}
 	
 	public static void gitHubProfileWnd() {
@@ -292,7 +312,6 @@ public class GitWindows {
 		gitHubProfileDialog.setSize(widthGitHubProfileDialog, heightGitHubProfileDialog);
 		gitHubProfileDialog.setLocationRelativeTo(null);
 		gitHubProfileDialog.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-		gitHubProfileDialog.setVisible(true);
 		
 		//General layout for the components.
 		JPanel contentPane = new JPanel(new GridLayout(6,1));
@@ -303,7 +322,7 @@ public class GitWindows {
 		JTextPane gitHubNicknameInput = new JTextPane();
 		JLabel gitHubEmailLabel = new JLabel("GitHub email");
 		JTextPane gitHubEmailInput = new JTextPane();
-		JLabel gitHubTokenLabel = new JLabel("<html>GitHub token - <span style='color: gray;'>view carefully</span></html>");
+		JLabel gitHubTokenLabel = new JLabel("<html>GitHub token - <span style='color: gray;'>not displayed</span></html>");
 		JTextPane gitHubTokenInput = new JTextPane();
 		
 		//Default data
@@ -317,7 +336,7 @@ public class GitWindows {
 		
 		gitHubNicknameInput.setText(userData.get("nickname"));
 		gitHubEmailInput.setText(userData.get("email"));
-		gitHubTokenInput.setText(userData.get("token"));
+		gitHubTokenInput.setText("Stored for this local session");
 		
 		
 		//Buttons
@@ -346,6 +365,7 @@ public class GitWindows {
 		closeBtn.addActionListener(clsBtn -> {
 			gitHubProfileDialog.dispose();
 		});
+		DashboardDialogSupport.show(gitHubProfileDialog);
 	}
 	
 	public static void cloneRepoWnd(JFrame frame) {
@@ -360,7 +380,6 @@ public class GitWindows {
 		gitHubRepositoriesCloneListDialog.setSize(widthGitHubRepositoriesCloneListDialog, heightGitHubRepositoriesCloneListDialog);
 		gitHubRepositoriesCloneListDialog.setLocationRelativeTo(null);
 		gitHubRepositoriesCloneListDialog.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-		gitHubRepositoriesCloneListDialog.setVisible(true);
 		
 		//We get the repositories list
 		List<String> repos = GitUtils.getRepoJoined();
@@ -393,6 +412,7 @@ public class GitWindows {
 		closeBtn.addActionListener(clsBtn -> {
 			gitHubRepositoriesCloneListDialog.dispose();
 		});
+		DashboardDialogSupport.show(gitHubRepositoriesCloneListDialog);
 	}
 	
 	private static void createClonelistComponents(JPanel contentPane, JFrame frame, JDialog dialog, List<String> repos) {
@@ -453,17 +473,23 @@ public class GitWindows {
 	private static void createInvitationListComponents(JPanel contentPane, List<Map<String, Object>> invitationsList) {
 		contentPane.removeAll();
 		String labelTextTemplate = "<html><b>%s</b> invited you to <i>%s</i></html>";
+		if(invitationsList == null) {
+			contentPane.add(new JLabel("<html><span style='color: #fa4545; text-align: center;'>Could not load invitations</span></html>"), BorderLayout.CENTER);
+			return;
+		}
 		if(invitationsList.size() < 1) {
 			contentPane.add(new JLabel("<html><span style='color: gray; text-align: center;'>No invitations pending</span></html>"), BorderLayout.CENTER);
 			return;
 		}
 		for(Map<String, Object> object : invitationsList) {
 			Map<?, ?> repoInfo = object.get("repository") instanceof Map<?, ?> repo ? repo : null;
-			if(repoInfo == null) return;
+			if(repoInfo == null) continue;
 			
 			String fullNameRepo = String.valueOf(repoInfo.get("full_name"));
-			String userSenderNickname = fullNameRepo.split("/")[0];
-			String repoName = fullNameRepo.split("/")[1];
+			String[] fullNameParts = fullNameRepo.split("/", 2);
+			if(fullNameParts.length != 2) continue;
+			String userSenderNickname = fullNameParts[0];
+			String repoName = fullNameParts[1];
 			
 			JPanel invitationContainer = new JPanel(new FlowLayout());
 			invitationContainer.setBorder(BorderFactory.createEmptyBorder(5,0,5,0));
@@ -476,7 +502,8 @@ public class GitWindows {
 			contentPane.add(invitationContainer);
 			
 			acceptBtn.addActionListener(accptBtn -> {
-				boolean invitationAcceptedSuccessfully = GitUtils.acceptInvitationById((int)object.get("id"));
+				Object invitationId = object.get("id");
+				boolean invitationAcceptedSuccessfully = invitationId instanceof Number number && GitUtils.acceptInvitationById(number.intValue());
 				invitationContainer.remove(acceptBtn);
 				if(invitationAcceptedSuccessfully) {
 					GitUtils.saveRepoJoined(fullNameRepo);
@@ -501,27 +528,27 @@ public class GitWindows {
 	}
 	
 	private static boolean checkNickname(String nickname) {
-		HttpClient client = HttpClient.newHttpClient();
-		
+		String encodedNickname = URLEncoder.encode(nickname.trim(), StandardCharsets.UTF_8);
 		HttpRequest request = HttpRequest.newBuilder()
-				.uri(URI.create("https://api.github.com/users/" + nickname))
+				.uri(URI.create(githubApiBase() + "/users/" + encodedNickname))
+				.timeout(REQUEST_TIMEOUT)
+				.header("User-Agent", "Peer_To_Peer_Minecraft_Server_System/1.0")
 				.header("Accept", "application/vnd.github+json")
+				.header("X-GitHub-Api-Version", "2022-11-28")
 				.build();
 		HttpResponse<Void> response;
 		try {
-			response = client.send(request, HttpResponse.BodyHandlers.discarding());
+			response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.discarding());
 		} catch (Exception e) {return false;}
 		
-		if(response.statusCode() == 404) return false;
-		return true;
+		return response.statusCode() == 200;
 	}
 	
-	private static boolean checkTokenValidity(String token) {
-		HttpClient client = HttpClient.newHttpClient();
-		
+	static String getAuthenticatedLogin(String token) {
 		HttpRequest request = HttpRequest.newBuilder()
-			    .uri(URI.create("https://api.github.com/user"))
+			    .uri(URI.create(githubApiBase() + "/user"))
 			    .GET()
+			    .timeout(REQUEST_TIMEOUT)
 			    .header("Authorization", "Bearer " + token)
 			    .header("User-Agent", "Peer_To_Peer_Minecraft_Server_System/1.0")
 			    .header("Accept", "application/vnd.github+json")
@@ -530,12 +557,22 @@ public class GitWindows {
 		
 		HttpResponse<String> response;
 		try {
-			response = client.send(request, HttpResponse.BodyHandlers.ofString());
+			response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
 		}
-		catch(Exception e) {return false;}
-		
-		if(response.statusCode() == 401) return false;
-		
-		return true;
+		catch(Exception e) {return null;}
+
+		if(response.statusCode() != 200) return null;
+		try {
+			JsonNode body = JSON_MAPPER.readTree(response.body());
+			String login = body.path("login").asText(null);
+			return login == null || login.isBlank() ? null : login;
+		} catch (Exception e) {
+			return null;
+		}
+	}
+
+	private static String githubApiBase() {
+		String base = System.getProperty("p2pmss.githubApiBase", "https://api.github.com");
+		return base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
 	}
 }

@@ -6,7 +6,6 @@ import java.io.BufferedWriter;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
@@ -17,6 +16,8 @@ import java.lang.management.ManagementFactory;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URL;
+import java.net.URLConnection;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -26,6 +27,7 @@ import java.util.List;
 import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import javax.swing.JOptionPane;
@@ -50,30 +52,58 @@ import vpn.DiscoveryResponder;
 public class ForgeUtils {
 	
 	public static final Path DIR_INSTALLERS = Paths.get("forge_installers");
+	private static final String FORGE_METADATA_URL = "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml";
+	private static final int DOWNLOAD_TIMEOUT_MILLIS = 30_000;
 		
 	public static Path downloadForgeInstaller(String version){
-		if(!(Files.exists(DIR_INSTALLERS)))
-			try {
-				Files.createDirectories(DIR_INSTALLERS);
-			} catch (IOException e) {
-				JOptionPane.showMessageDialog(null, "File not found or inaccessible", "Error", JOptionPane.ERROR_MESSAGE);
-			}
-		
+		try {
+			return downloadForgeInstallerChecked(version);
+		} catch(IOException failure) {
+			JOptionPane.showMessageDialog(null, failure.getMessage(), "Forge download failed", JOptionPane.ERROR_MESSAGE);
+			return null;
+		}
+	}
+
+	/** Downloads a Forge installer with finite network timeouts and an atomic final path. */
+	public static Path downloadForgeInstallerChecked(String version) throws IOException {
+		if(version == null || !version.matches("[0-9A-Za-z._+-]+")) {
+			throw new IOException("Select a valid Forge version.");
+		}
+		Files.createDirectories(DIR_INSTALLERS);
 		String url = String.format("https://maven.minecraftforge.net/net/minecraftforge/forge/%s/forge-%s-installer.jar", version, version);
-		
 		Path destination = DIR_INSTALLERS.resolve(String.format("forge-%s-installer.jar", version));
-		
-		try(InputStream in = new URL(url).openStream()) {
-			Files.copy(in, destination, StandardCopyOption.REPLACE_EXISTING);
-		} catch (MalformedURLException e) {
-			JOptionPane.showMessageDialog(null, "Forge url not found, contact with our technical support", "Error", JOptionPane.ERROR_MESSAGE);
-		} catch (IOException e) {
-			JOptionPane.showMessageDialog(null, "File not found or inaccessible", "Error", JOptionPane.ERROR_MESSAGE);
+		Path partial = DIR_INSTALLERS.resolve(destination.getFileName() + ".part");
+		URLConnection connection = openConnection(url);
+		try(InputStream in = connection.getInputStream()) {
+			Files.copy(in, partial, StandardCopyOption.REPLACE_EXISTING);
+			Files.move(partial, destination, StandardCopyOption.REPLACE_EXISTING);
+		} catch(IOException failure) {
+			Files.deleteIfExists(partial);
+			throw new IOException("Forge installer could not be downloaded. Check the connection and retry.", failure);
 		}
 		return destination;
 	}
 	
 	public static void installForgeServer(Path forgeInstallerFile, Path forgeServerInstalationDirectory){
+		try {
+			installForgeServerChecked(forgeInstallerFile, forgeServerInstalationDirectory);
+		} catch(InterruptedException interrupted) {
+			Thread.currentThread().interrupt();
+			JOptionPane.showMessageDialog(null, "Forge installation was interrupted.", "Error", JOptionPane.ERROR_MESSAGE);
+		} catch(IOException failure) {
+			JOptionPane.showMessageDialog(null, failure.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+		}
+	}
+
+	/** Runs the Forge installer and only succeeds when its process exits cleanly. */
+	public static void installForgeServerChecked(Path forgeInstallerFile, Path forgeServerInstalationDirectory)
+			throws IOException, InterruptedException {
+		if(forgeInstallerFile == null || !Files.isRegularFile(forgeInstallerFile)) {
+			throw new IOException("The downloaded Forge installer is missing.");
+		}
+		if(forgeServerInstalationDirectory == null || !Files.isDirectory(forgeServerInstalationDirectory)) {
+			throw new IOException("The selected server folder is not accessible.");
+		}
 		ProcessBuilder pb = new ProcessBuilder(
 				"java",
 				"-jar",
@@ -84,20 +114,12 @@ public class ForgeUtils {
 		pb.directory(forgeServerInstalationDirectory.toFile());
 		pb.inheritIO();
 		
-		Process p;
 		try {
-			p = pb.start();
-			p.waitFor();
-		} catch (IOException e) {
-			JOptionPane.showMessageDialog(null, "File not found or inaccessible (instalation selected directory)", "Error", JOptionPane.ERROR_MESSAGE);
-		} catch (InterruptedException e) {
-			JOptionPane.showMessageDialog(null, "Process interrupted, try again", "Error", JOptionPane.ERROR_MESSAGE);
-		}
-		
-		try {
-			Files.delete(forgeInstallerFile);
-		} catch (IOException e) {
-			JOptionPane.showMessageDialog(null, "Can not delete forge installer, path inaccessible", "Error", JOptionPane.ERROR_MESSAGE);
+			Process process = pb.start();
+			int exitCode = process.waitFor();
+			if(exitCode != 0) throw new IOException("Forge installer exited with code " + exitCode + ".");
+		} finally {
+			Files.deleteIfExists(forgeInstallerFile);
 		}
 	}
 	
@@ -121,22 +143,34 @@ public class ForgeUtils {
 	}
 	
 	public static String downloadForgeMetadata() {
-		URL url;
 		try {
-			url = new URL("https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml");
-			try(InputStream in = url.openStream()){
-				return new String(in.readAllBytes());
-			} catch (IOException e) {
-				JOptionPane.showMessageDialog(null, "File not found or inaccessible", "Error", JOptionPane.ERROR_MESSAGE);
-			}
-		} catch (MalformedURLException e) {
-            JOptionPane.showMessageDialog(null, "Forge url not found, contact with our technical support", "Error", JOptionPane.ERROR_MESSAGE);
+			return downloadForgeMetadataChecked();
+		} catch(IOException failure) {
+			JOptionPane.showMessageDialog(null, failure.getMessage(), "Forge catalogue failed", JOptionPane.ERROR_MESSAGE);
+			return null;
 		}
-		return null;
+	}
+
+	public static String downloadForgeMetadataChecked() throws IOException {
+		URLConnection connection = openConnection(FORGE_METADATA_URL);
+		try(InputStream in = connection.getInputStream()) {
+			return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+		} catch(IOException failure) {
+			throw new IOException("Forge versions could not be loaded. Check the connection and retry.", failure);
+		}
+	}
+
+	private static URLConnection openConnection(String url) throws IOException {
+		URLConnection connection = URI.create(url).toURL().openConnection();
+		connection.setConnectTimeout(DOWNLOAD_TIMEOUT_MILLIS);
+		connection.setReadTimeout(DOWNLOAD_TIMEOUT_MILLIS);
+		connection.setRequestProperty("User-Agent", "Peer_To_Peer_Minecraft_Server_System/1.6");
+		return connection;
 	}
 	
 	public static List<String> getForgeVersionsList(String forgeMetadata){
 		List<String> forgeVersions = new ArrayList<>();
+		if(forgeMetadata == null || forgeMetadata.isBlank()) return forgeVersions;
 		
 		DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
 		DocumentBuilder builder = null;
@@ -198,8 +232,8 @@ public class ForgeUtils {
 	}
 	
 	public static void openModsFolder(Path serverDirectory) {
-		File modsDirectory = new File(serverDirectory.toString() + "\\mods");
-		if(!(Files.exists(serverDirectory))) {
+		File modsDirectory = serverDirectory.resolve("mods").toFile();
+		if(!(Files.exists(modsDirectory.toPath()))) {
 			try {
 				Files.createDirectories(modsDirectory.toPath());
 			} catch (IOException e) {
@@ -214,54 +248,76 @@ public class ForgeUtils {
 			}
 		}
 	}
+
+	public static boolean hasServerStartupCommand(Path serverDirectory) {
+		return buildStartupCommand(serverDirectory, isWindows()) != null;
+	}
 	
 	public static Process executeMinecraftServer(Path serverDirectory) {
-		String serverJarName = getServerJarName(serverDirectory);
-		String ram = getServerRAMAlloc(serverDirectory);
-		if(serverJarName != null) {
-			try {
-				ProcessBuilder pb;
-				if(!(serverJarName.contains(" "))) {
-					pb = new ProcessBuilder(
-						    "java",
-						    ram,
-						    "-jar",
-						    serverJarName,
-						    "nogui"
-					);
-				}
-				else {
-					pb = new ProcessBuilder();
-					List<String> command = pb.command();
-					for(String argument : serverJarName.split(" ")) {
-						command.add(argument);
-					}
-					command.add("--nogui");
-				}
+		try {
+			List<String> command = buildStartupCommand(serverDirectory, isWindows());
+			if(command == null) return null;
+			ProcessBuilder pb = new ProcessBuilder(command);
 
-				pb.directory(serverDirectory.toFile());
-	            pb.redirectErrorStream(true);
-	            Process serverProcess = pb.start();
-	            
-	            return serverProcess;
-	            
-	        } catch (IOException e) {
-	            return null;
-	        }
+			pb.directory(serverDirectory.toFile());
+			pb.redirectErrorStream(true);
+			return pb.start();
+		} catch (IOException e) {
+			return null;
+		}
+	}
+
+	static List<String> buildStartupCommand(Path serverDirectory, boolean windows) {
+		Path startupScript = findStartupScript(serverDirectory, windows);
+		if(startupScript != null) {
+			return windows
+					? List.of("cmd.exe", "/c", startupScript.getFileName().toString(), "nogui")
+					: List.of("/bin/sh", startupScript.getFileName().toString(), "nogui");
+		}
+
+		String serverJarName = getServerJarName(serverDirectory);
+		return serverJarName == null
+				? null
+				: List.of("java", getServerRAMAlloc(serverDirectory), "-jar", serverJarName, "nogui");
+	}
+
+	private static Path findStartupScript(Path serverDirectory, boolean windows) {
+		String[] candidates = windows
+				? new String[] {"run.bat", "start.bat"}
+				: new String[] {"run.sh", "start.sh"};
+		for(String candidate : candidates) {
+			Path script = serverDirectory.resolve(candidate);
+			if(Files.isRegularFile(script)) return script;
 		}
 		return null;
 	}
+
+	private static boolean isWindows() {
+		return System.getProperty("os.name", "").toLowerCase().contains("win");
+	}
 	
 	public static Thread getServerOutputs(Process serverProcess, JTextArea consoleArea) {
+		return getServerOutputs(serverProcess, consoleArea, line -> {});
+	}
+
+	/** Streams Forge output to both the console and an optional state observer. */
+	public static Thread getServerOutputs(Process serverProcess, JTextArea consoleArea, Consumer<String> outputObserver) {
 		 Thread consoleThread = new Thread(() -> {
 		     try (BufferedReader reader = new BufferedReader(new InputStreamReader(serverProcess.getInputStream()))) {
 		
 		         String line;
 		         while ((line = reader.readLine()) != null) {
 		             String finalLine = line;
+		             try {
+						if(outputObserver != null) outputObserver.accept(finalLine);
+		             } catch(RuntimeException observerFailure) {
+						observerFailure.printStackTrace();
+		             }
 		             if(finalLine.contains("> \\")) CustomCommands.processCustomCommand(finalLine);
 		             if(finalLine.contains("Done")) {
-		                	MainFrame.responder = new DiscoveryResponder(MainFrame.networkName).listenAsync(MainFrame.actualServerPort);
+						MainFrame.responder = new DiscoveryResponder(MainFrame.networkName,
+								() -> MainFrame.window == null ? "" : MainFrame.window.playerDiscoveryPayload())
+								.listenAsync(MainFrame.actualServerPort);
 		                	MainFrame.window.checkServerStatus();
 		                	
 							if(ZipUtils.existsDirectory(GeneralConfigurationsWindows.USER_OPS_PATH)) {
@@ -287,8 +343,8 @@ public class ForgeUtils {
 		return serverWriter;
 	}
 	
-    public static void sendCommand(String command, Process serverProcess, BufferedWriter serverWriter) {
-        if (serverProcess == null || serverProcess.isAlive()) {
+    public static synchronized void sendCommand(String command, Process serverProcess, BufferedWriter serverWriter) {
+        if (serverProcess != null && serverProcess.isAlive() && serverWriter != null) {
             try {
                 serverWriter.write(command);
                 serverWriter.newLine();
@@ -300,94 +356,109 @@ public class ForgeUtils {
     }
 	
 	public static String getServerRAMAlloc(Path serverDirectory) {
-        Path path = Path.of(serverDirectory + "/user_jvm_args.txt");
-        List<String> lines;
-		try {
-			lines = Files.readAllLines(path);
-		} catch (IOException e) {
-			Path serverBat = Paths.get(serverDirectory.toString() + "/run.bat");
-			if(!ZipUtils.existsDirectory(serverBat)) serverBat = Paths.get(serverDirectory.toString() + "/start.bat");
-			try (BufferedReader br = new BufferedReader(new FileReader(serverBat.toString()))) {
-	            String line;
-	            while ((line = br.readLine()) != null) {
-	                if (line.contains("java")) {
-	                	Pattern pattern = Pattern.compile("-Xmx[0-9]+[GM]");
-	                	Matcher matcher = pattern.matcher(line);
-
-	                	while (matcher.find()) {
-	                		return matcher.group();
-	                	}
-	                }
-	            }
-	        } catch (IOException ioe) {}
-			return "-Xmx1G";
+		Pattern memoryPattern = Pattern.compile("-Xmx[0-9]+[GM]", Pattern.CASE_INSENSITIVE);
+		Path jvmArgs = serverDirectory.resolve("user_jvm_args.txt");
+		if(Files.isRegularFile(jvmArgs)) {
+			try {
+				for(String line : Files.readAllLines(jvmArgs)) {
+					if(isCommentedLine(line)) continue;
+					Matcher matcher = memoryPattern.matcher(line);
+					if(matcher.find()) return matcher.group();
+				}
+			} catch (IOException ignored) {}
 		}
-        
-        if (!lines.isEmpty()) {
-            String lastLine = lines.get(lines.size() - 1);
-            return lastLine.replaceAll("# ", "");
-        }
-        return "-Xmx1G";
+
+		for(String scriptName : new String[] {"run.bat", "start.bat", "run.sh", "start.sh"}) {
+			Path script = serverDirectory.resolve(scriptName);
+			if(!Files.isRegularFile(script)) continue;
+			try {
+				for(String line : Files.readAllLines(script)) {
+					if(isCommentedLine(line)) continue;
+					Matcher matcher = memoryPattern.matcher(line);
+					if(matcher.find()) return matcher.group();
+				}
+			} catch (IOException ignored) {}
+		}
+		return "-Xmx1G";
 	}
 	
 	public static void setServerRAMAlloc(Path serverDirectory, int gb) throws Exception {
 		String memoryUnit = "G";
-		//We get the free amount of RAM (in GB) in the system.
+		// Values up to the installed GB are interpreted as GB; larger values as MB.
+		// Available/free memory is not a reliable launch limit on macOS and Linux.
 		OperatingSystemMXBean os = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
-		long freeRamGB = (long) (os.getFreeMemorySize() / (Math.pow(1024L, 3)));
 		long totalRamGb = (long) (os.getTotalMemorySize() / (Math.pow(1024L, 3)));
 		
+		if(gb <= 0) throw new Exception("Ram exceeded");
 		if(gb > totalRamGb) memoryUnit = "M";
-		if(gb > freeRamGB && memoryUnit == "G" || gb > freeRamGB * 1024L && memoryUnit == "M") throw new Exception("Ram exceeded");
+		if(memoryUnit.equals("M") && gb > totalRamGb * 1024L) throw new Exception("Ram exceeded");
 		
-		Path path = Path.of(serverDirectory + "/user_jvm_args.txt");
-		if(!ZipUtils.existsDirectory(path)) path = Path.of(serverDirectory + "/start.bat");
-		List<String> lines;
-		try {
-			lines = Files.readAllLines(path);
-			if(ZipUtils.existsDirectory(Path.of(serverDirectory + "/user_jvm_args.txt"))) {
-				lines.set(lines.size() - 1, "-Xmx" + gb + memoryUnit);
-				Files.write(path, lines);
-			}
-			else {
-				for(int i = 0; i < lines.size(); i++) {
-					if(lines.get(i).contains("java") && Pattern.compile("-Xmx[0-9]+[GM]").matcher(lines.get(i)).find()) {
-						String line = lines.get(i).replaceAll("-Xmx[0-9]+[GM]", "-Xmx" + gb + memoryUnit);
-						lines.set(i, line);
-						Files.write(path, lines);
-					}
-				}
+		setServerRAMAlloc(serverDirectory, gb + memoryUnit);
+	}
+
+	/** Sets an exact JVM maximum such as {@code 4G} or {@code 2048M}. */
+	public static void setServerRAMAlloc(Path serverDirectory, String allocation) throws Exception {
+		String normalized = allocation == null ? "" : allocation.trim().toUpperCase();
+		Matcher allocationMatcher = Pattern.compile("^([1-9][0-9]*)([GM])$").matcher(normalized);
+		if(!allocationMatcher.matches()) throw new IllegalArgumentException("RAM must use a value such as 4G or 2048M.");
+		long amount = Long.parseLong(allocationMatcher.group(1));
+		long requestedBytes = "G".equals(allocationMatcher.group(2))
+				? amount * 1024L * 1024L * 1024L
+				: amount * 1024L * 1024L;
+		OperatingSystemMXBean os = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
+		if(requestedBytes <= 0 || requestedBytes > os.getTotalMemorySize()) throw new Exception("Ram exceeded");
+
+		Path jvmArgs = serverDirectory.resolve("user_jvm_args.txt");
+		Path path = Files.isRegularFile(jvmArgs) ? jvmArgs : findMemoryConfigurationScript(serverDirectory);
+		if(path == null) throw new IOException("No JVM arguments or startup script found");
+		List<String> lines = Files.readAllLines(path);
+		String replacement = "-Xmx" + normalized;
+		boolean replaced = false;
+		for(int i = 0; i < lines.size(); i++) {
+			if(!isCommentedLine(lines.get(i)) && Pattern.compile("-Xmx[0-9]+[GM]", Pattern.CASE_INSENSITIVE).matcher(lines.get(i)).find()) {
+				lines.set(i, lines.get(i).replaceAll("(?i)-Xmx[0-9]+[GM]", replacement));
+				replaced = true;
 			}
 		}
-		catch(IOException e) {
-			JOptionPane.showMessageDialog(null, "File not found or inaccessible (user_jvm_args.txt or start.bat)", "Error", JOptionPane.ERROR_MESSAGE);
+		if(!replaced && path.equals(jvmArgs)) lines.add(replacement);
+		if(!replaced && !path.equals(jvmArgs)) throw new IOException("No -Xmx option found in startup script");
+		Files.write(path, lines);
+	}
+
+	private static boolean isCommentedLine(String line) {
+		return line.trim().startsWith("#");
+	}
+
+	private static Path findMemoryConfigurationScript(Path serverDirectory) {
+		for(String scriptName : new String[] {"run.bat", "start.bat", "run.sh", "start.sh"}) {
+			Path script = serverDirectory.resolve(scriptName);
+			if(Files.isRegularFile(script)) return script;
 		}
+		return null;
 	}
 	
 	
 	public static String getServerJarName(Path serverDirectory) {
-		Path serverBat = Paths.get(serverDirectory.toString() + "/run.bat");
-		if(!ZipUtils.existsDirectory(serverBat)) serverBat = Paths.get(serverDirectory.toString() + "/start.bat");
-		try (BufferedReader br = new BufferedReader(new FileReader(serverBat.toString()))) {
-            String line;
-            while ((line = br.readLine()) != null) {
-                if (line.contains("java")) {
-                	if(ZipUtils.existsDirectory(Path.of(serverDirectory.toString() + "/run.bat"))) {
-                		 return line.replaceAll("java -jar ", "").replaceAll(" --onlyCheckJava", "").trim();
-                	}
-                	
-                	if(ZipUtils.existsDirectory(Path.of(serverDirectory.toString() + "/start.bat"))) {
-                       	Matcher matcher = Pattern.compile("\\b([^\\s]+\\.jar)\\b").matcher(line);
-                       	
-                    	while (matcher.find()) {
-                    		return matcher.group();
-                    	}
-                	}
-                }
-            }
-        } catch (IOException e) {
-            return null;
-        }
+		for(String scriptName : new String[] {"start.bat", "start.sh", "run.bat", "run.sh"}) {
+			Path script = serverDirectory.resolve(scriptName);
+			if(!Files.isRegularFile(script)) continue;
+			try {
+				for(String line : Files.readAllLines(script)) {
+					if(!line.contains("java")) continue;
+					Matcher matcher = Pattern.compile("(?:^|\\s)([^\\s\"']+\\.jar)(?:\\s|$)").matcher(line);
+					if(matcher.find()) return matcher.group(1);
+				}
+			} catch (IOException ignored) {}
+		}
+
+		try(Stream<Path> files = Files.list(serverDirectory)) {
+			return files.filter(Files::isRegularFile)
+					.map(path -> path.getFileName().toString())
+					.filter(name -> name.endsWith(".jar") && !name.contains("installer"))
+					.sorted((left, right) -> Boolean.compare(right.startsWith("forge-"), left.startsWith("forge-")))
+					.findFirst()
+					.orElse(null);
+		} catch (IOException ignored) {}
 		return null;
 	}
 	
@@ -440,6 +511,23 @@ public class ForgeUtils {
 			}
 		}
 	}
+
+	/** Checked variant used by the inline dashboard editor. */
+	public static void setNetworkNameChecked(String newNetworkName) throws IOException {
+		String normalized = newNetworkName == null ? "" : newNetworkName.trim();
+		if(normalized.isBlank()) throw new IllegalArgumentException("Network name cannot be empty.");
+		Path dataDirectory = Path.of("data");
+		Files.createDirectories(dataDirectory);
+		Path file = dataDirectory.resolve("networkName.properties");
+		Properties properties = new Properties();
+		if(Files.isRegularFile(file)) {
+			try(InputStream input = Files.newInputStream(file)) { properties.load(input); }
+		}
+		properties.setProperty("networkName", normalized);
+		try(java.io.OutputStream output = Files.newOutputStream(file)) {
+			properties.store(output, "Network name updated");
+		}
+	}
 	
 	public static int getServerPort(Path serverDirectory) {
 		Path serverProperties = serverDirectory.resolve("server.properties");
@@ -454,6 +542,18 @@ public class ForgeUtils {
 			}
 		}
 		return getSavedServerPort();
+	}
+
+	public static int getMaxPlayers(Path serverDirectory) {
+		Path serverProperties = serverDirectory.resolve("server.properties");
+		if(Files.isRegularFile(serverProperties)) {
+			Properties properties = new Properties();
+			try(FileInputStream input = new FileInputStream(serverProperties.toFile())) {
+				properties.load(input);
+				return Math.max(1, Integer.parseInt(properties.getProperty("max-players", "20")));
+			} catch(IOException | NumberFormatException ignored) {}
+		}
+		return 20;
 	}
 	
 	public static void setServerPort(Path serverDirectory, int newPort) {
@@ -472,6 +572,28 @@ public class ForgeUtils {
 			}
 		}
 		setSavedServerPort(newPort);
+	}
+
+	public static void setServerPortChecked(Path serverDirectory, int newPort) throws IOException {
+		if(newPort < 1 || newPort > 65_535) throw new IllegalArgumentException("Port must be between 1 and 65535.");
+		setServerProperty(serverDirectory, "server-port", Integer.toString(newPort));
+		setSavedServerPort(newPort);
+	}
+
+	public static void setMaxPlayers(Path serverDirectory, int maxPlayers) throws IOException {
+		if(maxPlayers < 1 || maxPlayers > 1_000) throw new IllegalArgumentException("Max players must be between 1 and 1000.");
+		setServerProperty(serverDirectory, "max-players", Integer.toString(maxPlayers));
+	}
+
+	private static void setServerProperty(Path serverDirectory, String key, String value) throws IOException {
+		Path serverProperties = serverDirectory.resolve("server.properties");
+		if(!Files.isRegularFile(serverProperties)) throw new IOException("server.properties was not found in the selected server.");
+		Properties properties = new Properties();
+		try(InputStream input = Files.newInputStream(serverProperties)) { properties.load(input); }
+		properties.setProperty(key, value);
+		try(java.io.OutputStream output = Files.newOutputStream(serverProperties)) {
+			properties.store(output, "server properties updated");
+		}
 	}
 	
 	private static int getSavedServerPort() {

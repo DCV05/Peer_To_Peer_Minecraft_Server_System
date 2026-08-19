@@ -1,14 +1,22 @@
 package vpn;
 
 import java.net.*;
+import java.nio.charset.StandardCharsets;
+import java.util.function.Supplier;
 
 public class DiscoveryResponder {
 
 	private final String myNetworkName;
+	private final Supplier<String> statusPayload;
 	private volatile DatagramSocket socket;
 	
 	public DiscoveryResponder(String name) {
+		this(name, () -> "");
+	}
+
+	public DiscoveryResponder(String name, Supplier<String> statusPayload) {
 		this.myNetworkName = name;
+		this.statusPayload = statusPayload == null ? () -> "" : statusPayload;
 	}
 	
 	public void listen(int port) throws Exception {
@@ -21,11 +29,17 @@ public class DiscoveryResponder {
 			DatagramPacket packet = new DatagramPacket(buf, buf.length);
 			socket.receive(packet);
 			
-			String msg = new String(packet.getData(), 0, packet.getLength());
+			String msg = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
 			
 			if(msg.equals(("DISCOVER: " + myNetworkName))) {
 				if(isPortActive(port)) {
-				byte[] response = "HERE".getBytes();
+					String payload;
+					try {
+						payload = "HERE" + statusPayload.get();
+					} catch(RuntimeException ignored) {
+						payload = "HERE";
+					}
+					byte[] response = payload.getBytes(StandardCharsets.UTF_8);
 				DatagramPacket resp = new DatagramPacket(
 						response, response.length,
 						packet.getAddress(), packet.getPort()
@@ -44,7 +58,7 @@ public class DiscoveryResponder {
 	}
 	
 	public void closeListeningSocket() {
-		socket.close();
+		if(socket != null) socket.close();
 		socket = null;
 	}
 	

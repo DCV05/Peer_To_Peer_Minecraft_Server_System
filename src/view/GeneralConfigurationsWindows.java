@@ -22,6 +22,7 @@ import javax.swing.JTextField;
 import cloud.ZipUtils;
 import jgit.GitUtils;
 import minecraftServerManagement.ForgeUtils;
+import view.dashboard.DashboardDialogSupport;
 
 public class GeneralConfigurationsWindows {
 	
@@ -39,7 +40,6 @@ public class GeneralConfigurationsWindows {
 		generalConfigurationsDialog.setSize(widthGeneralConfigurationsDialog, heightGeneralConfigurationsDialog);
 		generalConfigurationsDialog.setLocationRelativeTo(null);
 		generalConfigurationsDialog.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-		generalConfigurationsDialog.setVisible(true);
 		
 
 		
@@ -138,6 +138,7 @@ public class GeneralConfigurationsWindows {
 		closeBtn.addActionListener(clsBtn -> {
 			generalConfigurationsDialog.dispose();
 		});
+		DashboardDialogSupport.show(generalConfigurationsDialog);
 	}
 	
 	private static boolean checkFormatValidity(String text) {

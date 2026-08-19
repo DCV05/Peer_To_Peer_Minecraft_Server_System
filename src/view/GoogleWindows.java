@@ -34,6 +34,7 @@ import com.google.api.services.drive.Drive.About;
 import cloud.google.GoogleDriveCloudProvider;
 import jgit.GitUtils;
 import jgit.TokenStore;
+import view.dashboard.DashboardDialogSupport;
 
 public class GoogleWindows {
 	
@@ -50,7 +51,6 @@ public class GoogleWindows {
 		addHostingUserDialog.setSize(widthSignInDialog, heightSignInDialog);
 		addHostingUserDialog.setLocationRelativeTo(null);
 		addHostingUserDialog.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-		addHostingUserDialog.setVisible(true);
 		
 		//General layout for the components.
 		JPanel contentPane = new JPanel(new GridLayout(2,1));
@@ -127,6 +127,7 @@ public class GoogleWindows {
 		cancelBtn.addActionListener(cnlbtn -> {
 			addHostingUserDialog.dispose();
 		});
+		DashboardDialogSupport.show(addHostingUserDialog);
 	}
 	
 	public static void googleProfileWnd() {
@@ -140,7 +141,6 @@ public class GoogleWindows {
 		googleDriveProfileDialog.setSize(widthGoogleDriveProfileDialog, heightGoogleDriveProfileDialog);
 		googleDriveProfileDialog.setLocationRelativeTo(null);
 		googleDriveProfileDialog.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-		googleDriveProfileDialog.setVisible(true);
 		
 		//General layout for the components.
 		JPanel contentPane = new JPanel(new GridLayout(2,1));
@@ -187,6 +187,7 @@ public class GoogleWindows {
 		closeBtn.addActionListener(clsBtn -> {
 			googleDriveProfileDialog.dispose();
 		});
+		DashboardDialogSupport.show(googleDriveProfileDialog);
 	}
 	
 	public static void cloneServerFolderWnd(JFrame frame) {
@@ -201,7 +202,6 @@ public class GoogleWindows {
 		googleDriveServerFoldersCloneListDialog.setSize(widthGoogleDriveServerFoldersCloneListDialog, heightGoogleDriveServerFoldersCloneListDialog);
 		googleDriveServerFoldersCloneListDialog.setLocationRelativeTo(null);
 		googleDriveServerFoldersCloneListDialog.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-		googleDriveServerFoldersCloneListDialog.setVisible(true);
 		
 		//We get the folders list
 		List<String> serverFolderlist = MainFrame.cloudProvider.getInvitedFolderList();
@@ -234,6 +234,7 @@ public class GoogleWindows {
 		closeBtn.addActionListener(clsBtn -> {
 			googleDriveServerFoldersCloneListDialog.dispose();
 		});
+		DashboardDialogSupport.show(googleDriveServerFoldersCloneListDialog);
 	}
 	
 	private static void createClonelistComponents(JPanel contentPane, JFrame frame, JDialog googleDriveServerFoldersCloneListDialog, List<String> serverFolderlist) {

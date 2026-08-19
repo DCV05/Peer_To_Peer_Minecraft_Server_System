@@ -54,14 +54,27 @@ From the application menu:
 
 Once a server is opened or created, a dashboard is displayed with the following options:
 
+The desktop interface uses an operations-first layout with persistent pages for **Overview**, **Servers**, **Backups**, **Network**, **Console**, and **Settings**. Server, host-discovery and GitHub states remain visible while background work is running. The visual and state architecture is documented in [`docs/DASHBOARD_UI.md`](docs/DASHBOARD_UI.md).
+
 #### Start / Stop Server
 - Starts the server using the configured settings
 - Displays a live console for logs and command execution
+- Shows the connected-player roster from real Forge `list` responses
 - When the server is running, the button switches to **Off**
 - Stopping the server using this button triggers a cloud save
 
+#### Import / Pull World
+- Imports a Minecraft world folder or ZIP into the selected offline Forge server
+- Preserves the previous world in `world-import-backups` and rolls it back if promotion fails
+- Pulls the latest confirmed GitHub world only while no local or remote host is active
+
+#### Inline Server Settings
+- Edits the P2P network, server port, RAM limit and maximum players directly in the **Settings** page
+- Validates values before writing and locks the editor while a local or remote host is active
+- Keeps `server.properties` and `user_jvm_args.txt` local to each host
+
 **Important:**  
-Stopping the server manually using `/stop` is not recommended, as it will not trigger the cloud synchronization.
+Use the dashboard stop control (or enter `stop` in its console). P2PMSS waits for Forge to finish saving and only then starts the verified cloud backup.
 
 ---
 
@@ -83,13 +96,14 @@ Mods are also synchronized through the cloud.
 
 ---
 
-#### Create Server Repository
-Creates a local Git repository (Git installation not required) and a remote GitHub repository where the server data will be stored.
+#### Automatic Private Server Backup
+After a GitHub account is connected, opening an offline server automatically creates and links a **private** repository (Git installation is not required). The same check runs before start, after stop, and before the application exits.
 
-To use this feature, you must log in with:
-- A GitHub **classic personal access token**
-- GitHub username
-- Email address
+Large existing servers are not staged as one enormous push. P2PMSS inspects the complete tree first, divides changed files into conservative commit batches, pushes each batch separately, and continues only after the remote confirms it. A network failure leaves the accepted batches in GitHub and the pending batch locally, so **Retry private backup** resumes the process.
+
+Generated logs, crash reports, temporary session locks, and local import rollback folders are excluded. The playable server state—including the world, mods, configuration, Forge libraries, and startup files—remains versioned. Files over GitHub's 100 MiB per-object limit are rejected before a remote repository is created, with the blocking path shown in the dashboard.
+
+To use this feature, sign in with a GitHub **classic personal access token** carrying the `repo` scope. P2PMSS validates the token against GitHub and derives the account identity itself.
 
 It is recommended to use a separate GitHub account to avoid mixing personal or professional repositories.
 
@@ -117,7 +131,7 @@ To use GitHub as a cloud storage backend, you need:
 
 1. A GitHub account  
    (Using a secondary account is recommended)
-2. A **classic personal access token** with full permissions  
+2. A **classic personal access token** with the `repo` scope
    Official guide:  
    https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens
 
@@ -167,8 +181,8 @@ The specific VPN software does not matter, as long as all users are connected to
    `File > New Minecraft Server`  
    Select Minecraft and Forge versions.
 
-3. **Log in to GitHub and create the repository**  
-   Generate a classic token, log in, and click **Create repository**.
+3. **Log in to GitHub**
+   Generate a classic token with the `repo` scope and log in. P2PMSS creates the private repository and uploads the offline server automatically.
 
 4. **Invite server members** (multiplayer)  
    `Git > Add hosting user` and enter GitHub usernames.
