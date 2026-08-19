@@ -66,7 +66,7 @@ class ForgeUtilsTest {
         Path arguments = server.resolve("user_jvm_args.txt");
         Files.writeString(arguments, "# Example only: -Xmx3G\n# -Xmx4G\n");
 
-        assertEquals("-Xmx1G", ForgeUtils.getServerRAMAlloc(server));
+        assertEquals("-Xmx4G", ForgeUtils.getServerRAMAlloc(server));
         ForgeUtils.setServerRAMAlloc(server, 1);
         assertEquals("-Xmx1G", ForgeUtils.getServerRAMAlloc(server));
         assertTrue(Files.readAllLines(arguments).stream().anyMatch(line -> line.equals("-Xmx1G")));

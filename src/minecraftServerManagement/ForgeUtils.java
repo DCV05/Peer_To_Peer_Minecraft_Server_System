@@ -379,7 +379,9 @@ public class ForgeUtils {
 				}
 			} catch (IOException ignored) {}
 		}
-		return "-Xmx1G";
+		// Default when no explicit -Xmx exists yet (fresh Forge installs ship it commented out).
+		// 1G starves a real modded world; 4G is a safer launch default for hosts.
+		return "-Xmx4G";
 	}
 	
 	public static void setServerRAMAlloc(Path serverDirectory, int gb) throws Exception {

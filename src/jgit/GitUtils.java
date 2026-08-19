@@ -176,13 +176,17 @@ public class GitUtils {
 		}
 	}
 
-	private static boolean protectMachineLocalFiles(Path repoDirectory) {
+	static boolean protectMachineLocalFiles(Path repoDirectory) {
 		return protectMachineLocalFile(repoDirectory, Path.of("server.properties"))
 				&& protectMachineLocalFile(repoDirectory, Path.of("user_jvm_args.txt"));
 	}
 
 	private static boolean protectMachineLocalFile(Path repoDirectory, Path relativePath) {
-		if(Files.exists(repoDirectory.resolve(relativePath))) return setSkipWorktree(repoDirectory, relativePath, true);
+		// Decide by index membership, not disk existence: Forge creates server.properties on the
+		// first boot, so the file can exist on disk while it was never staged (it is covered by
+		// .git/info/exclude instead). Asking setSkipWorktree to flag a non-indexed file made the
+		// whole stop backup report PUSH FAILED even though every batch was already confirmed.
+		if(isTrackedInIndex(repoDirectory, relativePath)) return setSkipWorktree(repoDirectory, relativePath, true);
 		Path exclude = repoDirectory.resolve(".git/info/exclude");
 		try {
 			Files.createDirectories(exclude.getParent());
@@ -194,6 +198,15 @@ public class GitUtils {
 			}
 			return true;
 		} catch(IOException failure) {
+			return false;
+		}
+	}
+
+	private static boolean isTrackedInIndex(Path repoDirectory, Path relativePath) {
+		try (Git git = Git.open(repoDirectory.toFile())) {
+			String indexPath = relativePath.toString().replace('\\', '/');
+			return git.getRepository().readDirCache().getEntry(indexPath) != null;
+		} catch(Exception e) {
 			return false;
 		}
 	}

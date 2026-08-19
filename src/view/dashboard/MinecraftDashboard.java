@@ -1066,7 +1066,7 @@ public final class MinecraftDashboard extends JPanel {
         updateMetric("network", state.networkName(), "P2P identity", TEXT);
         String backupValue = state.repositoryLinked() && ("UP TO DATE".equalsIgnoreCase(state.syncState()) || "READY".equalsIgnoreCase(state.syncState()))
                 ? "SYNCED" : state.syncState();
-        updateMetric("backup", backupValue, state.lastSync(), state.repositoryLinked() ? GREEN : TEXT_MUTED);
+        updateMetric("backup", backupValue, state.lastSync(), state.repositoryLinked() ? syncColor() : TEXT_MUTED);
 
         updateMetric("github", state.githubAuthenticated() ? "ONLINE" : "OFFLINE", state.githubAccount(), state.githubAuthenticated() ? GREEN : TEXT_MUTED);
         updateMetric("repository", state.repositoryLinked() ? "LINKED" : "NOT LINKED", state.repository(), state.repositoryLinked() ? GREEN : TEXT_MUTED);

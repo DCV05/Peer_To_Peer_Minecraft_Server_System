@@ -54,6 +54,48 @@ class GitUtilsIntegrationTest {
     }
 
     @Test
+    void protectsForgeCreatedUntrackedFilesWithoutFailingTheBackup() throws Exception {
+        Path server = temporaryDirectory.resolve("forge-server");
+        Files.createDirectories(server);
+        try(Git git = Git.init().setDirectory(server.toFile()).call()) {
+            Files.writeString(server.resolve("run.sh"), "exec forge");
+            git.add().addFilepattern("run.sh").call();
+            git.commit().setMessage("initial world backup")
+                    .setAuthor("hoster", "hoster@example.test")
+                    .setCommitter("hoster", "hoster@example.test").call();
+        }
+        // Forge writes these on the first boot: they exist on disk but were never staged, so the
+        // protection must fall back to .git/info/exclude instead of reporting a failed backup
+        Files.writeString(server.resolve("server.properties"), "server-port=25565");
+        Files.writeString(server.resolve("user_jvm_args.txt"), "-Xmx1G");
+
+        assertTrue(GitUtils.protectMachineLocalFiles(server));
+
+        List<String> excluded = Files.readAllLines(server.resolve(".git/info/exclude"));
+        assertTrue(excluded.contains("server.properties"));
+        assertTrue(excluded.contains("user_jvm_args.txt"));
+    }
+
+    @Test
+    void protectsTrackedMachineLocalFilesWithTheIndexFlag() throws Exception {
+        Path server = temporaryDirectory.resolve("tracked-server");
+        Files.createDirectories(server);
+        try(Git git = Git.init().setDirectory(server.toFile()).call()) {
+            Files.writeString(server.resolve("server.properties"), "server-port=25565");
+            git.add().addFilepattern("server.properties").call();
+            git.commit().setMessage("initial world backup")
+                    .setAuthor("hoster", "hoster@example.test")
+                    .setCommitter("hoster", "hoster@example.test").call();
+
+            assertTrue(GitUtils.protectMachineLocalFiles(server));
+
+            DirCacheEntry entry = git.getRepository().readDirCache().getEntry("server.properties");
+            assertNotNull(entry);
+            assertTrue(entry.isAssumeValid());
+        }
+    }
+
+    @Test
     void synchronizesTwoHostsAndReportsThenRecoversRejectedPush() throws Exception {
         Path remote = temporaryDirectory.resolve("remote.git");
         try(Git ignored = Git.init().setBare(true).setDirectory(remote.toFile()).call()) {}
