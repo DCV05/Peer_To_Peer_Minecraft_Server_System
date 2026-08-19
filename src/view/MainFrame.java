@@ -20,8 +20,11 @@ import cloud.CloudStorageProvider;
 import cloud.ZipUtils;
 import cloud.google.GoogleDriveCloudProvider;
 import jgit.GitUtils;
+import jgit.HostLock;
 import jgit.TokenStore;
+import minecraftServerManagement.FabricInstaller;
 import minecraftServerManagement.ForgeUtils;
+import minecraftServerManagement.LoaderKind;
 import minecraftServerManagement.PlayerPresenceTracker;
 import minecraftServerManagement.WorldImportService;
 import vpn.DiscoveryResponder;
@@ -105,7 +108,8 @@ public class MainFrame {
 	public static String cloudInUseReminderText[];
 	public static JMenuItem cloudInUseReminderMenuText;
 	public static MainFrame window = null;
-	
+	private static java.util.Timer hostLockHeartbeatTimer = null;
+
 	private JFrame frame;
 	private MinecraftDashboard dashboard;
 	private volatile Phase dashboardPhase = Phase.NO_SERVER;
@@ -118,6 +122,7 @@ public class MainFrame {
 	private final AtomicBoolean privateBackupSetupInProgress = new AtomicBoolean(false);
 	private final AtomicBoolean closeInProgress = new AtomicBoolean(false);
 	private volatile Path lastAutomaticBackupAttempt;
+	private volatile String activeHostLockRepo = null;
 	private javax.swing.Timer playerRefreshTimer;
 
 	/**
@@ -410,14 +415,14 @@ public class MainFrame {
 		newServerMenuItem.setHorizontalAlignment(SwingConstants.LEFT);
 		newServerMenuItem.addActionListener(mcSrv -> {
 			JFileChooser fileChooser = new JFileChooser();
-			fileChooser.setDialogTitle("Choose an empty folder for the Forge server");
+			fileChooser.setDialogTitle("Choose an empty folder for the new server");
 			fileChooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
 			int result = fileChooser.showOpenDialog(frame);
 			if(result == JFileChooser.APPROVE_OPTION) {
 				newMinecraftServerDirectory = fileChooser.getSelectedFile();
 				String[] children = newMinecraftServerDirectory.list();
 				if(!newMinecraftServerDirectory.isDirectory() || children == null || children.length != 0) {
-					showError("Folder must be empty", "Choose an accessible empty directory for the new Forge server.");
+					showError("Folder must be empty", "Choose an accessible empty directory for the new server.");
 				} else showForgeVersionWizard(newMinecraftServerDirectory.toPath());
 			}
 			
@@ -451,7 +456,7 @@ public class MainFrame {
 	}
 
 	private void showForgeVersionWizard(Path destination) {
-		JDialog dialog = new JDialog(frame, "Create Forge Server", true);
+		JDialog dialog = new JDialog(frame, "Create Minecraft Server", true);
 		dialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
 		dialog.setResizable(false);
 		ForgeVersionWizard[] wizardReference = new ForgeVersionWizard[1];
@@ -465,7 +470,17 @@ public class MainFrame {
 		dialog.setContentPane(wizard);
 		dialog.pack();
 		dialog.setLocationRelativeTo(frame);
-		wizard.loadCatalog(() -> {
+		wizard.loadCatalog(loader -> {
+			if("Fabric".equals(loader)) {
+				FabricInstaller.Catalog catalog = FabricInstaller.loadCatalogChecked();
+				// El wizard invierte las listas para mostrar lo nuevo primero; la
+				// meta API de Fabric ya viene nuevo-primero, asi que se compensa
+				List<String> gameVersions = new java.util.ArrayList<>(catalog.gameVersions());
+				List<String> loaderVersions = new java.util.ArrayList<>(catalog.loaderVersions());
+				java.util.Collections.reverse(gameVersions);
+				java.util.Collections.reverse(loaderVersions);
+				return new ForgeVersionWizard.VersionCatalog(gameVersions, loaderVersions, true);
+			}
 			String metadata = ForgeUtils.downloadForgeMetadataChecked();
 			List<String> forgeVersions = ForgeUtils.getForgeVersionsList(metadata);
 			if(forgeVersions.isEmpty()) throw new IOException("Forge returned an empty version catalogue.");
@@ -477,14 +492,19 @@ public class MainFrame {
 
 	private void installForgeFromWizard(JDialog dialog, ForgeVersionWizard wizard, Path destination,
 			ForgeVersionWizard.Selection selection) {
-		wizard.setBusy(true, "Downloading Forge " + selection.forgeVersion() + "…");
+		wizard.setBusy(true, "Downloading " + selection.loader() + " " + selection.forgeVersion() + "…");
 		new SwingWorker<Void, String>() {
 			@Override protected Void doInBackground() throws Exception {
-				Path installer = ForgeUtils.downloadForgeInstallerChecked(selection.forgeVersion());
-				publish("Installing Forge server files…");
-				ForgeUtils.installForgeServerChecked(installer, destination);
+				if("Fabric".equals(selection.loader())) {
+					publish("Downloading the Fabric server launcher…");
+					FabricInstaller.installServerChecked(destination, selection.minecraftVersion(), selection.forgeVersion());
+				} else {
+					Path installer = ForgeUtils.downloadForgeInstallerChecked(selection.forgeVersion());
+					publish("Installing Forge server files…");
+					ForgeUtils.installForgeServerChecked(installer, destination);
+				}
 				if(!ForgeUtils.hasServerStartupCommand(destination)) {
-					throw new IOException("Forge finished but no startup script was created.");
+					throw new IOException(selection.loader() + " finished but no startup command is available.");
 				}
 				return null;
 			}
@@ -764,7 +784,7 @@ public class MainFrame {
 	private void openKnownServer(String path) {
 		File candidate = new File(path);
 		if(!candidate.isDirectory() || !ForgeUtils.hasServerStartupCommand(candidate.toPath())) {
-			showError("Invalid server folder", "The selected folder does not contain a supported Forge startup script.");
+			showError("Invalid server folder", "The selected folder does not contain a supported Forge or Fabric server.");
 			return;
 		}
 		if(serverOpenedDirectory != null
@@ -786,6 +806,7 @@ public class MainFrame {
 		rememberRecentServer(candidate);
 		openServerOptions(contentPane);
 		showDashboardPage(MinecraftDashboard.Page.OVERVIEW);
+		appendDashboardActivity(LoaderKind.detect(candidate.toPath()).displayName() + " server opened: " + candidate.getName());
 	}
 
 	private void rememberRecentServer(File serverDirectory) {
@@ -838,10 +859,17 @@ public class MainFrame {
 			}
 
 				try {
+					activeHostLockRepo = null;
 					if(isGitHubSelected()) {
 						if(!TokenStore.sessionIsOpened()) {
 							syncState = "AUTH REQUIRED";
 							setDashboardFailure("Sign into GitHub before starting this protected world.");
+							return;
+						}
+						// El lock de GitHub arbitra el hosting por internet; el discovery UDP de
+						// arriba solo ve peers dentro de la misma LAN virtual
+						if(GitUtils.hasRemoteOrigin(serverOpenedDirectory.toPath())
+								&& !acquireHostLockForStart(GitUtils.remoteRepoFullName(serverOpenedDirectory.toPath()))) {
 							return;
 						}
 						setDashboardPhase(Phase.SYNCING, "Confirming the automatic private GitHub backup");
@@ -855,6 +883,11 @@ public class MainFrame {
 						syncState = "UP TO DATE";
 						lastSync = setup.alreadyLinked() ? "PUSH CONFIRMED" : "INITIAL PUSH";
 						appendDashboardActivity(setup.message());
+						// Server recién vinculado: el repo no existía al comprobar el lock arriba
+						if(activeHostLockRepo == null
+								&& !acquireHostLockForStart(GitUtils.remoteRepoFullName(serverOpenedDirectory.toPath()))) {
+							return;
+						}
 					}
 					if(isGitHubSelected() && GitUtils.repoExistInPath(serverOpenedDirectory.toPath())) {
 					setDashboardPhase(Phase.SYNCING, "Pulling the latest confirmed world from GitHub");
@@ -1108,7 +1141,7 @@ public class MainFrame {
 	}
 
 	/** Keeps activity-log mutations on Swing's event-dispatch thread. */
-	private void appendDashboardActivity(String message) {
+	public void appendDashboardActivity(String message) {
 		if(dashboard == null) return;
 		Runnable update = () -> dashboard.appendActivity(activityLine(message));
 		if(SwingUtilities.isEventDispatchThread()) update.run();
@@ -1251,8 +1284,8 @@ public class MainFrame {
 		configDialog.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
 		
 		//Array for the autoSaveSelect
-		String[] autoSaveIntervalsTexts = { "5 mins", "10 mins", "30 mins", "1 h", "2 h" };
-		int[] autoSaveIntervalsInts = { 5 * 60, 10 * 60, 30 * 60, 1 * 60 * 60, 2 * 60 * 60 };
+		String[] autoSaveIntervalsTexts = { "Off", "5 mins", "10 mins", "30 mins", "1 h", "2 h" };
+		int[] autoSaveIntervalsInts = { 0, 5 * 60, 10 * 60, 30 * 60, 1 * 60 * 60, 2 * 60 * 60 };
 		
 		JPanel contentPane = new JPanel(new GridLayout(8, 1));
 		JPanel buttonsPane = new JPanel(new FlowLayout(FlowLayout.RIGHT));
@@ -1269,10 +1302,9 @@ public class MainFrame {
 		
 		JLabel autoSaveIntervalLabel = new JLabel("Intervalo del autoguardado");
 		JComboBox<String> autoSaveIntervalSelect = new JComboBox<String>(autoSaveIntervalsTexts);
-		autoSaveIntervalLabel.setVisible(false);
-		autoSaveIntervalSelect.setVisible(false);
-		
-		autoSaveIntervalSelect.setSelectedIndex(Arrays.binarySearch(autoSaveIntervalsInts, GitUtils.getSavedAutoSaveInteval()));
+
+		int savedIntervalIndex = Arrays.binarySearch(autoSaveIntervalsInts, GitUtils.getSavedAutoSaveInteval());
+		autoSaveIntervalSelect.setSelectedIndex(savedIntervalIndex >= 0 ? savedIntervalIndex : 2 /* 10 mins */);
 		JButton saveBtn = new JButton("Save");
 		
 		contentPane.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
@@ -1406,7 +1438,8 @@ public class MainFrame {
 		frame.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
 		setDashboardPhase(Phase.STOPPING, "Waiting for Forge to save and close the world");
 		appendDashboardActivity("Stop requested; waiting for the Forge process");
-		GitUtils.serverAutoSaveIsActive = false;
+		stopHostLockHeartbeat();
+		GitUtils.stopAutoSaveAndWait();
 		ForgeUtils.sendCommand("/stop", serverProcess, serverWriter);
 		new Thread(() ->{
 			try {
@@ -1436,6 +1469,17 @@ public class MainFrame {
 								+ "\n\nThe local changes are preserved; use RETRY PRIVATE BACKUP.",
 						"Git backup error", JOptionPane.ERROR_MESSAGE));
 			}
+			if(isGitHubSelected() && TokenStore.sessionIsOpened() && serverOpenedDirectory != null) {
+				String lockRepo = GitUtils.remoteRepoFullName(serverOpenedDirectory.toPath());
+				if(lockRepo != null) {
+					// El commit final de guardado invalida el healthcheck: se libera al instante,
+					// sin esperar la caducidad del lease
+					if(HostLock.release(lockRepo)) appendDashboardActivity("GitHub host lock released; the world is free to host");
+					else appendDashboardActivity("The host lock could not be released; it will expire on its own within "
+							+ (HostLock.DEFAULT_LEASE_SECONDS / 60) + " minutes");
+				}
+			}
+			activeHostLockRepo = null;
 			if(cloudProvider != null && cloudProvider.getProviderName().equals(cloudProviderInUse) && cloudProvider.isSessionOpened()) {
 				if(cloudProvider.hasRemoteServerFolder()) {
 					ZipUtils.createZip(serverOpenedDirectory.toPath(), ZipUtils.BACKUPS_ZIPS_FOLDER);
@@ -1464,8 +1508,58 @@ public class MainFrame {
 				if(backupSucceeded) refreshNetworkAsync();
 			});
 			SwingUtilities.invokeLater(() -> frame.setCursor(Cursor.getDefaultCursor()));
-			
+
 		}, "p2pmss-dashboard-stop").start();
+	}
+
+	private boolean acquireHostLockForStart(String repoFullName) {
+		if(repoFullName == null) return true;
+		setDashboardPhase(Phase.DISCOVERING, "Arbitrating the GitHub host lock");
+		HostLock.AcquireResult lock = HostLock.acquire(repoFullName);
+		if(lock.acquired()) {
+			activeHostLockRepo = repoFullName;
+			appendDashboardActivity(lock.message());
+			return true;
+		}
+		if(lock.blockedByPeer()) {
+			setDashboardPhase(Phase.REMOTE_HOST, lock.message());
+			SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(frame, lock.message(),
+					"Another peer is hosting", JOptionPane.INFORMATION_MESSAGE));
+		} else {
+			setDashboardFailure(lock.message());
+		}
+		return false;
+	}
+
+	/** Started from the console "Done" hook: host lock heartbeat plus the live world autosave. */
+	public void startHostServices() {
+		String repoFullName = activeHostLockRepo;
+		if(repoFullName != null) {
+			stopHostLockHeartbeat();
+			hostLockHeartbeatTimer = new java.util.Timer("p2pmss-host-lock-heartbeat", true);
+			hostLockHeartbeatTimer.scheduleAtFixedRate(new java.util.TimerTask() {
+				@Override public void run() {
+					if(!serverIsOn || serverProcess == null || !serverProcess.isAlive()) {
+						// Forge murió solo: sin server no se sostiene el lease; caducará y otro podrá hostear
+						stopHostLockHeartbeat();
+						return;
+					}
+					if(HostLock.heartbeat(repoFullName)) appendDashboardActivity("Host lock heartbeat confirmed on GitHub");
+					else appendDashboardActivity("Host lock heartbeat failed; the lease may expire in "
+							+ (HostLock.DEFAULT_LEASE_SECONDS / 60) + " minutes");
+				}
+			}, HostLock.HEARTBEAT_SECONDS * 1000L, HostLock.HEARTBEAT_SECONDS * 1000L);
+		}
+		if(GitUtils.autoSaveSecondsInterval > 0 && isGitHubSelected() && TokenStore.sessionIsOpened()) {
+			GitUtils.activeAutoSave();
+		}
+	}
+
+	private static void stopHostLockHeartbeat() {
+		if(hostLockHeartbeatTimer != null) {
+			hostLockHeartbeatTimer.cancel();
+			hostLockHeartbeatTimer = null;
+		}
 	}
 
 }

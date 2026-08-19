@@ -20,6 +20,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.swing.JOptionPane;
 
@@ -49,14 +51,14 @@ import view.MainFrame;
 public class GitUtils {
 
 	public static volatile boolean serverAutoSaveIsActive = false;
-	public static int autoSaveSecondsInterval = 5/*minutes*/ * 60; // 5 minutes by default.
+	public static int autoSaveSecondsInterval = 10/*minutes*/ * 60; // Default 10 min: pierde poco y no infla el repo.
 	public static Thread autoSaveProcess = null; //By default.
 
 	public static final Path JOINED_REPOS = Path.of("data/joined_repos.properties");
 	private static final String GITHUB_API_PROPERTY = "p2pmss.githubApiBase";
-	private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
-	private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder().connectTimeout(REQUEST_TIMEOUT).build();
-	private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
+	static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
+	static final HttpClient HTTP_CLIENT = HttpClient.newBuilder().connectTimeout(REQUEST_TIMEOUT).build();
+	static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 	private static final String BACKUP_IGNORE_START = "# BEGIN P2PMSS MANAGED BACKUP EXCLUDES";
 	private static final String BACKUP_IGNORE_END = "# END P2PMSS MANAGED BACKUP EXCLUDES";
 	private static final List<String> BACKUP_IGNORE_LINES = List.of(
@@ -242,6 +244,22 @@ public class GitUtils {
 		} catch (IOException e) {
 			return false;
 		}
+	}
+
+	/** Resolves "owner/repo" from the origin URL, or null when the server is not linked. */
+	public static String remoteRepoFullName(Path repoDirectory) {
+		try (Git git = Git.open(repoDirectory.toFile())) {
+			return parseRepoFullName(git.getRepository().getConfig().getString("remote", "origin", "url"));
+		} catch (IOException e) {
+			return null;
+		}
+	}
+
+	static String parseRepoFullName(String originUrl) {
+		if(originUrl == null || originUrl.isBlank()) return null;
+		Matcher matcher = Pattern.compile("github\\.com[:/]([^/:]+)/([^/:]+?)(?:\\.git)?/?$").matcher(originUrl.trim());
+		if(!matcher.find()) return null;
+		return matcher.group(1) + "/" + matcher.group(2);
 	}
 
 	public static void removeRemoteOrigin(Path repoDirectory) {
@@ -794,7 +812,7 @@ public class GitUtils {
 	}
 	
 	public static void saveAutoSaveInterval(int seconds) {
-		if(seconds < 2 * 60) throw new RuntimeException("Autosave interval can not be lower than 2 minutes");
+		if(seconds != 0 && seconds < 2 * 60) throw new RuntimeException("Autosave interval can not be lower than 2 minutes");
 		
 		Path networkNamePath = Path.of("data/networkName.properties");
 		if(!(Files.exists(networkNamePath))) return;
@@ -834,31 +852,70 @@ public class GitUtils {
 		return autoSaveSecondsInterval;
 	}
 	
+	/** Serializes live saves against the stop backup so both never commit at once. */
+	private static final Object LIVE_SAVE_MUTEX = new Object();
+	static long saveConfirmationTimeoutSeconds = 60;
+
 	public static void activeAutoSave() {
-		//All will be or null/false or notNull/true at the same time, but like this is more compressible the conditional.
+		if(serverAutoSaveIsActive) return;
+		if(autoSaveSecondsInterval <= 0) return;
 		if(MainFrame.serverIsOn && MainFrame.serverProcess != null && MainFrame.serverWriter != null) {
 			autoSaveProcess = new Thread(() -> {
 				serverAutoSaveIsActive = true;
-				while(serverAutoSaveIsActive) {
+				// El arranque acaba de pushear el mundo al día: el primer guardado espera un intervalo entero
+				while(serverAutoSaveIsActive && MainFrame.serverProcess != null && MainFrame.serverProcess.isAlive()) {
 					try {
-						ForgeUtils.sendCommand("/save-off", MainFrame.serverProcess, MainFrame.serverWriter);
-						ForgeUtils.sendCommand("/save-all flush", MainFrame.serverProcess, MainFrame.serverWriter);
-						ForgeUtils.sendCommand("/say Saving world, creating backup...", MainFrame.serverProcess, MainFrame.serverWriter);
-						//Esto al ser de git lo podrías ignorar y pensar en meter aquí la subida de el google drive...
-						if(!autoCommitAndPush()) {
-							serverAutoSaveIsActive = false;
-						}
-						ForgeUtils.sendCommand("/save-on", MainFrame.serverProcess, MainFrame.serverWriter);
-						Thread.sleep(autoSaveSecondsInterval * 1000);
+						Thread.sleep(autoSaveSecondsInterval * 1000L);
 					} catch (InterruptedException e) {
-						e.printStackTrace();
+						Thread.currentThread().interrupt();
+						break;
 					}
+					if(!serverAutoSaveIsActive || MainFrame.serverProcess == null || !MainFrame.serverProcess.isAlive()) break;
+					performLiveSave();
 				}
-				autoSaveProcess.interrupt();
-			});
-			
+				serverAutoSaveIsActive = false;
+			}, "p2pmss-live-autosave");
+			autoSaveProcess.setDaemon(true);
 			autoSaveProcess.start();
 		}
+	}
+
+	/**
+	 * One hot snapshot: freeze writes, flush, wait for the server's own "Saved the
+	 * game" confirmation, commit the whole server tree, and ALWAYS re-enable
+	 * saving. A failed push retries on the next tick instead of killing the loop
+	 * (transient antivirus/network hiccups must not disable live protection).
+	 */
+	static void performLiveSave() {
+		synchronized(LIVE_SAVE_MUTEX) {
+			boolean pushed = false;
+			try {
+				ForgeUtils.sendCommand("/save-off", MainFrame.serverProcess, MainFrame.serverWriter);
+				boolean flushed = ForgeUtils.flushWorldToDisk(MainFrame.serverProcess, MainFrame.serverWriter,
+						saveConfirmationTimeoutSeconds);
+				if(flushed) {
+					ForgeUtils.sendCommand("/say Saving world, creating backup...", MainFrame.serverProcess, MainFrame.serverWriter);
+					pushed = autoCommitAndPush();
+				}
+			} finally {
+				// Pase lo que pase, el server recupera su guardado normal
+				ForgeUtils.sendCommand("/save-on", MainFrame.serverProcess, MainFrame.serverWriter);
+			}
+			if(MainFrame.window != null) {
+				MainFrame.window.appendDashboardActivity(pushed
+						? "Live world backup confirmed on GitHub"
+						: "Live world backup could not be confirmed; retrying on the next interval");
+			}
+		}
+	}
+
+	/** Stops the autosave loop and waits for any in-flight snapshot before the stop backup runs. */
+	public static void stopAutoSaveAndWait() {
+		serverAutoSaveIsActive = false;
+		Thread process = autoSaveProcess;
+		if(process != null) process.interrupt();
+		synchronized(LIVE_SAVE_MUTEX) { /* espera al lote en vuelo */ }
+		autoSaveProcess = null;
 	}
 	
 	public static Boolean isRemoteRepoHeadFordward(Path repoPath) {
@@ -912,7 +969,7 @@ public class GitUtils {
 		return false;
 	}
 
-	private static HttpRequest.Builder authenticatedRequest(String url, String token) {
+	static HttpRequest.Builder authenticatedRequest(String url, String token) {
 		return HttpRequest.newBuilder()
 				.uri(URI.create(url))
 				.timeout(REQUEST_TIMEOUT)
@@ -922,7 +979,7 @@ public class GitUtils {
 				.header("X-GitHub-Api-Version", "2022-11-28");
 	}
 
-	private static String githubApiBase() {
+	static String githubApiBase() {
 		String base = System.getProperty(GITHUB_API_PROPERTY, "https://api.github.com");
 		return base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
 	}
@@ -931,7 +988,7 @@ public class GitUtils {
 		return Path.of(System.getProperty("p2pmss.dataDirectory", "data")).resolve("joined_repos.properties");
 	}
 
-	private static String encodePathSegment(String value) {
+	static String encodePathSegment(String value) {
 		return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
 	}
 

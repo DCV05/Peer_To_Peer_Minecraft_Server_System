@@ -1,6 +1,7 @@
 view/dashboard/ForgeVersionWizard$1.class
 view/dashboard/MinecraftDashboard.class
 jgit/GitUtils$1.class
+minecraftServerManagement/LoaderKind.class
 jgit/GitBackupPreflight$FileEntry.class
 view/dashboard/ForgeVersionWizard.class
 jgit/GitBackupPreflight$UnreadableBackupFile.class
@@ -15,15 +16,19 @@ minecraftServerManagement/PlayerPresenceTracker.class
 cloud/google/GoogleDriveCloudProvider.class
 view/MainFrame$1.class
 view/dashboard/MinecraftDashboard$ServerEntry.class
+minecraftServerManagement/FabricInstaller.class
 view/dashboard/ForgeVersionWizard$VersionCatalog.class
 view/dashboard/DashboardDialogSupport.class
+jgit/HostLock$AcquireResult.class
 view/dashboard/MinecraftDashboard$State.class
 view/dashboard/MinecraftDashboard$MetricCard.class
 view/GitWindows.class
 jgit/TokenStore.class
+jgit/HostLock$Heartbeat.class
 vpn/DiscoveryResponder.class
 cloud/ZipUtils.class
 view/dashboard/MinecraftDashboard$SettingsDraft.class
+view/MainFrame$5.class
 vpn/NetworkDiscoverClient$DiscoveryResult.class
 jgit/GitUtils$3.class
 minecraftServerManagement/WorldImportService$ImportResult.class
@@ -51,5 +56,8 @@ minecraftServerManagement/ForgeUtils.class
 jgit/GitBackupPreflight.class
 jgit/GitBackupPreflight$1.class
 cloud/CloudStorageProvider.class
+jgit/HostLock.class
 view/dashboard/DashboardTheme$ButtonKind.class
+minecraftServerManagement/FabricInstaller$Catalog.class
+jgit/HostLock$Status.class
 view/dashboard/ForgeVersionWizard$CatalogLoader.class

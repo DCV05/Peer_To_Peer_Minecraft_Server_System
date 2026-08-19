@@ -32,23 +32,29 @@ import java.util.function.Consumer;
  * delegated to background workers by the controller so Swing never freezes.
  */
 public final class ForgeVersionWizard extends JPanel {
-    public record VersionCatalog(List<String> minecraftVersions, List<String> forgeVersions) {
+    /** Builds keyed by Minecraft version, or shared across all of them (Fabric loaders). */
+    public record VersionCatalog(List<String> minecraftVersions, List<String> forgeVersions, boolean sharedBuilds) {
         public VersionCatalog {
             minecraftVersions = minecraftVersions == null ? List.of() : List.copyOf(minecraftVersions);
             forgeVersions = forgeVersions == null ? List.of() : List.copyOf(forgeVersions);
         }
+
+        public VersionCatalog(List<String> minecraftVersions, List<String> forgeVersions) {
+            this(minecraftVersions, forgeVersions, false);
+        }
     }
 
-    public record Selection(String minecraftVersion, String forgeVersion) {}
+    public record Selection(String loader, String minecraftVersion, String forgeVersion) {}
 
     @FunctionalInterface
     public interface CatalogLoader {
-        VersionCatalog load() throws Exception;
+        VersionCatalog load(String loader) throws Exception;
     }
 
     private static final String MINECRAFT_PLACEHOLDER = "Select Minecraft version";
-    private static final String FORGE_PLACEHOLDER = "Select Forge build";
+    private static final String FORGE_PLACEHOLDER = "Select build";
 
+    private final JComboBox<String> loaderSelect = new JComboBox<>(new String[] { "Forge", "Fabric" });
     private final JComboBox<String> minecraftSelect = new JComboBox<>();
     private final JComboBox<String> forgeSelect = new JComboBox<>();
     private final JLabel statusLabel = DashboardTheme.label("Loading Forge catalogue…", DashboardTheme.TEXT_MUTED, 11, Font.PLAIN);
@@ -60,6 +66,7 @@ public final class ForgeVersionWizard extends JPanel {
     private final Map<String, List<String>> forgeByMinecraft = new LinkedHashMap<>();
     private final Consumer<Selection> installAction;
     private Runnable primaryAction;
+    private CatalogLoader catalogLoader;
 
     public ForgeVersionWizard(Path destination, Consumer<Selection> installAction, Runnable cancelAction) {
         this.installAction = Objects.requireNonNull(installAction, "installAction");
@@ -82,9 +89,9 @@ public final class ForgeVersionWizard extends JPanel {
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
 
         stepLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        JLabel title = DashboardTheme.label("Create Forge server", DashboardTheme.TEXT, 26, Font.PLAIN);
+        JLabel title = DashboardTheme.label("Create Minecraft server", DashboardTheme.TEXT, 26, Font.PLAIN);
         title.setAlignmentX(Component.LEFT_ALIGNMENT);
-        JLabel subtitle = DashboardTheme.label("Choose a compatible pair. Installation runs in the background.", DashboardTheme.TEXT_MUTED, 11, Font.PLAIN);
+        JLabel subtitle = DashboardTheme.label("Choose a loader and a compatible pair. Installation runs in the background.", DashboardTheme.TEXT_MUTED, 11, Font.PLAIN);
         subtitle.setAlignmentX(Component.LEFT_ALIGNMENT);
         body.add(stepLabel);
         body.add(Box.createVerticalStrut(9));
@@ -108,13 +115,17 @@ public final class ForgeVersionWizard extends JPanel {
         selectors.setOpaque(false);
         GridBagConstraints constraints = new GridBagConstraints();
         constraints.gridy = 0;
-        constraints.weightx = 0.5;
+        constraints.weightx = 0.34;
         constraints.fill = GridBagConstraints.HORIZONTAL;
         constraints.insets = new Insets(0, 0, 0, 7);
-        selectors.add(field("MINECRAFT VERSION", minecraftSelect, "Filters compatible Forge builds"), constraints);
+        selectors.add(field("SERVER TYPE", loaderSelect, "Forge for mods, Fabric is lighter"), constraints);
         constraints.gridx = 1;
+        constraints.weightx = 0.33;
+        constraints.insets = new Insets(0, 7, 0, 7);
+        selectors.add(field("MINECRAFT VERSION", minecraftSelect, "Filters compatible builds"), constraints);
+        constraints.gridx = 2;
         constraints.insets = new Insets(0, 7, 0, 0);
-        selectors.add(field("FORGE BUILD", forgeSelect, "Exact installer version"), constraints);
+        selectors.add(field("LOADER BUILD", forgeSelect, "Forge installer or Fabric loader"), constraints);
         selectors.setAlignmentX(Component.LEFT_ALIGNMENT);
         selectors.setMaximumSize(new Dimension(Integer.MAX_VALUE, 105));
         body.add(selectors);
@@ -173,6 +184,7 @@ public final class ForgeVersionWizard extends JPanel {
     }
 
     private void configureSelectors() {
+        loaderSelect.addActionListener(event -> reloadCatalogForSelectedLoader());
         minecraftSelect.addActionListener(event -> populateForgeVersions());
         forgeSelect.addActionListener(event -> updateInstallAvailability());
         primaryAction = () -> {
@@ -182,15 +194,23 @@ public final class ForgeVersionWizard extends JPanel {
     }
 
     public void loadCatalog(CatalogLoader loader) {
-        setBusy(true, "Loading available Minecraft and Forge versions…");
+        catalogLoader = loader;
+        reloadCatalogForSelectedLoader();
+    }
+
+    private void reloadCatalogForSelectedLoader() {
+        if(catalogLoader == null) return;
+        String loader = selectedLoader();
+        setBusy(true, "Loading available Minecraft and " + loader + " versions…");
         new SwingWorker<VersionCatalog, Void>() {
             @Override protected VersionCatalog doInBackground() throws Exception {
-                return loader.load();
+                return catalogLoader.load(loader);
             }
 
             @Override protected void done() {
                 try {
-                    applyCatalog(get());
+                    // Un cambio de loader durante la carga invalida este resultado
+                    if(loader.equals(selectedLoader())) applyCatalog(get());
                 } catch(Exception failure) {
                     showError(rootMessage(failure));
                 }
@@ -204,7 +224,12 @@ public final class ForgeVersionWizard extends JPanel {
             if(minecraft != null && !minecraft.startsWith("Select ")) forgeByMinecraft.putIfAbsent(minecraft, new ArrayList<>());
         }
         for(String forge : catalog.forgeVersions()) {
-            if(forge == null || !forge.contains("-")) continue;
+            if(forge == null) continue;
+            if(catalog.sharedBuilds()) {
+                for(List<String> builds : forgeByMinecraft.values()) builds.add(forge);
+                continue;
+            }
+            if(!forge.contains("-")) continue;
             String minecraft = forge.substring(0, forge.indexOf('-'));
             forgeByMinecraft.computeIfAbsent(minecraft, ignored -> new ArrayList<>()).add(forge);
         }
@@ -228,7 +253,7 @@ public final class ForgeVersionWizard extends JPanel {
             Collections.reverse(versions);
             versions.forEach(forgeSelect::addItem);
             forgeSelect.setEnabled(true);
-            statusLabel.setText(versions.size() + " compatible Forge builds");
+            statusLabel.setText(versions.size() + " compatible " + selectedLoader() + " builds");
         } else {
             forgeSelect.setEnabled(false);
         }
@@ -243,10 +268,16 @@ public final class ForgeVersionWizard extends JPanel {
         Object minecraft = minecraftSelect.getSelectedItem();
         Object forge = forgeSelect.getSelectedItem();
         if(minecraft == null || forge == null || MINECRAFT_PLACEHOLDER.equals(minecraft) || FORGE_PLACEHOLDER.equals(forge)) return null;
-        return new Selection(minecraft.toString(), forge.toString());
+        return new Selection(selectedLoader(), minecraft.toString(), forge.toString());
+    }
+
+    public String selectedLoader() {
+        Object loader = loaderSelect.getSelectedItem();
+        return loader == null ? "Forge" : loader.toString();
     }
 
     public void setBusy(boolean busy, String message) {
+        loaderSelect.setEnabled(!busy);
         minecraftSelect.setEnabled(!busy && minecraftSelect.getItemCount() > 1);
         forgeSelect.setEnabled(!busy && minecraftSelect.getSelectedIndex() > 0);
         cancelButton.setEnabled(!busy);
@@ -264,12 +295,13 @@ public final class ForgeVersionWizard extends JPanel {
 
     public void showEulaStep(Runnable viewEula, Runnable acceptEula) {
         stepLabel.setText("STEP 2 OF 2 · MINECRAFT EULA");
+        loaderSelect.setEnabled(false);
         minecraftSelect.setEnabled(false);
         forgeSelect.setEnabled(false);
         progress.setVisible(false);
         progress.setIndeterminate(false);
         statusLabel.setForeground(DashboardTheme.GREEN);
-        statusLabel.setText("Forge is installed. Review and explicitly accept the Minecraft EULA to open it.");
+        statusLabel.setText(selectedLoader() + " is installed. Review and explicitly accept the Minecraft EULA to open it.");
         secondaryButton.setVisible(true);
         for(var listener : secondaryButton.getActionListeners()) secondaryButton.removeActionListener(listener);
         secondaryButton.addActionListener(event -> viewEula.run());
@@ -281,6 +313,7 @@ public final class ForgeVersionWizard extends JPanel {
         repaint();
     }
 
+    JComboBox<String> loaderSelect() { return loaderSelect; }
     JComboBox<String> minecraftSelect() { return minecraftSelect; }
     JComboBox<String> forgeSelect() { return forgeSelect; }
     JButton primaryButton() { return primaryButton; }

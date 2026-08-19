@@ -313,12 +313,14 @@ public class ForgeUtils {
 		             } catch(RuntimeException observerFailure) {
 						observerFailure.printStackTrace();
 		             }
+		             noteConsoleLine(finalLine);
 		             if(finalLine.contains("> \\")) CustomCommands.processCustomCommand(finalLine);
 		             if(finalLine.contains("Done")) {
 						MainFrame.responder = new DiscoveryResponder(MainFrame.networkName,
 								() -> MainFrame.window == null ? "" : MainFrame.window.playerDiscoveryPayload())
 								.listenAsync(MainFrame.actualServerPort);
 		                	MainFrame.window.checkServerStatus();
+		                	MainFrame.window.startHostServices();
 		                	
 							if(ZipUtils.existsDirectory(GeneralConfigurationsWindows.USER_OPS_PATH)) {
 								for(String nickname : ZipUtils.getDataFromPropertiesFile("userOps", GeneralConfigurationsWindows.USER_OPS_PATH).split(", ")) {
@@ -338,6 +340,34 @@ public class ForgeUtils {
 		return consoleThread;
 	}
 	
+	private static volatile java.util.concurrent.CountDownLatch savedTheGameLatch = null;
+
+	/** Feeds console lines to whoever is waiting for a save confirmation. */
+	public static void noteConsoleLine(String line) {
+		java.util.concurrent.CountDownLatch latch = savedTheGameLatch;
+		if(latch != null && line != null && line.contains("Saved the game")) latch.countDown();
+	}
+
+	/**
+	 * Sends "/save-all flush" and blocks until the server prints "Saved the game"
+	 * (or the timeout expires). Committing before that confirmation copies region
+	 * files mid-write and produces a corrupt snapshot — the reason naive live
+	 * backups appear to "not work".
+	 */
+	public static boolean flushWorldToDisk(Process serverProcess, BufferedWriter serverWriter, long timeoutSeconds) {
+		java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+		savedTheGameLatch = latch;
+		try {
+			sendCommand("/save-all flush", serverProcess, serverWriter);
+			return latch.await(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS);
+		} catch(InterruptedException e) {
+			Thread.currentThread().interrupt();
+			return false;
+		} finally {
+			savedTheGameLatch = null;
+		}
+	}
+
 	public static BufferedWriter configureServerWriter(Process serverProcess, BufferedWriter serverWriter) {
 		serverWriter = new BufferedWriter(new OutputStreamWriter(serverProcess.getOutputStream()));
 		return serverWriter;

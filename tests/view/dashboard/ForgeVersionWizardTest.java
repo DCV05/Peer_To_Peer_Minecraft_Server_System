@@ -41,7 +41,38 @@ class ForgeVersionWizardTest {
             wizard.primaryButton().doClick();
         });
         assertNotNull(installed.get());
+        assertEquals("Forge", installed.get().loader());
         assertEquals("1.20.1", installed.get().minecraftVersion());
         assertEquals("1.20.1-47.3.0", installed.get().forgeVersion());
+    }
+
+    @Test
+    void sharedBuildsCatalogOffersEveryLoaderForEveryMinecraftVersion() throws Exception {
+        AtomicReference<ForgeVersionWizard.Selection> installed = new AtomicReference<>();
+        AtomicReference<ForgeVersionWizard> reference = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() -> {
+            ForgeVersionWizard wizard = new ForgeVersionWizard(Path.of("/tmp/server"), installed::set, () -> {});
+            wizard.loaderSelect().setSelectedItem("Fabric");
+            // Listas viejo-primero: el wizard las invierte para mostrar lo nuevo arriba
+            wizard.applyCatalog(new ForgeVersionWizard.VersionCatalog(
+                    List.of("1.20.6", "1.21.1"),
+                    List.of("0.16.13", "0.16.14"),
+                    true));
+            reference.set(wizard);
+        });
+
+        ForgeVersionWizard wizard = reference.get();
+        SwingUtilities.invokeAndWait(() -> {
+            wizard.minecraftSelect().setSelectedItem("1.21.1");
+            // Placeholder + los dos loaders compartidos, el mas nuevo primero
+            assertEquals(3, wizard.forgeSelect().getItemCount());
+            assertEquals("0.16.14", wizard.forgeSelect().getItemAt(1));
+            wizard.forgeSelect().setSelectedItem("0.16.14");
+            wizard.primaryButton().doClick();
+        });
+        assertNotNull(installed.get());
+        assertEquals("Fabric", installed.get().loader());
+        assertEquals("1.21.1", installed.get().minecraftVersion());
+        assertEquals("0.16.14", installed.get().forgeVersion());
     }
 }
