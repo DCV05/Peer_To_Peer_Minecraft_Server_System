@@ -104,6 +104,7 @@ jobs:
           VERSION: ${{ steps.tag.outputs.version }}
         run: |
           jpackage --type dmg --name P2PMSS --app-version "$VERSION" \
+            --icon packaging/P2PMSS.icns \
             --input stage --main-jar P2PMSS.jar --main-class view.MainFrame --dest dist
           for built in dist/*.dmg; do
             [ "$built" = "dist/P2PMSS-$VERSION.dmg" ] || mv "$built" "dist/P2PMSS-$VERSION.dmg"
@@ -119,6 +120,7 @@ jobs:
           # mismo directorio: los accesos directos sobreviven a las actualizaciones
           jpackage --type exe --name P2PMSS --app-version "$VERSION" \
             --vendor P2PMSS --win-upgrade-uuid 61CF6467-CAD1-4F24-B033-3BD205D8D7CE \
+            --icon packaging/P2PMSS.ico \
             --input stage --main-jar P2PMSS.jar --main-class view.MainFrame \
             --win-shortcut --win-menu --win-per-user-install --dest dist
           for built in dist/*.exe; do
