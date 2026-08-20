@@ -610,6 +610,9 @@ public class MainFrame {
 					else ForgeUtils.sendCommand(command, serverProcess, serverWriter);
 				}
 			}
+			@Override public void openWorldMap() {
+				ForgeUtils.openURL("http://localhost:8100");
+			}
 		});
 	}
 
@@ -741,8 +744,20 @@ public class MainFrame {
 		PlayitAgentFile playitAgent = loaded ? PlayitAgentFile.load(serverOpenedDirectory.toPath()) : null;
 		dashboard.showPublicUrl(playitAgent != null && playitAgent.enabled,
 				playitAgent == null ? null : playitAgent.tunnel_address);
+		dashboard.showWorldMap(loaded && blueMapInstalled(serverOpenedDirectory.toPath()), serverIsOn);
 		turnOnOffBtn = dashboard.primaryActionButton();
 		consoleArea = dashboard.consoleArea();
+	}
+
+	/** True when a BlueMap jar is present in the server's mods folder. */
+	private static boolean blueMapInstalled(Path serverDirectory) {
+		File[] mods = serverDirectory.resolve("mods").toFile().listFiles();
+		if(mods == null) return false;
+		for(File mod : mods) {
+			String name = mod.getName().toLowerCase();
+			if(name.startsWith("bluemap") && name.endsWith(".jar")) return true;
+		}
+		return false;
 	}
 
 	private List<MinecraftDashboard.ServerEntry> readRecentServers() {

@@ -207,6 +207,7 @@ public final class MinecraftDashboard extends JPanel {
         default void showInvitations() {}
         default void inviteHost() {}
         default void sendCommand(String command) {}
+        default void openWorldMap() {}
     }
 
     private final Actions actions;
@@ -256,6 +257,8 @@ public final class MinecraftDashboard extends JPanel {
     private final JLabel publicUrlValue = DashboardTheme.label("—", TEXT_MUTED, 11, Font.PLAIN);
     private final JButton copyPublicUrlButton = new JButton("COPY URL");
     private volatile String publicUrlAddress = null;
+    private final JButton viewMapButton = new JButton("VIEW MAP");
+    private final JLabel worldMapStatus = DashboardTheme.label("Install the BlueMap mod on this server to get a live 3D map.", TEXT_MUTED, 11, Font.PLAIN);
 
     private final JTextArea consoleArea = new JTextArea();
     private final JTextArea consolePreview = new JTextArea();
@@ -393,6 +396,21 @@ public final class MinecraftDashboard extends JPanel {
                              : "Enabled — authorize playit in the browser or start the server to get the address");
         publicUrlValue.setForeground(enabled && hasAddress ? GREEN : TEXT_MUTED);
         copyPublicUrlButton.setVisible(enabled && hasAddress);
+    }
+
+    /** Live BlueMap section on the overview: the button only activates while the server is online. */
+    public void showWorldMap(boolean installed, boolean serverOnline) {
+        if(!installed) {
+            worldMapStatus.setText("Install the BlueMap mod on this server to get a live 3D map.");
+            worldMapStatus.setForeground(TEXT_MUTED);
+        } else if(!serverOnline) {
+            worldMapStatus.setText("BlueMap ready — start the server to browse the live 3D map.");
+            worldMapStatus.setForeground(TEXT_MUTED);
+        } else {
+            worldMapStatus.setText("Live 3D map with real-time player positions.");
+            worldMapStatus.setForeground(GREEN);
+        }
+        viewMapButton.setEnabled(installed && serverOnline);
     }
 
     private void copyPublicUrlToClipboard() {
@@ -559,8 +577,34 @@ public final class MinecraftDashboard extends JPanel {
         middle.add(buildActivityPanel());
         page.add(middle);
         page.add(Box.createVerticalStrut(12));
+        page.add(buildWorldMapPanel());
+        page.add(Box.createVerticalStrut(12));
         page.add(buildConsolePreview());
         return page;
+    }
+
+    private JPanel buildWorldMapPanel() {
+        JPanel panel = sectionPanel();
+        panel.setLayout(new BorderLayout(20, 0));
+        JPanel copy = new JPanel();
+        copy.setOpaque(false);
+        copy.setLayout(new BoxLayout(copy, BoxLayout.Y_AXIS));
+        copy.add(DashboardTheme.eyebrow("WORLD MAP"));
+        copy.add(Box.createVerticalStrut(8));
+        worldMapStatus.setAlignmentX(Component.LEFT_ALIGNMENT);
+        copy.add(worldMapStatus);
+        panel.add(copy, BorderLayout.CENTER);
+
+        JPanel action = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 8));
+        action.setOpaque(false);
+        DashboardTheme.styleButton(viewMapButton, DashboardTheme.ButtonKind.SECONDARY);
+        viewMapButton.setEnabled(false);
+        viewMapButton.addActionListener(event -> actions.openWorldMap());
+        action.add(viewMapButton);
+        panel.add(action, BorderLayout.EAST);
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 88));
+        return panel;
     }
 
     private JPanel buildOnboardingPage() {
