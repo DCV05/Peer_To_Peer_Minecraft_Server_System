@@ -235,10 +235,15 @@ public final class GitBackupPreflight
 		String portable = portable( relativePath );
 		String first = relativePath.getName( 0 ).toString();
 		String fileName = relativePath.getFileName().toString();
+		// Espejo de los excludes managed del .gitignore (GitUtils.BACKUP_IGNORE_LINES):
+		// si un directorio no entra en el backup, TAMPOCO puede contar para el
+		// tope de tamano — el render de BlueMap solo ya pesa varios GiB por host
 		return ".git".equals( first )
 				|| "logs".equals( first )
 				|| "crash-reports".equals( first )
 				|| "world-import-backups".equals( first )
+				|| "bluemap".equals( first )
+				|| ".fabric".equals( first )
 				|| first.startsWith( ".p2pmss-import-" )
 				|| ".DS_Store".equals( fileName )
 				|| "session.lock".equals( fileName )

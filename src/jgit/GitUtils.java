@@ -202,15 +202,6 @@ public final class GitUtils
 				break;
 			}
 
-			// El preflight va ANTES de crear nada remoto: un mundo con un fichero de
-			// mas de 100 MiB no debe dejar un repositorio vacio tirado en la cuenta
-			GitBackupPreflight.Result preflight = GitBackupPreflight.inspect( repoDirectory );
-			if( !preflight.safe() )
-			{
-				result = PrivateBackupSetupResult.failure( preflight.message() );
-				break;
-			}
-
 			Map<String, String> userData;
 			try
 			{
@@ -247,6 +238,17 @@ public final class GitUtils
 						? "Private GitHub backup is linked and remote state was confirmed."
 						: backup.message();
 				result = PrivateBackupSetupResult.alreadyLinked( confirmation );
+				break;
+			}
+
+			// El preflight va ANTES de crear nada remoto: un mundo con un fichero de
+			// mas de 100 MiB no debe dejar un repositorio vacio tirado en la cuenta.
+			// Solo se recorre el disco en el alta: en un repo ya enlazado el preflight
+			// lo hace commitAndPush y unicamente cuando hay cambios que subir
+			GitBackupPreflight.Result preflight = GitBackupPreflight.inspect( repoDirectory );
+			if( !preflight.safe() )
+			{
+				result = PrivateBackupSetupResult.failure( preflight.message() );
 				break;
 			}
 
@@ -1221,10 +1223,6 @@ public final class GitUtils
 		{
 			return new BackupPushResult( false, 0, "The backup exclusion file could not be updated." );
 		}
-		GitBackupPreflight.Result preflight = GitBackupPreflight.inspect( repoDirectory );
-		if( !preflight.safe() )
-			return new BackupPushResult( false, 0, preflight.message() );
-
 		Map<String, String> userdata;
 		try
 		{
@@ -1263,6 +1261,13 @@ public final class GitUtils
 			{
 				return new BackupPushResult( true, 0, "GitHub already has the latest confirmed world state." );
 			}
+
+			// El preflight recorre el disco entero (stat de cada fichero del mundo):
+			// solo se paga cuando de verdad hay algo que subir. Un arranque con el
+			// arbol limpio se ahorra el recorrido completo
+			GitBackupPreflight.Result preflight = GitBackupPreflight.inspect( repoDirectory );
+			if( !preflight.safe() )
+				return new BackupPushResult( false, 0, preflight.message() );
 
 			Map<String, GitBackupPreflight.FileEntry> existingFiles = new HashMap<>();
 			for( GitBackupPreflight.FileEntry file : preflight.files() )
@@ -1731,6 +1736,16 @@ public final class GitUtils
 	/** Solo hace pull con el árbol limpio: un merge sobre cambios locales podría perderlos. */
 	public static boolean pull( Path repoPath )
 	{
+		return pull( repoPath, false );
+	}
+
+	/**
+	 * Variante para llamadores que ACABAN de dejar el árbol limpio (un
+	 * commitAndPush confirmado): con {@code treeConfirmedClean} se ahorra el
+	 * status de JGit, que recorre el mundo entero y es caro justo al arrancar.
+	 */
+	public static boolean pull( Path repoPath, boolean treeConfirmedClean )
+	{
 		boolean result;
 		do
 		{
@@ -1750,7 +1765,8 @@ public final class GitUtils
 
 			try (Git git = Git.open( repoPath.toFile() ))
 			{
-				if( !git.status().call().isClean() || !hasRemoteOrigin( repoPath ) )
+				if( !hasRemoteOrigin( repoPath )
+						|| (!treeConfirmedClean && !git.status().call().isClean()) )
 				{
 					result = false;
 					break;

@@ -1399,8 +1399,10 @@ public final class MainFrame
 					setDashboardPhase( Phase.SYNCING, "Pulling the latest confirmed world from GitHub" );
 					syncState = "PULLING";
 					refreshDashboardState();
+					// El backup de arriba acaba de dejar el arbol limpio: el pull se salta
+					// su status (recorrido completo del mundo) para no pagar dos veces
 					if( !TokenStore.sessionIsOpened() || !GitUtils.hasRemoteOrigin( serverOpenedDirectory.toPath() )
-							|| !GitUtils.pull( serverOpenedDirectory.toPath() ) )
+							|| !GitUtils.pull( serverOpenedDirectory.toPath(), true ) )
 					{
 						syncState = "FAILED";
 						setDashboardFailure(

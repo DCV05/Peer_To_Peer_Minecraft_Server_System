@@ -399,7 +399,11 @@ public final class ForgeUtils
 			String serverJarName = getServerJarName( serverDirectory );
 			if( serverJarName == null )
 				break;
-			result = List.of( "java", getServerRAMAlloc( serverDirectory ), "-jar", serverJarName, "nogui" );
+			// -Xms igual al -Xmx: el heap arranca ya reservado y la carga inicial del
+			// mundo no encadena pausas de GC mientras la JVM lo va agrandando
+			String maximumHeap = getServerRAMAlloc( serverDirectory );
+			String initialHeap = maximumHeap.replaceFirst( "(?i)^-Xmx", "-Xms" );
+			result = List.of( "java", maximumHeap, initialHeap, "-jar", serverJarName, "nogui" );
 		} while( false );
 		return result;
 	}

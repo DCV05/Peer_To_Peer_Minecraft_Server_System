@@ -49,7 +49,7 @@ class ForgeUtilsTest
 		Files.writeString( server.resolve( "user_jvm_args.txt" ), "-Xmx2G\n" );
 
 		assertEquals(
-				List.of( "java", "-Xmx2G", "-jar", "forge-legacy.jar", "nogui" ),
+				List.of( "java", "-Xmx2G", "-Xms2G", "-jar", "forge-legacy.jar", "nogui" ),
 				ForgeUtils.buildStartupCommand( server, false ) );
 	}
 

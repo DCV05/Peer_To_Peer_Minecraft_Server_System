@@ -50,6 +50,33 @@ class GitBackupPreflightTest
 	}
 
 	@Test
+	void runtimeRenderAndCacheDirectoriesNeverCountTowardTheSizeCap() throws Exception
+	{
+		Path world = Files.createDirectories( temporaryDirectory.resolve( "world/region" ) );
+		Files.writeString( world.resolve( "small.mca" ), "region data" );
+
+		// El render de BlueMap y la cache de Fabric no viajan en el backup
+		// (.gitignore gestionado): si contaran aqui, un mundo pequeno con un
+		// render local de varios GiB se rechazaria por el tope de 10 GiB
+		Path bluemap = Files.createDirectories( temporaryDirectory.resolve( "bluemap/web/maps" ) );
+		Path fabricCache = Files.createDirectories( temporaryDirectory.resolve( ".fabric/remappedJars" ) );
+		try (RandomAccessFile sparse = new RandomAccessFile( bluemap.resolve( "tiles.bin" ).toFile(), "rw" ))
+		{
+			sparse.setLength( GitBackupPreflight.MAX_RECOMMENDED_REPOSITORY_BYTES + 1 );
+		}
+		try (RandomAccessFile sparse = new RandomAccessFile( fabricCache.resolve( "mod.jar" ).toFile(), "rw" ))
+		{
+			sparse.setLength( GitBackupPreflight.MAX_GITHUB_FILE_BYTES + 1 );
+		}
+
+		GitBackupPreflight.Result result = GitBackupPreflight.inspect( temporaryDirectory );
+
+		assertTrue( result.safe() );
+		assertEquals( 1, result.fileCount() );
+		assertTrue( result.blockedFiles().isEmpty() );
+	}
+
+	@Test
 	void rejectsRepositoriesBeyondGithubRecommendedSizeWithoutOneOversizedFile()
 	{
 		List<GitBackupPreflight.FileEntry> files = new ArrayList<>();
