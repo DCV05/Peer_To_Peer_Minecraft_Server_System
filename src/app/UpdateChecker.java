@@ -88,40 +88,53 @@ public final class UpdateChecker
 		return baked != null ? baked : DEFAULT_VERSION;
 	}
 
-	/** Returns the latest published release only when it is strictly newer than {@link #currentVersion()}. */
+	/**
+	 * Returns the latest published release only when it is strictly newer than
+	 * {@link #currentVersion()}. Un solo punto de salida: las validaciones van en
+	 * cascada y cada una corta con break; cualquier fallo de red o de formato
+	 * degrada a "sin actualizacion" en vez de romper el arranque de la app.
+	 */
 	public static Optional<ReleaseInfo> findNewerRelease()
 	{
+		Optional<ReleaseInfo> result = Optional.empty();
 		try
 		{
-			HttpClient client = HttpClient.newBuilder().connectTimeout( REQUEST_TIMEOUT ).build();
-			HttpRequest request = HttpRequest.newBuilder()
-					.uri( URI.create( apiBase() + "/repos/" + releasesRepo() + "/releases/latest" ) )
-					.timeout( REQUEST_TIMEOUT )
-					.header( "Accept", "application/vnd.github+json" )
-					.GET()
-					.build();
-			HttpResponse<String> response = client.send( request, HttpResponse.BodyHandlers.ofString() );
-			if( response.statusCode() != 200 )
-				return Optional.empty();
+			do
+			{
+				HttpClient client = HttpClient.newBuilder().connectTimeout( REQUEST_TIMEOUT ).build();
+				HttpRequest request = HttpRequest.newBuilder()
+						.uri( URI.create( apiBase() + "/repos/" + releasesRepo() + "/releases/latest" ) )
+						.timeout( REQUEST_TIMEOUT )
+						.header( "Accept", "application/vnd.github+json" )
+						.GET()
+						.build();
 
-			JsonNode release = JSON_MAPPER.readTree( response.body() );
-			String version = normalizeVersion( release.path( "tag_name" ).asText( "" ) );
-			if( version.isEmpty() || !isNewer( version, normalizeVersion( currentVersion() ) ) )
-				return Optional.empty();
+				HttpResponse<String> response = client.send( request, HttpResponse.BodyHandlers.ofString() );
+				if( response.statusCode() != 200 )
+					break;
 
-			String pageUrl = release.path( "html_url" ).asText( "https://github.com/" + releasesRepo() + "/releases" );
-			String downloadUrl = pickDownloadUrl( release.path( "assets" ), System.getProperty( "os.name", "" ) );
-			// La release se publica unos minutos antes de que el CI adjunte los
-			// instaladores: hasta que no exista el asset de ESTA plataforma no se
-			// ofrece nada; el siguiente chequeo periodico la recogera ya completa
-			if( downloadUrl == null )
-				return Optional.empty();
-			return Optional.of( new ReleaseInfo( version, pageUrl, downloadUrl ) );
+				JsonNode release = JSON_MAPPER.readTree( response.body() );
+				String version = normalizeVersion( release.path( "tag_name" ).asText( "" ) );
+				if( version.isEmpty() || !isNewer( version, normalizeVersion( currentVersion() ) ) )
+					break;
+
+				// La release se publica unos minutos antes de que el CI adjunte los
+				// instaladores: hasta que no exista el asset de ESTA plataforma no se
+				// ofrece nada; el siguiente chequeo periodico la recogera ya completa
+				String pageUrl = release.path( "html_url" ).asText( "https://github.com/" + releasesRepo() + "/releases" );
+				String downloadUrl = pickDownloadUrl( release.path( "assets" ), System.getProperty( "os.name", "" ) );
+				if( downloadUrl == null )
+					break;
+
+				result = Optional.of( new ReleaseInfo( version, pageUrl, downloadUrl ) );
+			} while( false );
 		}
-		catch( Exception unreachable )
+		catch( Exception checkFailure )
 		{
-			return Optional.empty();
+			// Sin red o API caida: silencio, el siguiente chequeo periodico reintenta
+			result = Optional.empty();
 		}
+		return result;
 	}
 
 	/** Picks the release asset that installs best on this platform, falling back to the portable jar. */
