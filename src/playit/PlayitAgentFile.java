@@ -14,41 +14,50 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * address survives host changes: whoever holds the host lock reuses the same
  * tunnel. The private repo is already the trust boundary of the world.
  */
-public final class PlayitAgentFile {
+public final class PlayitAgentFile
+{
 
 	public static final String RELATIVE_PATH = "p2pmss/playit-agent.json";
 
 	private static final ObjectMapper JSON = new ObjectMapper()
-			.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-			.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+			.configure( DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false )
+			.setSerializationInclusion( JsonInclude.Include.NON_NULL );
 
 	public boolean enabled;
 	public String secret_key;
 	public String tunnel_address;
 
-	public static Path pathIn(Path serverDirectory) {
-		return serverDirectory.resolve(RELATIVE_PATH);
+	public static Path pathIn( Path serverDirectory )
+	{
+		return serverDirectory.resolve( RELATIVE_PATH );
 	}
 
 	/** Returns the stored state, or null when the world has no playit setup. */
-	public static PlayitAgentFile load(Path serverDirectory) {
-		Path file = pathIn(serverDirectory);
-		if(!Files.isRegularFile(file)) return null;
-		try {
-			return JSON.readValue(Files.readString(file, StandardCharsets.UTF_8), PlayitAgentFile.class);
-		} catch(IOException broken) {
+	public static PlayitAgentFile load( Path serverDirectory )
+	{
+		Path file = pathIn( serverDirectory );
+		if( !Files.isRegularFile( file ) )
+			return null;
+		try
+		{
+			return JSON.readValue( Files.readString( file, StandardCharsets.UTF_8 ), PlayitAgentFile.class );
+		}
+		catch( IOException broken )
+		{
 			return null;
 		}
 	}
 
-	public void save(Path serverDirectory) throws IOException {
-		Path file = pathIn(serverDirectory);
-		Files.createDirectories(file.getParent());
-		Files.writeString(file, JSON.writerWithDefaultPrettyPrinter().writeValueAsString(this) + "\n",
-				StandardCharsets.UTF_8);
+	public void save( Path serverDirectory ) throws IOException
+	{
+		Path file = pathIn( serverDirectory );
+		Files.createDirectories( file.getParent() );
+		Files.writeString( file, JSON.writerWithDefaultPrettyPrinter().writeValueAsString( this ) + "\n",
+				StandardCharsets.UTF_8 );
 	}
 
-	public boolean readyToStart() {
+	public boolean readyToStart()
+	{
 		return enabled && secret_key != null && secret_key.length() >= 32;
 	}
 }

@@ -24,133 +24,150 @@ import jgit.GitUtils;
 import minecraftServerManagement.ForgeUtils;
 import view.dashboard.DashboardDialogSupport;
 
-public class GeneralConfigurationsWindows {
-	
-	public static final Path USER_OPS_PATH = app.AppPaths.dataFile("userOps.properties");
+public class GeneralConfigurationsWindows
+{
+
+	public static final Path USER_OPS_PATH = app.AppPaths.dataFile( "userOps.properties" );
 	private static boolean hasErrors = false;
-	
-	public static void generalConfigurations() {
+
+	public static void generalConfigurations()
+	{
 		//Dialog creation and configurations.
-		JDialog generalConfigurationsDialog  = new JDialog();
-		generalConfigurationsDialog.setTitle("General configurations");
-		generalConfigurationsDialog.getContentPane().setLayout(new BorderLayout());
-		generalConfigurationsDialog.setResizable(false);
+		JDialog generalConfigurationsDialog = new JDialog();
+		generalConfigurationsDialog.setTitle( "General configurations" );
+		generalConfigurationsDialog.getContentPane().setLayout( new BorderLayout() );
+		generalConfigurationsDialog.setResizable( false );
 		int widthGeneralConfigurationsDialog = 560;
 		int heightGeneralConfigurationsDialog = 200;
-		generalConfigurationsDialog.setSize(widthGeneralConfigurationsDialog, heightGeneralConfigurationsDialog);
-		generalConfigurationsDialog.setLocationRelativeTo(null);
-		generalConfigurationsDialog.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-		
+		generalConfigurationsDialog.setSize( widthGeneralConfigurationsDialog, heightGeneralConfigurationsDialog );
+		generalConfigurationsDialog.setLocationRelativeTo( null );
+		generalConfigurationsDialog.setDefaultCloseOperation( JFrame.DISPOSE_ON_CLOSE );
 
-		
+
 		//General layout for the components.
 		JPanel contentPane;
 		JScrollPane scrollPane;
-		
-		contentPane = new JPanel(new GridLayout(4, 1));
-		scrollPane = new JScrollPane(contentPane);
-		contentPane.setBorder(BorderFactory.createEmptyBorder(10, 20, 0, 20));
-		scrollPane.setPreferredSize(new Dimension(355, 100));
-		scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
-		scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+
+		contentPane = new JPanel( new GridLayout( 4, 1 ) );
+		scrollPane = new JScrollPane( contentPane );
+		contentPane.setBorder( BorderFactory.createEmptyBorder( 10, 20, 0, 20 ) );
+		scrollPane.setPreferredSize( new Dimension( 355, 100 ) );
+		scrollPane.setVerticalScrollBarPolicy( JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED );
+		scrollPane.setHorizontalScrollBarPolicy( JScrollPane.HORIZONTAL_SCROLLBAR_NEVER );
 
 		String usersOpsLabelText = "Users operators (format: name, name, name...)";
-		JLabel usersOpsLabel = new JLabel(usersOpsLabelText);
+		JLabel usersOpsLabel = new JLabel( usersOpsLabelText );
 		JTextField userOpsInput = new JTextField();
-		
+
 		String usersOpsForCustomCommandsLabelText = "Custom commands operators (format: name, name, name...)";
-		JLabel usersOpsForCustomCommandsLabel = new JLabel(usersOpsForCustomCommandsLabelText);
+		JLabel usersOpsForCustomCommandsLabel = new JLabel( usersOpsForCustomCommandsLabelText );
 		JTextField usersOpsForCustomCommandsInput = new JTextField();
-		
-		JPanel buttonsPane = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-		
-		JButton saveBtn = new JButton("Save");
-		JButton closeBtn = new JButton("Close");
-		
+
+		JPanel buttonsPane = new JPanel( new FlowLayout( FlowLayout.RIGHT ) );
+
+		JButton saveBtn = new JButton( "Save" );
+		JButton closeBtn = new JButton( "Close" );
+
 		//Default values
-		
-		if(ZipUtils.existsDirectory(USER_OPS_PATH)) {
-			userOpsInput.setText(ZipUtils.getDataFromPropertiesFile("userOps", USER_OPS_PATH));
-			usersOpsForCustomCommandsInput.setText(ZipUtils.getDataFromPropertiesFile("usersOpsForCustomCommands", USER_OPS_PATH));
+
+		if( ZipUtils.existsDirectory( USER_OPS_PATH ) )
+		{
+			userOpsInput.setText( ZipUtils.getDataFromPropertiesFile( "userOps", USER_OPS_PATH ) );
+			usersOpsForCustomCommandsInput.setText( ZipUtils.getDataFromPropertiesFile( "usersOpsForCustomCommands", USER_OPS_PATH ) );
 		}
-		
+
 		//Configurations
-		scrollPane.setBorder(null);
-		
-		contentPane.add(usersOpsLabel);
-		contentPane.add(userOpsInput);
-		contentPane.add(usersOpsForCustomCommandsLabel);
-		contentPane.add(usersOpsForCustomCommandsInput);
-		
-		buttonsPane.add(closeBtn);
-		buttonsPane.add(saveBtn);
-		
-		generalConfigurationsDialog.add(scrollPane, BorderLayout.NORTH);
-		generalConfigurationsDialog.add(buttonsPane, BorderLayout.SOUTH);
-		
+		scrollPane.setBorder( null );
+
+		contentPane.add( usersOpsLabel );
+		contentPane.add( userOpsInput );
+		contentPane.add( usersOpsForCustomCommandsLabel );
+		contentPane.add( usersOpsForCustomCommandsInput );
+
+		buttonsPane.add( closeBtn );
+		buttonsPane.add( saveBtn );
+
+		generalConfigurationsDialog.add( scrollPane, BorderLayout.NORTH );
+		generalConfigurationsDialog.add( buttonsPane, BorderLayout.SOUTH );
+
 		//EventListeners
-		saveBtn.addActionListener(svBtn -> {
+		saveBtn.addActionListener( svBtn ->
+		{
 			String errorTemplate = "<html>%s <span style='color: #fa4545;'>%s</span></html>";
 			String errorMessage = "Invalid format";
-			
-			usersOpsLabel.setText(usersOpsLabelText);
-			usersOpsForCustomCommandsLabel.setText(usersOpsForCustomCommandsLabelText);
-			
-			if(ZipUtils.existsDirectory(USER_OPS_PATH) && userOpsInput.getText().equals(ZipUtils.getDataFromPropertiesFile("userOps", USER_OPS_PATH)) && usersOpsForCustomCommandsInput.getText().equals(ZipUtils.getDataFromPropertiesFile("usersOpsForCustomCommands", USER_OPS_PATH))) {
+
+			usersOpsLabel.setText( usersOpsLabelText );
+			usersOpsForCustomCommandsLabel.setText( usersOpsForCustomCommandsLabelText );
+
+			if( ZipUtils.existsDirectory( USER_OPS_PATH )
+					&& userOpsInput.getText().equals( ZipUtils.getDataFromPropertiesFile( "userOps", USER_OPS_PATH ) )
+					&& usersOpsForCustomCommandsInput.getText()
+							.equals( ZipUtils.getDataFromPropertiesFile( "usersOpsForCustomCommands", USER_OPS_PATH ) ) )
+			{
 				generalConfigurationsDialog.dispose();
 				return;
 			}
-			
-			if(!checkFormatValidity(userOpsInput.getText()))
-				usersOpsLabel.setText(errorTemplate.formatted(usersOpsLabelText, errorMessage));
-			
-			if(!checkFormatValidity(usersOpsForCustomCommandsInput.getText()))
-				usersOpsForCustomCommandsLabel.setText(errorTemplate.formatted(usersOpsForCustomCommandsLabelText, errorMessage));
-			
-			if(!hasErrors) {
-				String currentValue = ZipUtils.getDataFromPropertiesFile("userOps", USER_OPS_PATH);
 
-				
-				ZipUtils.createOrModiFyPropertiesFile("userOps", userOpsInput.getText(), USER_OPS_PATH);
-				ZipUtils.createOrModiFyPropertiesFile("usersOpsForCustomCommands", usersOpsForCustomCommandsInput.getText(), USER_OPS_PATH);
-				
-				if(MainFrame.serverIsOn) {
-					if(ZipUtils.getDataFromPropertiesFile("userOps", USER_OPS_PATH) instanceof String ops && !ops.isBlank()) {
-						for(String currentsNickname : currentValue.split(", ")) {
-							if(!userOpsInput.getText().contains(currentsNickname))
-								ForgeUtils.sendCommand("/deop " + currentsNickname, MainFrame.serverProcess, MainFrame.serverWriter);
+			if( !checkFormatValidity( userOpsInput.getText() ) )
+				usersOpsLabel.setText( errorTemplate.formatted( usersOpsLabelText, errorMessage ) );
+
+			if( !checkFormatValidity( usersOpsForCustomCommandsInput.getText() ) )
+				usersOpsForCustomCommandsLabel.setText( errorTemplate.formatted( usersOpsForCustomCommandsLabelText, errorMessage ) );
+
+			if( !hasErrors )
+			{
+				String currentValue = ZipUtils.getDataFromPropertiesFile( "userOps", USER_OPS_PATH );
+
+
+				ZipUtils.createOrModiFyPropertiesFile( "userOps", userOpsInput.getText(), USER_OPS_PATH );
+				ZipUtils.createOrModiFyPropertiesFile( "usersOpsForCustomCommands", usersOpsForCustomCommandsInput.getText(),
+						USER_OPS_PATH );
+
+				if( MainFrame.serverIsOn )
+				{
+					if( ZipUtils.getDataFromPropertiesFile( "userOps", USER_OPS_PATH ) instanceof String ops && !ops.isBlank() )
+					{
+						for( String currentsNickname : currentValue.split( ", " ) )
+						{
+							if( !userOpsInput.getText().contains( currentsNickname ) )
+								ForgeUtils.sendCommand( "/deop " + currentsNickname, MainFrame.serverProcess, MainFrame.serverWriter );
 						}
-						for(String nickname : userOpsInput.getText().split(", ")) {
-							if(!currentValue.contains(nickname))
-							ForgeUtils.sendCommand("/op " + nickname, MainFrame.serverProcess, MainFrame.serverWriter);
+						for( String nickname : userOpsInput.getText().split( ", " ) )
+						{
+							if( !currentValue.contains( nickname ) )
+								ForgeUtils.sendCommand( "/op " + nickname, MainFrame.serverProcess, MainFrame.serverWriter );
 						}
 					}
 				}
 				else
-					ZipUtils.deleteDirectory(Path.of(MainFrame.serverOpenedDirectory.toString() + "/ops.json"));
-				
+					ZipUtils.deleteDirectory( Path.of( MainFrame.serverOpenedDirectory.toString() + "/ops.json" ) );
+
 				generalConfigurationsDialog.dispose();
-	
+
 			}
-				
-		});
-		
-		closeBtn.addActionListener(clsBtn -> {
+
+		} );
+
+		closeBtn.addActionListener( clsBtn ->
+		{
 			generalConfigurationsDialog.dispose();
-		});
-		DashboardDialogSupport.show(generalConfigurationsDialog);
+		} );
+		DashboardDialogSupport.show( generalConfigurationsDialog );
 	}
-	
-	private static boolean checkFormatValidity(String text) {
-		if(text.isBlank()) return true;
-		Pattern regExp = Pattern.compile("^.*[^, ]$");
-		Matcher matcher = regExp.matcher(text);
-		
-		if(matcher.matches()) {
+
+	private static boolean checkFormatValidity( String text )
+	{
+		if( text.isBlank() )
+			return true;
+		Pattern regExp = Pattern.compile( "^.*[^, ]$" );
+		Matcher matcher = regExp.matcher( text );
+
+		if( matcher.matches() )
+		{
 			hasErrors = false;
 			return true;
 		}
-		
+
 		hasErrors = true;
 		return false;
 	}

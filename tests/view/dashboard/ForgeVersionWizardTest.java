@@ -13,66 +13,78 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class ForgeVersionWizardTest {
-    @BeforeAll
-    static void installTheme() throws Exception {
-        SwingUtilities.invokeAndWait(DashboardTheme::install);
-    }
+class ForgeVersionWizardTest
+{
+	@BeforeAll
+	static void installTheme() throws Exception
+	{
+		SwingUtilities.invokeAndWait( DashboardTheme::install );
+	}
 
-    @Test
-    void rendersCompactCompatibleSelectionAndDelegatesInstall() throws Exception {
-        AtomicReference<ForgeVersionWizard.Selection> installed = new AtomicReference<>();
-        AtomicReference<ForgeVersionWizard> reference = new AtomicReference<>();
-        SwingUtilities.invokeAndWait(() -> {
-            ForgeVersionWizard wizard = new ForgeVersionWizard(Path.of("/tmp/server"), installed::set, () -> {});
-            wizard.applyCatalog(new ForgeVersionWizard.VersionCatalog(
-                    List.of("1.19", "1.20.1"),
-                    List.of("1.19-41.1.0", "1.20.1-47.2.0", "1.20.1-47.3.0")));
-            reference.set(wizard);
-        });
+	@Test
+	void rendersCompactCompatibleSelectionAndDelegatesInstall() throws Exception
+	{
+		AtomicReference<ForgeVersionWizard.Selection> installed = new AtomicReference<>();
+		AtomicReference<ForgeVersionWizard> reference = new AtomicReference<>();
+		SwingUtilities.invokeAndWait( () ->
+		{
+			ForgeVersionWizard wizard = new ForgeVersionWizard( Path.of( "/tmp/server" ), installed::set, () ->
+			{
+			} );
+			wizard.applyCatalog( new ForgeVersionWizard.VersionCatalog(
+					List.of( "1.19", "1.20.1" ),
+					List.of( "1.19-41.1.0", "1.20.1-47.2.0", "1.20.1-47.3.0" ) ) );
+			reference.set( wizard );
+		} );
 
-        ForgeVersionWizard wizard = reference.get();
-        assertTrue(wizard.getPreferredSize().height <= 430);
-        assertFalse(wizard.primaryButton().isEnabled());
-        SwingUtilities.invokeAndWait(() -> {
-            wizard.minecraftSelect().setSelectedItem("1.20.1");
-            assertEquals(3, wizard.forgeSelect().getItemCount());
-            wizard.forgeSelect().setSelectedItem("1.20.1-47.3.0");
-            wizard.primaryButton().doClick();
-        });
-        assertNotNull(installed.get());
-        assertEquals("Forge", installed.get().loader());
-        assertEquals("1.20.1", installed.get().minecraftVersion());
-        assertEquals("1.20.1-47.3.0", installed.get().forgeVersion());
-    }
+		ForgeVersionWizard wizard = reference.get();
+		assertTrue( wizard.getPreferredSize().height <= 430 );
+		assertFalse( wizard.primaryButton().isEnabled() );
+		SwingUtilities.invokeAndWait( () ->
+		{
+			wizard.minecraftSelect().setSelectedItem( "1.20.1" );
+			assertEquals( 3, wizard.forgeSelect().getItemCount() );
+			wizard.forgeSelect().setSelectedItem( "1.20.1-47.3.0" );
+			wizard.primaryButton().doClick();
+		} );
+		assertNotNull( installed.get() );
+		assertEquals( "Forge", installed.get().loader() );
+		assertEquals( "1.20.1", installed.get().minecraftVersion() );
+		assertEquals( "1.20.1-47.3.0", installed.get().forgeVersion() );
+	}
 
-    @Test
-    void sharedBuildsCatalogOffersEveryLoaderForEveryMinecraftVersion() throws Exception {
-        AtomicReference<ForgeVersionWizard.Selection> installed = new AtomicReference<>();
-        AtomicReference<ForgeVersionWizard> reference = new AtomicReference<>();
-        SwingUtilities.invokeAndWait(() -> {
-            ForgeVersionWizard wizard = new ForgeVersionWizard(Path.of("/tmp/server"), installed::set, () -> {});
-            wizard.loaderSelect().setSelectedItem("Fabric");
-            // Listas viejo-primero: el wizard las invierte para mostrar lo nuevo arriba
-            wizard.applyCatalog(new ForgeVersionWizard.VersionCatalog(
-                    List.of("1.20.6", "1.21.1"),
-                    List.of("0.16.13", "0.16.14"),
-                    true));
-            reference.set(wizard);
-        });
+	@Test
+	void sharedBuildsCatalogOffersEveryLoaderForEveryMinecraftVersion() throws Exception
+	{
+		AtomicReference<ForgeVersionWizard.Selection> installed = new AtomicReference<>();
+		AtomicReference<ForgeVersionWizard> reference = new AtomicReference<>();
+		SwingUtilities.invokeAndWait( () ->
+		{
+			ForgeVersionWizard wizard = new ForgeVersionWizard( Path.of( "/tmp/server" ), installed::set, () ->
+			{
+			} );
+			wizard.loaderSelect().setSelectedItem( "Fabric" );
+			// Listas viejo-primero: el wizard las invierte para mostrar lo nuevo arriba
+			wizard.applyCatalog( new ForgeVersionWizard.VersionCatalog(
+					List.of( "1.20.6", "1.21.1" ),
+					List.of( "0.16.13", "0.16.14" ),
+					true ) );
+			reference.set( wizard );
+		} );
 
-        ForgeVersionWizard wizard = reference.get();
-        SwingUtilities.invokeAndWait(() -> {
-            wizard.minecraftSelect().setSelectedItem("1.21.1");
-            // Placeholder + los dos loaders compartidos, el mas nuevo primero
-            assertEquals(3, wizard.forgeSelect().getItemCount());
-            assertEquals("0.16.14", wizard.forgeSelect().getItemAt(1));
-            wizard.forgeSelect().setSelectedItem("0.16.14");
-            wizard.primaryButton().doClick();
-        });
-        assertNotNull(installed.get());
-        assertEquals("Fabric", installed.get().loader());
-        assertEquals("1.21.1", installed.get().minecraftVersion());
-        assertEquals("0.16.14", installed.get().forgeVersion());
-    }
+		ForgeVersionWizard wizard = reference.get();
+		SwingUtilities.invokeAndWait( () ->
+		{
+			wizard.minecraftSelect().setSelectedItem( "1.21.1" );
+			// Placeholder + los dos loaders compartidos, el mas nuevo primero
+			assertEquals( 3, wizard.forgeSelect().getItemCount() );
+			assertEquals( "0.16.14", wizard.forgeSelect().getItemAt( 1 ) );
+			wizard.forgeSelect().setSelectedItem( "0.16.14" );
+			wizard.primaryButton().doClick();
+		} );
+		assertNotNull( installed.get() );
+		assertEquals( "Fabric", installed.get().loader() );
+		assertEquals( "1.21.1", installed.get().minecraftVersion() );
+		assertEquals( "0.16.14", installed.get().forgeVersion() );
+	}
 }

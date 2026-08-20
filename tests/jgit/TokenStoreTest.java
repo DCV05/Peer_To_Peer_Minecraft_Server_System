@@ -14,58 +14,64 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-class TokenStoreTest {
-    @TempDir
-    Path temporaryDirectory;
+class TokenStoreTest
+{
+	@TempDir
+	Path temporaryDirectory;
 
-    private Path dataDirectory;
+	private Path dataDirectory;
 
-    @BeforeEach
-    void configureIsolatedDataDirectory() {
-        dataDirectory = temporaryDirectory.resolve("data");
-        System.setProperty("p2pmss.dataDirectory", dataDirectory.toString());
-    }
+	@BeforeEach
+	void configureIsolatedDataDirectory()
+	{
+		dataDirectory = temporaryDirectory.resolve( "data" );
+		System.setProperty( "p2pmss.dataDirectory", dataDirectory.toString() );
+	}
 
-    @AfterEach
-    void clearConfiguration() {
-        TokenStore.invalidateSession();
-        System.clearProperty("p2pmss.dataDirectory");
-    }
+	@AfterEach
+	void clearConfiguration()
+	{
+		TokenStore.invalidateSession();
+		System.clearProperty( "p2pmss.dataDirectory" );
+	}
 
-    @Test
-    void savesAndLoadsOnlyCompleteSessions() throws Exception {
-        assertTrue(TokenStore.saveUserData("hoster", "hoster@example.test", "secret-token"));
-        assertTrue(TokenStore.sessionIsOpened());
+	@Test
+	void savesAndLoadsOnlyCompleteSessions() throws Exception
+	{
+		assertTrue( TokenStore.saveUserData( "hoster", "hoster@example.test", "secret-token" ) );
+		assertTrue( TokenStore.sessionIsOpened() );
 
-        Map<String, String> userData = TokenStore.getSavedUserData();
-        assertEquals("hoster", userData.get("nickname"));
-        assertEquals("hoster@example.test", userData.get("email"));
-        assertEquals("secret-token", userData.get("token"));
+		Map<String, String> userData = TokenStore.getSavedUserData();
+		assertEquals( "hoster", userData.get( "nickname" ) );
+		assertEquals( "hoster@example.test", userData.get( "email" ) );
+		assertEquals( "secret-token", userData.get( "token" ) );
 
-        Files.delete(dataDirectory.resolve("userData.properties"));
-        assertFalse(TokenStore.sessionIsOpened());
-        assertThrows(Exception.class, TokenStore::getSavedUserData);
-    }
+		Files.delete( dataDirectory.resolve( "userData.properties" ) );
+		assertFalse( TokenStore.sessionIsOpened() );
+		assertThrows( Exception.class, TokenStore::getSavedUserData );
+	}
 
-    @Test
-    void rejectsTamperedCredentials() throws Exception {
-        assertTrue(TokenStore.saveUserData("hoster", "hoster@example.test", "secret-token"));
-        Path credentials = dataDirectory.resolve("credentials.dat");
-        byte[] bytes = Files.readAllBytes(credentials);
-        bytes[bytes.length - 1] ^= 1;
-        Files.write(credentials, bytes);
+	@Test
+	void rejectsTamperedCredentials() throws Exception
+	{
+		assertTrue( TokenStore.saveUserData( "hoster", "hoster@example.test", "secret-token" ) );
+		Path credentials = dataDirectory.resolve( "credentials.dat" );
+		byte[] bytes = Files.readAllBytes( credentials );
+		bytes[bytes.length - 1] ^= 1;
+		Files.write( credentials, bytes );
 
-        assertFalse(TokenStore.sessionIsOpened());
-        assertThrows(Exception.class, TokenStore::getSavedUserData);
-    }
+		assertFalse( TokenStore.sessionIsOpened() );
+		assertThrows( Exception.class, TokenStore::getSavedUserData );
+	}
 
-    @Test
-    void invalidSaveDoesNotDestroyPreviousSession() throws Exception {
-        assertTrue(TokenStore.saveUserData("hoster", "hoster@example.test", "secret-token"));
-        assertFalse(TokenStore.saveUserData("", "replacement@example.test", "replacement-token"));
+	@Test
+	void invalidSaveDoesNotDestroyPreviousSession() throws Exception
+	{
+		assertTrue( TokenStore.saveUserData( "hoster", "hoster@example.test", "secret-token" ) );
+		assertFalse( TokenStore.saveUserData( "", "replacement@example.test", "replacement-token" ) );
 
-        Map<String, String> userData = TokenStore.getSavedUserData();
-        assertEquals("hoster", userData.get("nickname"));
-        assertEquals("secret-token", userData.get("token"));
-    }
+		Map<String, String> userData = TokenStore.getSavedUserData();
+		assertEquals( "hoster", userData.get( "nickname" ) );
+		assertEquals( "secret-token", userData.get( "token" ) );
+	}
 }

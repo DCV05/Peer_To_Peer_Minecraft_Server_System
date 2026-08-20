@@ -4,13 +4,16 @@ import view.dashboard.DashboardTheme;
 import javax.swing.*;
 import java.awt.*;
 
-public class ThemeManager {
+public class ThemeManager
+{
 
-    public static void setupSystemTheme() {
+	public static void setupSystemTheme()
+	{
 		DashboardTheme.install();
-    	for (Window w : Window.getWindows()) {
-    	    SwingUtilities.updateComponentTreeUI(w);
-    	    w.pack();
-    	}
-    }
+		for( Window w : Window.getWindows() )
+		{
+			SwingUtilities.updateComponentTreeUI( w );
+			w.pack();
+		}
+	}
 }
