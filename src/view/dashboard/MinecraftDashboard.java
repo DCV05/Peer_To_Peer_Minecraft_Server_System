@@ -254,6 +254,8 @@ public final class MinecraftDashboard extends JPanel {
     private final JButton saveSettingsButton = new JButton("SAVE SETTINGS");
     private final JCheckBox publicUrlCheck = new JCheckBox("Enable public URL via playit.gg");
     private final JLabel publicUrlValue = DashboardTheme.label("—", TEXT_MUTED, 11, Font.PLAIN);
+    private final JButton copyPublicUrlButton = new JButton("COPY URL");
+    private volatile String publicUrlAddress = null;
 
     private final JTextArea consoleArea = new JTextArea();
     private final JTextArea consolePreview = new JTextArea();
@@ -384,11 +386,24 @@ public final class MinecraftDashboard extends JPanel {
             }
         }
         boolean hasAddress = address != null && !address.isBlank();
+        publicUrlAddress = hasAddress ? address : null;
         publicUrlValue.setText(!enabled
                 ? "Off — players join through the P2P network"
                 : hasAddress ? "Address: " + address
                              : "Enabled — authorize playit in the browser or start the server to get the address");
         publicUrlValue.setForeground(enabled && hasAddress ? GREEN : TEXT_MUTED);
+        copyPublicUrlButton.setVisible(enabled && hasAddress);
+    }
+
+    private void copyPublicUrlToClipboard() {
+        String address = publicUrlAddress;
+        if(address == null) return;
+        java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
+                .setContents(new java.awt.datatransfer.StringSelection(address), null);
+        copyPublicUrlButton.setText("COPIED");
+        Timer revert = new Timer(1500, event -> copyPublicUrlButton.setText("COPY URL"));
+        revert.setRepeats(false);
+        revert.start();
     }
 
     public void showSettingsResult(boolean success, String message) {
@@ -807,10 +822,19 @@ public final class MinecraftDashboard extends JPanel {
         publicUrlHint.setAlignmentX(Component.LEFT_ALIGNMENT);
         publicUrl.add(publicUrlHint);
         publicUrl.add(Box.createVerticalStrut(8));
-        publicUrlValue.setAlignmentX(Component.LEFT_ALIGNMENT);
-        publicUrl.add(publicUrlValue);
+        JPanel addressRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        addressRow.setOpaque(false);
+        addressRow.add(publicUrlValue);
+        addressRow.add(Box.createHorizontalStrut(12));
+        DashboardTheme.styleButton(copyPublicUrlButton, DashboardTheme.ButtonKind.SECONDARY);
+        copyPublicUrlButton.setVisible(false);
+        copyPublicUrlButton.addActionListener(event -> copyPublicUrlToClipboard());
+        addressRow.add(copyPublicUrlButton);
+        addressRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        addressRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+        publicUrl.add(addressRow);
         publicUrl.setAlignmentX(Component.LEFT_ALIGNMENT);
-        publicUrl.setMaximumSize(new Dimension(Integer.MAX_VALUE, 125));
+        publicUrl.setMaximumSize(new Dimension(Integer.MAX_VALUE, 140));
         page.add(publicUrl);
         page.add(Box.createVerticalStrut(10));
 
