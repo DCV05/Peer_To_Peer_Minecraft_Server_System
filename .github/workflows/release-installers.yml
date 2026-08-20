@@ -62,9 +62,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p stage dist
-          cp target/Peer_To_Peer_Minecraft_Server_System-*.jar stage/
-          rm -f stage/original-*.jar
-          mv stage/Peer_To_Peer_Minecraft_Server_System-*.jar stage/P2PMSS.jar
+          POM_VERSION=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)
+          cp "target/Peer_To_Peer_Minecraft_Server_System-$POM_VERSION.jar" stage/P2PMSS.jar
 
       - name: Instalador DMG (macOS)
         if: matrix.kind == 'dmg'
