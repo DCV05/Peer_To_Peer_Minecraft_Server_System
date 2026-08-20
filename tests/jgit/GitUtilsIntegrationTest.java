@@ -161,14 +161,10 @@ class GitUtilsIntegrationTest {
         assertTrue(GitUtils.setLocalIdentity(hostB));
         Files.writeString(hostB.resolve("host-b.txt"), "pending local commit\n");
         MainFrame.serverOpenedDirectory = hostB.toFile();
-        assertFalse(GitUtils.autoCommitAndPush(false));
-
-        try(Git git = Git.open(hostB.toFile())) {
-            assertNotNull(git.getRepository().resolve("HEAD"));
-        }
-
-        assertTrue(GitUtils.pull(hostB));
+        // El remoto va por delante (hostA ya subio world-v4): el push del backup se
+        // auto-recupera con fetch + rebase + reintento en la misma llamada
         assertTrue(GitUtils.autoCommitAndPush(false));
+        assertEquals("world-v4\n", Files.readString(hostB.resolve("world.txt")));
 
         Path verifier = temporaryDirectory.resolve("verifier");
         try(Git git = Git.cloneRepository().setURI(remote.toUri().toString()).setDirectory(verifier.toFile()).call()) {

@@ -27,6 +27,8 @@ import javax.swing.JOptionPane;
 
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.PullResult;
+import org.eclipse.jgit.api.RebaseCommand;
+import org.eclipse.jgit.api.RebaseResult;
 import org.eclipse.jgit.api.Status;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.dircache.DirCache;
@@ -759,9 +761,42 @@ public class GitUtils {
 		return pushAndCheckDetailed(git, credentials).success();
 	}
 
-	private record PushCheckResult(boolean success, String message) {}
+	private record PushCheckResult(boolean success, String message, boolean nonFastForward) {}
 
+	/**
+	 * Pushes and, when the remote moved forward in the meantime (another peer or an
+	 * out-of-band backup), fetches, rebases the local backup on top of the remote
+	 * state and retries once. During the rebase the active host's files win: the
+	 * machine running the world owns its current state.
+	 */
 	private static PushCheckResult pushAndCheckDetailed(Git git, UsernamePasswordCredentialsProvider credentials) throws GitAPIException {
+		PushCheckResult first = pushOnce(git, credentials);
+		if(first.success() || !first.nonFastForward()) return first;
+		try {
+			git.fetch().setCredentialsProvider(credentials).call();
+			String branch = git.getRepository().getBranch();
+			// Rebase normal; solo los ficheros en CONFLICTO se resuelven a favor del
+			// backup local (THEIRS durante un rebase = los commits que se reaplican):
+			// la maquina que corre el mundo es la autoridad sobre su estado actual
+			RebaseResult rebase = git.rebase()
+					.setUpstream("refs/remotes/origin/" + branch)
+					.setContentMergeStrategy(org.eclipse.jgit.merge.ContentMergeStrategy.THEIRS)
+					.call();
+			if(!rebase.getStatus().isSuccessful()) {
+				try {
+					git.rebase().setOperation(RebaseCommand.Operation.ABORT).call();
+				} catch(GitAPIException unwindFailure) {}
+				return new PushCheckResult(false,
+						first.message() + " Automatic rebase onto the new remote state failed (" + rebase.getStatus() + ").", true);
+			}
+		} catch(Exception recoveryFailure) {
+			return new PushCheckResult(false,
+					first.message() + " Automatic recovery failed: " + recoveryFailure.getMessage(), true);
+		}
+		return pushOnce(git, credentials);
+	}
+
+	private static PushCheckResult pushOnce(Git git, UsernamePasswordCredentialsProvider credentials) throws GitAPIException {
 		Iterable<PushResult> pushResults = git.push().setCredentialsProvider(credentials).call();
 		boolean updateFound = false;
 		for(PushResult pushResult : pushResults) {
@@ -771,12 +806,13 @@ public class GitUtils {
 				if(status != RemoteRefUpdate.Status.OK && status != RemoteRefUpdate.Status.UP_TO_DATE) {
 					System.err.println("Git push rejected for " + update.getRemoteName() + ": " + status + " " + update.getMessage());
 					String detail = update.getMessage() == null ? "" : " (" + update.getMessage() + ")";
-					return new PushCheckResult(false, "GitHub rejected " + update.getRemoteName() + ": " + status + detail + ".");
+					return new PushCheckResult(false, "GitHub rejected " + update.getRemoteName() + ": " + status + detail + ".",
+							status == RemoteRefUpdate.Status.REJECTED_NONFASTFORWARD);
 				}
 			}
 		}
 		return new PushCheckResult(updateFound,
-				updateFound ? "GitHub accepted the push." : "Git did not report a remote branch update.");
+				updateFound ? "GitHub accepted the push." : "Git did not report a remote branch update.", false);
 	}
 
 	private static Set<String> backupPaths(Status status) {
