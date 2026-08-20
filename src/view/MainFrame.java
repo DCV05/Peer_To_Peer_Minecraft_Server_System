@@ -1595,12 +1595,15 @@ public class MainFrame {
 	private void applyPublicUrlToggle(boolean wanted) {
 		PlayitAgentFile storedAgent = PlayitAgentFile.load(serverOpenedDirectory.toPath());
 		boolean enabledNow = storedAgent != null && storedAgent.enabled;
-		if(wanted == enabledNow) return;
 		if(wanted) {
-			enablePublicUrl(storedAgent);
+			// Re-guardar con el toggle ya activo tambien cura un setup a medias
+			// (sin secret valido o sin direccion todavia)
+			if(!enabledNow || storedAgent.secret_key == null || storedAgent.tunnel_address == null) {
+				enablePublicUrl(storedAgent);
+			}
 			return;
 		}
-		if(storedAgent == null) return;
+		if(!enabledNow) return;
 		storedAgent.enabled = false;
 		try {
 			storedAgent.save(serverOpenedDirectory.toPath());
@@ -1611,40 +1614,39 @@ public class MainFrame {
 		stopPlayitTunnel();
 	}
 
-	/** Enables the public URL for this world; claims a playit agent in the browser when needed. */
+	/**
+	 * Enables the public URL for this world on a background thread: verifies any
+	 * stored secret, claims a new agent in the browser when needed, resolves the
+	 * fixed address and persists everything in the shared repo file.
+	 */
 	private void enablePublicUrl(PlayitAgentFile existingAgent) {
 		Path serverDirectory = serverOpenedDirectory.toPath();
-		if(existingAgent != null && existingAgent.secret_key != null) {
-			existingAgent.enabled = true;
-			try {
-				existingAgent.save(serverDirectory);
-			} catch(IOException failure) {
-				appendDashboardActivity("Public URL could not be saved: " + failure.getMessage());
-				return;
-			}
-			appendDashboardActivity(existingAgent.tunnel_address != null
-					? "Public URL enabled: " + existingAgent.tunnel_address
-					: "Public URL enabled; it will go online with the server");
-			if(serverIsOn) startPlayitTunnelIfConfigured();
-			SwingUtilities.invokeLater(this::refreshDashboardState);
-			return;
-		}
-
-		String claimCode = PlayitTunnel.newClaimCode();
-		ForgeUtils.openURL(PlayitTunnel.claimUrl(claimCode));
-		appendDashboardActivity("Authorize the playit.gg tunnel in the opened browser tab (guest works): "
-				+ PlayitTunnel.claimUrl(claimCode));
 		new Thread(() -> {
-			PlayitTunnel.ClaimOutcome outcome = PlayitTunnel.claimAgent(claimCode, 10 * 60);
-			if(!outcome.ok()) {
-				appendDashboardActivity("playit.gg authorization failed: " + outcome.error());
-				return;
-			}
-			PlayitAgentFile agent = new PlayitAgentFile();
+			PlayitAgentFile agent = existingAgent != null ? existingAgent : new PlayitAgentFile();
 			agent.enabled = true;
-			agent.secret_key = outcome.secretKey();
+
+			if(agent.secret_key != null && !PlayitTunnel.secretWorks(agent.secret_key)) {
+				appendDashboardActivity("The stored playit key was rejected; requesting a new authorization");
+				agent.secret_key = null;
+				agent.tunnel_address = null;
+			}
+
+			if(agent.secret_key == null) {
+				String claimCode = PlayitTunnel.newClaimCode();
+				String claimUrl = PlayitTunnel.claimUrl(claimCode);
+				SwingUtilities.invokeLater(() -> ForgeUtils.openURL(claimUrl));
+				appendDashboardActivity("Authorize the playit.gg tunnel in the opened browser tab (guest works): " + claimUrl);
+				PlayitTunnel.ClaimOutcome outcome = PlayitTunnel.claimAgent(claimCode, 10 * 60);
+				if(!outcome.ok()) {
+					appendDashboardActivity("playit.gg authorization failed: " + outcome.error());
+					SwingUtilities.invokeLater(MainFrame.this::refreshDashboardState);
+					return;
+				}
+				agent.secret_key = outcome.secretKey();
+			}
+
 			try {
-				agent.tunnel_address = PlayitTunnel.ensureTunnel(outcome.secretKey());
+				agent.tunnel_address = PlayitTunnel.ensureTunnel(agent.secret_key);
 			} catch(IOException tunnelFailure) {
 				appendDashboardActivity("playit authorized, but the tunnel is not ready yet: " + tunnelFailure.getMessage());
 			}
@@ -1658,7 +1660,7 @@ public class MainFrame {
 					? "Public URL ready for every host of this world: " + agent.tunnel_address
 					: "playit authorized; the address will appear when the tunnel starts");
 			if(serverIsOn) startPlayitTunnelIfConfigured();
-			SwingUtilities.invokeLater(this::refreshDashboardState);
+			SwingUtilities.invokeLater(MainFrame.this::refreshDashboardState);
 		}, "p2pmss-playit-claim").start();
 	}
 

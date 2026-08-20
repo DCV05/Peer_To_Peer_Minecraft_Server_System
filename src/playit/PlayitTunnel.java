@@ -104,7 +104,13 @@ public final class PlayitTunnel {
 						case UserAccepted -> {
 							var exchange = openClient.claimExchange(new ReqClaimExchange(claimCode));
 							if(exchange instanceof ApiSuccess<AgentSecretKey, ?> secret) {
-								return new ClaimOutcome(secret.data().secret_key(), null);
+								// El canje puede devolver una clave aun no activa: verificarla
+								// contra la API antes de darla por buena (igual que el plugin oficial)
+								if(waitUntilSecretWorks(secret.data().secret_key(), 30)) {
+									return new ClaimOutcome(secret.data().secret_key(), null);
+								}
+								return new ClaimOutcome(null,
+										"playit issued a key that never became valid; retry the authorization");
 							}
 							return new ClaimOutcome(null, "playit claim exchange failed: " + exchange);
 						}
@@ -126,6 +132,29 @@ public final class PlayitTunnel {
 			}
 		}
 		return new ClaimOutcome(null, "Nobody approved the claim on playit.gg (timed out)");
+	}
+
+	/** True when the secret authenticates against the playit API. */
+	public static boolean secretWorks(String secretKey) {
+		try {
+			return new ApiClient(secretKey).v1AgentsRundata() instanceof ApiSuccessNoFail<AgentRunDataV1>;
+		} catch(ApiClientException failure) {
+			return false;
+		}
+	}
+
+	private static boolean waitUntilSecretWorks(String secretKey, long timeoutSeconds) {
+		long deadline = System.currentTimeMillis() + timeoutSeconds * 1000;
+		while(System.currentTimeMillis() < deadline) {
+			if(secretWorks(secretKey)) return true;
+			try {
+				Thread.sleep(2000);
+			} catch(InterruptedException interrupted) {
+				Thread.currentThread().interrupt();
+				return false;
+			}
+		}
+		return false;
 	}
 
 	/** Finds the existing Minecraft Java tunnel or creates one; returns its fixed address. */
