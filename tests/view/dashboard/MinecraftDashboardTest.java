@@ -213,7 +213,7 @@ class MinecraftDashboardTest {
             assertTrue(dashboard.saveSettingsButton().isEnabled());
             dashboard.saveSettingsButton().doClick();
         });
-        assertEquals(new MinecraftDashboard.SettingsDraft("friends-vpn", 25570, "2G", 12), saved.get());
+        assertEquals(new MinecraftDashboard.SettingsDraft("friends-vpn", 25570, "2G", 12, false), saved.get());
 
         SwingUtilities.invokeAndWait(() -> dashboard.setState(onlineState()));
         assertFalse(dashboard.settingsPortInput().isEnabled());

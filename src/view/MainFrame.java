@@ -723,7 +723,7 @@ public class MainFrame {
 				port,
 				ram,
 				networkName,
-				"FORGE / JAVA 21",
+				(loaded ? LoaderKind.detect(serverOpenedDirectory.toPath()).displayName().toUpperCase() : "FORGE") + " / JAVA 21",
 				presence.players(),
 				presence.onlineCount(),
 				presence.maxPlayers(),
@@ -738,6 +738,9 @@ public class MainFrame {
 				readRecentServers()
 		);
 		dashboard.setState(dashboardState);
+		PlayitAgentFile playitAgent = loaded ? PlayitAgentFile.load(serverOpenedDirectory.toPath()) : null;
+		dashboard.showPublicUrl(playitAgent != null && playitAgent.enabled,
+				playitAgent == null ? null : playitAgent.tunnel_address);
 		turnOnOffBtn = dashboard.primaryActionButton();
 		consoleArea = dashboard.consoleArea();
 	}
@@ -765,7 +768,9 @@ public class MainFrame {
 			File directory = new File(path);
 			String name = directory.getName().isBlank() ? path : directory.getName();
 			boolean selected = serverOpenedDirectory != null && directory.getAbsolutePath().equals(serverOpenedDirectory.getAbsolutePath());
-			String detail = ForgeUtils.hasServerStartupCommand(directory.toPath()) ? "FORGE READY" : "MISSING STARTUP SCRIPT";
+			String detail = ForgeUtils.hasServerStartupCommand(directory.toPath())
+					? LoaderKind.detect(directory.toPath()).displayName().toUpperCase() + " READY"
+					: "MISSING STARTUP SCRIPT";
 			entries.add(new MinecraftDashboard.ServerEntry(name, path, detail, selected));
 		}
 		return entries;
@@ -1062,6 +1067,7 @@ public class MainFrame {
 			networkName = settings.networkName();
 			actualServerPort = settings.port();
 			playerPresence.reset(settings.maxPlayers());
+			applyPublicUrlToggle(settings.publicUrl());
 			dashboard.showSettingsResult(true, "Saved locally · applies on the next start");
 			appendDashboardActivity("Local server settings updated");
 			refreshDashboardState();
@@ -1308,13 +1314,6 @@ public class MainFrame {
 
 		int savedIntervalIndex = Arrays.binarySearch(autoSaveIntervalsInts, GitUtils.getSavedAutoSaveInteval());
 		autoSaveIntervalSelect.setSelectedIndex(savedIntervalIndex >= 0 ? savedIntervalIndex : 2 /* 10 mins */);
-
-		PlayitAgentFile playitAgent = PlayitAgentFile.load(serverOpenedDirectory.toPath());
-		javax.swing.JCheckBox publicUrlCheck = new javax.swing.JCheckBox("Enable via playit.gg");
-		publicUrlCheck.setSelected(playitAgent != null && playitAgent.enabled);
-		JLabel publicUrlLabel = new JLabel(playitAgent != null && playitAgent.tunnel_address != null
-				? "<html>URL pública: <b>" + playitAgent.tunnel_address + "</b></html>"
-				: "URL pública (amigos sin VPN ni la app)");
 		JButton saveBtn = new JButton("Save");
 		
 		contentPane.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
@@ -1331,8 +1330,6 @@ public class MainFrame {
 		contentPane.add(serverRamAllocInput);
 		contentPane.add(autoSaveIntervalLabel);
 		contentPane.add(autoSaveIntervalSelect);
-		contentPane.add(publicUrlLabel);
-		contentPane.add(publicUrlCheck);
 		buttonsPane.add(saveBtn);
 		configDialog.getContentPane().add(scroll, BorderLayout.NORTH);
 		configDialog.getContentPane().add(buttonsPane, BorderLayout.SOUTH);
@@ -1366,22 +1363,6 @@ public class MainFrame {
 			int selectedAutosaveInteval = autoSaveIntervalsInts[autoSaveIntervalSelect.getSelectedIndex()];
 			if(GitUtils.getSavedAutoSaveInteval() != selectedAutosaveInteval) {
 				GitUtils.setAutoSaveInterval(selectedAutosaveInteval);
-			}
-			PlayitAgentFile storedAgent = PlayitAgentFile.load(serverOpenedDirectory.toPath());
-			boolean publicUrlEnabled = storedAgent != null && storedAgent.enabled;
-			if(publicUrlCheck.isSelected() != publicUrlEnabled) {
-				if(publicUrlCheck.isSelected()) {
-					enablePublicUrl(storedAgent);
-				} else if(storedAgent != null) {
-					storedAgent.enabled = false;
-					try {
-						storedAgent.save(serverOpenedDirectory.toPath());
-						appendDashboardActivity("Public URL disabled for this world");
-					} catch(IOException failure) {
-						appendDashboardActivity("Public URL could not be disabled: " + failure.getMessage());
-					}
-					stopPlayitTunnel();
-				}
 			}
 			configDialog.dispose();
 			actualServerPort = ForgeUtils.getServerPort(serverOpenedDirectory.toPath());
@@ -1610,6 +1591,26 @@ public class MainFrame {
 		}
 	}
 
+	/** Applies the Settings-page toggle against the stored per-world playit state. */
+	private void applyPublicUrlToggle(boolean wanted) {
+		PlayitAgentFile storedAgent = PlayitAgentFile.load(serverOpenedDirectory.toPath());
+		boolean enabledNow = storedAgent != null && storedAgent.enabled;
+		if(wanted == enabledNow) return;
+		if(wanted) {
+			enablePublicUrl(storedAgent);
+			return;
+		}
+		if(storedAgent == null) return;
+		storedAgent.enabled = false;
+		try {
+			storedAgent.save(serverOpenedDirectory.toPath());
+			appendDashboardActivity("Public URL disabled for this world");
+		} catch(IOException failure) {
+			appendDashboardActivity("Public URL could not be disabled: " + failure.getMessage());
+		}
+		stopPlayitTunnel();
+	}
+
 	/** Enables the public URL for this world; claims a playit agent in the browser when needed. */
 	private void enablePublicUrl(PlayitAgentFile existingAgent) {
 		Path serverDirectory = serverOpenedDirectory.toPath();
@@ -1625,6 +1626,7 @@ public class MainFrame {
 					? "Public URL enabled: " + existingAgent.tunnel_address
 					: "Public URL enabled; it will go online with the server");
 			if(serverIsOn) startPlayitTunnelIfConfigured();
+			SwingUtilities.invokeLater(this::refreshDashboardState);
 			return;
 		}
 
@@ -1656,6 +1658,7 @@ public class MainFrame {
 					? "Public URL ready for every host of this world: " + agent.tunnel_address
 					: "playit authorized; the address will appear when the tunnel starts");
 			if(serverIsOn) startPlayitTunnelIfConfigured();
+			SwingUtilities.invokeLater(this::refreshDashboardState);
 		}, "p2pmss-playit-claim").start();
 	}
 

@@ -4,6 +4,7 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -119,7 +120,7 @@ public final class MinecraftDashboard extends JPanel {
     }
 
     /** Validated, machine-local values submitted by the Settings page. */
-    public record SettingsDraft(String networkName, int port, String ram, int maxPlayers) {}
+    public record SettingsDraft(String networkName, int port, String ram, int maxPlayers, boolean publicUrl) {}
 
     public record State(
             boolean serverLoaded,
@@ -251,6 +252,8 @@ public final class MinecraftDashboard extends JPanel {
     private final JButton onboardingInvitationsButton = new JButton("VIEW INVITATIONS");
     private final JButton onboardingCloneButton = new JButton("CLONE SERVER");
     private final JButton saveSettingsButton = new JButton("SAVE SETTINGS");
+    private final JCheckBox publicUrlCheck = new JCheckBox("Enable public URL via playit.gg");
+    private final JLabel publicUrlValue = DashboardTheme.label("—", TEXT_MUTED, 11, Font.PLAIN);
 
     private final JTextArea consoleArea = new JTextArea();
     private final JTextArea consolePreview = new JTextArea();
@@ -368,6 +371,24 @@ public final class MinecraftDashboard extends JPanel {
         }
         activityArea.setText(next);
         activityArea.setCaretPosition(activityArea.getDocument().getLength());
+    }
+
+    /** Reflects the shared playit state; the checkbox is only refreshed while there are no unsaved edits. */
+    public void showPublicUrl(boolean enabled, String address) {
+        if(!settingsDirty) {
+            updatingSettingsFields = true;
+            try {
+                publicUrlCheck.setSelected(enabled);
+            } finally {
+                updatingSettingsFields = false;
+            }
+        }
+        boolean hasAddress = address != null && !address.isBlank();
+        publicUrlValue.setText(!enabled
+                ? "Off — players join through the P2P network"
+                : hasAddress ? "Address: " + address
+                             : "Enabled — authorize playit in the browser or start the server to get the address");
+        publicUrlValue.setForeground(enabled && hasAddress ? GREEN : TEXT_MUTED);
     }
 
     public void showSettingsResult(boolean success, String message) {
@@ -768,6 +789,29 @@ public final class MinecraftDashboard extends JPanel {
         editor.setAlignmentX(Component.LEFT_ALIGNMENT);
         editor.setMaximumSize(new Dimension(Integer.MAX_VALUE, 185));
         page.add(editor);
+        page.add(Box.createVerticalStrut(12));
+
+        JPanel publicUrl = sectionPanel();
+        publicUrl.setLayout(new BoxLayout(publicUrl, BoxLayout.Y_AXIS));
+        publicUrl.add(DashboardTheme.eyebrow("PUBLIC URL"));
+        publicUrl.add(Box.createVerticalStrut(8));
+        publicUrlCheck.setOpaque(false);
+        publicUrlCheck.setForeground(TEXT);
+        publicUrlCheck.setFocusPainted(false);
+        publicUrlCheck.setAlignmentX(Component.LEFT_ALIGNMENT);
+        publicUrl.add(publicUrlCheck);
+        publicUrl.add(Box.createVerticalStrut(4));
+        JLabel publicUrlHint = DashboardTheme.label(
+                "Friends join with vanilla Minecraft — no VPN, no app, no port forwarding. One-time browser authorization.",
+                TEXT_DIM, 10, Font.PLAIN);
+        publicUrlHint.setAlignmentX(Component.LEFT_ALIGNMENT);
+        publicUrl.add(publicUrlHint);
+        publicUrl.add(Box.createVerticalStrut(8));
+        publicUrlValue.setAlignmentX(Component.LEFT_ALIGNMENT);
+        publicUrl.add(publicUrlValue);
+        publicUrl.setAlignmentX(Component.LEFT_ALIGNMENT);
+        publicUrl.setMaximumSize(new Dimension(Integer.MAX_VALUE, 125));
+        page.add(publicUrl);
         page.add(Box.createVerticalStrut(10));
 
         JPanel saveRow = new JPanel(new BorderLayout(12, 0));
@@ -979,23 +1023,25 @@ public final class MinecraftDashboard extends JPanel {
 
     private void configureSettingsEditor() {
         DocumentListener dirtyListener = new DocumentListener() {
-            private void changed() {
-                if(updatingSettingsFields) return;
-                settingsDirty = true;
-                settingsStatus.setText("Unsaved local changes");
-                settingsStatus.setForeground(AMBER);
-                boolean editable = state.serverLoaded() && !state.phase().isBusy()
-                        && state.phase() != Phase.ONLINE && state.phase() != Phase.REMOTE_HOST;
-                saveSettingsButton.setEnabled(editable);
-            }
-            @Override public void insertUpdate(DocumentEvent event) { changed(); }
-            @Override public void removeUpdate(DocumentEvent event) { changed(); }
-            @Override public void changedUpdate(DocumentEvent event) { changed(); }
+            @Override public void insertUpdate(DocumentEvent event) { markSettingsEdited(); }
+            @Override public void removeUpdate(DocumentEvent event) { markSettingsEdited(); }
+            @Override public void changedUpdate(DocumentEvent event) { markSettingsEdited(); }
         };
         for(JTextField field : List.of(settingsNetworkInput, settingsPortInput, settingsRamInput, settingsMaxPlayersInput)) {
             field.getDocument().addDocumentListener(dirtyListener);
         }
+        publicUrlCheck.addItemListener(event -> markSettingsEdited());
         saveSettingsButton.addActionListener(event -> submitSettings());
+    }
+
+    private void markSettingsEdited() {
+        if(updatingSettingsFields) return;
+        settingsDirty = true;
+        settingsStatus.setText("Unsaved local changes");
+        settingsStatus.setForeground(AMBER);
+        boolean editable = state.serverLoaded() && !state.phase().isBusy()
+                && state.phase() != Phase.ONLINE && state.phase() != Phase.REMOTE_HOST;
+        saveSettingsButton.setEnabled(editable);
     }
 
     private void submitSettings() {
@@ -1008,7 +1054,7 @@ public final class MinecraftDashboard extends JPanel {
             int maxPlayers = parseRange(settingsMaxPlayersInput.getText(), "Max players", 1, 1_000);
             settingsStatus.setText("Saving local settings…");
             settingsStatus.setForeground(AMBER);
-            actions.saveServerSettings(new SettingsDraft(network, port, ram, maxPlayers));
+            actions.saveServerSettings(new SettingsDraft(network, port, ram, maxPlayers, publicUrlCheck.isSelected()));
         } catch(IllegalArgumentException invalid) {
             showSettingsResult(false, invalid.getMessage());
         }
@@ -1199,6 +1245,7 @@ public final class MinecraftDashboard extends JPanel {
         for(JTextField field : List.of(settingsNetworkInput, settingsPortInput, settingsRamInput, settingsMaxPlayersInput)) {
             field.setEnabled(canEditSettings);
         }
+        publicUrlCheck.setEnabled(canEditSettings);
         saveSettingsButton.setEnabled(canEditSettings && settingsDirty);
         if(!loaded) {
             settingsStatus.setText("Open a server to edit its local settings.");
