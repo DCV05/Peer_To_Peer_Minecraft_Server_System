@@ -88,6 +88,25 @@ class UpdateCheckerTest {
 	}
 
 	@Test
+	void assetIsPickedByPlatformWithJarFallback() throws Exception {
+		com.fasterxml.jackson.databind.JsonNode assets = new com.fasterxml.jackson.databind.ObjectMapper().readTree("""
+				[
+				  { "name": "P2PMSS-99.0.0.jar", "browser_download_url": "https://example.test/app.jar" },
+				  { "name": "P2PMSS-99.0.0.dmg", "browser_download_url": "https://example.test/app.dmg" },
+				  { "name": "P2PMSS-99.0.0.exe", "browser_download_url": "https://example.test/app.exe" }
+				]
+				""");
+		assertEquals("https://example.test/app.dmg", UpdateChecker.pickDownloadUrl(assets, "Mac OS X"));
+		assertEquals("https://example.test/app.exe", UpdateChecker.pickDownloadUrl(assets, "Windows 11"));
+		assertEquals("https://example.test/app.jar", UpdateChecker.pickDownloadUrl(assets, "Linux"));
+
+		com.fasterxml.jackson.databind.JsonNode onlyJar = new com.fasterxml.jackson.databind.ObjectMapper().readTree(
+				"[ { \"name\": \"P2PMSS-99.0.0.jar\", \"browser_download_url\": \"https://example.test/app.jar\" } ]");
+		assertEquals("https://example.test/app.jar", UpdateChecker.pickDownloadUrl(onlyJar, "Mac OS X"));
+		assertEquals("https://example.test/app.jar", UpdateChecker.pickDownloadUrl(onlyJar, "Windows 11"));
+	}
+
+	@Test
 	void versionNormalizationAndComparison() {
 		assertEquals("1.7.1", UpdateChecker.normalizeVersion("v1.7.1-p2p"));
 		assertEquals("2.0", UpdateChecker.normalizeVersion("V2.0"));

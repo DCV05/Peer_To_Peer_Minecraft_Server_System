@@ -89,17 +89,31 @@ public final class UpdateChecker {
 			if(version.isEmpty() || !isNewer(version, normalizeVersion(currentVersion()))) return Optional.empty();
 
 			String pageUrl = release.path("html_url").asText("https://github.com/" + releasesRepo() + "/releases");
-			String downloadUrl = null;
-			for(JsonNode asset : release.path("assets")) {
-				if(asset.path("name").asText("").endsWith(".jar")) {
-					downloadUrl = asset.path("browser_download_url").asText(null);
-					break;
-				}
-			}
+			String downloadUrl = pickDownloadUrl(release.path("assets"), System.getProperty("os.name", ""));
 			return Optional.of(new ReleaseInfo(version, pageUrl, downloadUrl));
 		} catch(Exception unreachable) {
 			return Optional.empty();
 		}
+	}
+
+	/** Picks the release asset that installs best on this platform, falling back to the portable jar. */
+	static String pickDownloadUrl(JsonNode assets, String osName) {
+		for(String extension : preferredAssetExtensions(osName)) {
+			for(JsonNode asset : assets) {
+				if(asset.path("name").asText("").toLowerCase().endsWith(extension)) {
+					return asset.path("browser_download_url").asText(null);
+				}
+			}
+		}
+		return null;
+	}
+
+	/** Installer preference by platform: mac wants a dmg, windows an exe, and the jar always works. */
+	static java.util.List<String> preferredAssetExtensions(String osName) {
+		String os = osName == null ? "" : osName.toLowerCase();
+		if(os.contains("mac") || os.contains("darwin")) return java.util.List.of(".dmg", ".pkg", ".jar");
+		if(os.contains("win")) return java.util.List.of(".exe", ".msi", ".jar");
+		return java.util.List.of(".jar");
 	}
 
 	/** Strips the leading "v" and any "-suffix" so "v1.7.1-p2p" compares as "1.7.1". */
