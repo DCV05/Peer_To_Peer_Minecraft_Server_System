@@ -328,10 +328,15 @@ public class ForgeUtils {
 								}
 							}
 		             }
-		             SwingUtilities.invokeLater(() -> {
-		                 consoleArea.append(finalLine + "\n");
-		                 consoleArea.setCaretPosition(consoleArea.getDocument().getLength());
-		             });
+		             // La respuesta al sondeo de jugadores (un "list" cada pocos segundos)
+		             // alimenta al tracker pero no se pinta: solo ensucia la consola
+		             if(!isPresencePollNoise(finalLine)) {
+		                 SwingUtilities.invokeLater(() -> {
+		                     consoleArea.append(finalLine + "\n");
+		                     trimConsole(consoleArea);
+		                     consoleArea.setCaretPosition(consoleArea.getDocument().getLength());
+		                 });
+		             }
 		         }
 		
 		     } catch (IOException e) {}
@@ -340,6 +345,25 @@ public class ForgeUtils {
 		return consoleThread;
 	}
 	
+	private static final java.util.regex.Pattern PRESENCE_POLL_NOISE = java.util.regex.Pattern.compile(
+			"There are\\s+\\d+\\s+of a max of\\s+\\d+\\s+players online", java.util.regex.Pattern.CASE_INSENSITIVE);
+	private static final int CONSOLE_MAX_LINES = 1200;
+	private static final int CONSOLE_KEEP_LINES = 800;
+
+	/** Roster-poll responses feed the presence tracker but should not reach the visible console. */
+	static boolean isPresencePollNoise(String line) {
+		return line != null && PRESENCE_POLL_NOISE.matcher(line).find();
+	}
+
+	/** Caps the console document so hours of hosting cannot degrade the whole UI. */
+	private static void trimConsole(JTextArea consoleArea) {
+		int lines = consoleArea.getLineCount();
+		if(lines <= CONSOLE_MAX_LINES) return;
+		try {
+			consoleArea.getDocument().remove(0, consoleArea.getLineStartOffset(lines - CONSOLE_KEEP_LINES));
+		} catch(javax.swing.text.BadLocationException unreachable) {}
+	}
+
 	private static volatile java.util.concurrent.CountDownLatch savedTheGameLatch = null;
 
 	/** Feeds console lines to whoever is waiting for a save confirmation. */
