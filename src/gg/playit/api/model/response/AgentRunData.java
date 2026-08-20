@@ -8,10 +8,11 @@ import java.util.List;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record AgentRunData(
-    String agent_id,
-    AgentType agent_type,
-    AgentAccountStatus account_status,
-    List<AgentTunnel> tunnels,
-    List<AgentPendingTunnel> pending,
-    AccountFeatures account_features
-) {}
+		String agent_id,
+		AgentType agent_type,
+		AgentAccountStatus account_status,
+		List<AgentTunnel> tunnels,
+		List<AgentPendingTunnel> pending,
+		AccountFeatures account_features )
+{
+}

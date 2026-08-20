@@ -4,4 +4,6 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import gg.playit.api.model.enums.AgentNoticePriority;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record AgentNotice(AgentNoticePriority priority, String message, String resolve_link) {}
+public record AgentNotice( AgentNoticePriority priority, String message, String resolve_link )
+{
+}

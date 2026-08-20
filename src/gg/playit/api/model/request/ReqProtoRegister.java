@@ -5,10 +5,11 @@ import gg.playit.api.model.enums.Platform;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record ReqProtoRegister(
-    PlayitAgentVersion agent_version,
-    Long proto_version,
-    AgentVersion version,
-    Platform platform,
-    String client_addr,
-    String tunnel_addr
-) {}
+		PlayitAgentVersion agent_version,
+		Long proto_version,
+		AgentVersion version,
+		Platform platform,
+		String client_addr,
+		String tunnel_addr )
+{
+}

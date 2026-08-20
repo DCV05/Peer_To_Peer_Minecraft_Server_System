@@ -5,4 +5,6 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.List;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record AccountTunnelsV1(List<AccountTunnelV1> tunnels) {}
+public record AccountTunnelsV1( List<AccountTunnelV1> tunnels )
+{
+}

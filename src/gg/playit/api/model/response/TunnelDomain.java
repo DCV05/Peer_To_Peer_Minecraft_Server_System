@@ -3,4 +3,6 @@ package gg.playit.api.model.response;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record TunnelDomain(String id, String name) {}
+public record TunnelDomain( String id, String name )
+{
+}

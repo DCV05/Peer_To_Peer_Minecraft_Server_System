@@ -2,18 +2,20 @@ package gg.playit.api.model.enums;
 
 import com.fasterxml.jackson.annotation.JsonValue;
 
-public enum ProxyProtocol {
-    ProxyProtocolV1("proxy-protocol-v1"),
-    ProxyProtocolV2("proxy-protocol-v2");
+public enum ProxyProtocol
+{
+	ProxyProtocolV1("proxy-protocol-v1"), ProxyProtocolV2("proxy-protocol-v2");
 
-    private final String value;
+	private final String value;
 
-    ProxyProtocol(String value) {
-        this.value = value;
-    }
+	ProxyProtocol( String value )
+	{
+		this.value = value;
+	}
 
-    @JsonValue
-    public String getValue() {
-        return value;
-    }
+	@JsonValue
+	public String getValue()
+	{
+		return value;
+	}
 }

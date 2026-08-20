@@ -6,8 +6,9 @@ import java.util.List;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record AgentRouting(
-    String agent_id,
-    List<String> targets4,
-    List<String> targets6,
-    boolean disable_ip6
-) {}
+		String agent_id,
+		List<String> targets4,
+		List<String> targets6,
+		boolean disable_ip6 )
+{
+}

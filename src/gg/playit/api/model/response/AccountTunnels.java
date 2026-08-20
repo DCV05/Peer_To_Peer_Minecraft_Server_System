@@ -6,7 +6,8 @@ import java.util.List;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record AccountTunnels(
-    List<AccountTunnel> tunnels,
-    AllocatedPorts tcp_alloc,
-    AllocatedPorts udp_alloc
-) {}
+		List<AccountTunnel> tunnels,
+		AllocatedPorts tcp_alloc,
+		AllocatedPorts udp_alloc )
+{
+}

@@ -10,11 +10,6 @@ insert_final_newline = true
 indent_style = tab
 indent_size = 4
 
-# Codigo de terceros vendorizado: se respeta su estilo original
-[src/gg/**]
-indent_style = unset
-indent_size = unset
-
 [*.{yml,yaml,json,md}]
 indent_style = space
 indent_size = 2

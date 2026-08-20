@@ -7,8 +7,11 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
 @JsonSubTypes({
-    @JsonSubTypes.Type(value = AccountTunnelOriginCreate.Agent.class, name = "agent")
+		@JsonSubTypes.Type(value = AccountTunnelOriginCreate.Agent.class, name = "agent")
 })
-public sealed interface AccountTunnelOriginCreate permits AccountTunnelOriginCreate.Agent {
-    record Agent(AgentOrigin data) implements AccountTunnelOriginCreate {}
+public sealed interface AccountTunnelOriginCreate permits AccountTunnelOriginCreate.Agent
+{
+	record Agent( AgentOrigin data ) implements AccountTunnelOriginCreate
+	{
+	}
 }

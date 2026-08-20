@@ -10,22 +10,23 @@ import gg.playit.api.model.enums.TunnelType;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record AccountTunnel(
-    String id,
-    TunnelType tunnel_type,
-    String created_at,
-    String name,
-    PortType port_type,
-    int port_count,
-    AccountTunnelAllocation alloc,
-    TunnelOrigin origin,
-    TunnelDomain domain,
-    String firewall_id,
-    Ratelimit ratelimit,
-    boolean active,
-    TunnelOfflineReason disabled_reason,
-    PlayitNetwork region,
-    ExpireNotice expire_notice,
-    ProxyProtocol proxy_protocol,
-    HostnameVerifyLevel hostname_verify_level,
-    boolean agent_over_limit
-) {}
+		String id,
+		TunnelType tunnel_type,
+		String created_at,
+		String name,
+		PortType port_type,
+		int port_count,
+		AccountTunnelAllocation alloc,
+		TunnelOrigin origin,
+		TunnelDomain domain,
+		String firewall_id,
+		Ratelimit ratelimit,
+		boolean active,
+		TunnelOfflineReason disabled_reason,
+		PlayitNetwork region,
+		ExpireNotice expire_notice,
+		ProxyProtocol proxy_protocol,
+		HostnameVerifyLevel hostname_verify_level,
+		boolean agent_over_limit )
+{
+}

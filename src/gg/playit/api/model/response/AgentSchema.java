@@ -6,7 +6,8 @@ import java.util.List;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record AgentSchema(
-    AgentTunnelSchema default_schema,
-    List<AgentSchemaForTunnelType> schemas,
-    Boolean only_explicit_schemas
-) {}
+		AgentTunnelSchema default_schema,
+		List<AgentSchemaForTunnelType> schemas,
+		Boolean only_explicit_schemas )
+{
+}

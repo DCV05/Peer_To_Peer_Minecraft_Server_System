@@ -126,9 +126,6 @@
               <include>src/**/*.java</include>
               <include>tests/**/*.java</include>
             </includes>
-            <excludes>
-              <exclude>src/gg/**</exclude>
-            </excludes>
             <eclipse>
               <file>${project.basedir}/style/eclipse-format.xml</file>
             </eclipse>

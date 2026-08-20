@@ -7,10 +7,15 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
 @JsonSubTypes({
-    @JsonSubTypes.Type(value = TunnelOrigin.Agent.class, name = "agent"),
-    @JsonSubTypes.Type(value = TunnelOrigin.Managed.class, name = "managed")
+		@JsonSubTypes.Type(value = TunnelOrigin.Agent.class, name = "agent"),
+		@JsonSubTypes.Type(value = TunnelOrigin.Managed.class, name = "managed")
 })
-public sealed interface TunnelOrigin permits TunnelOrigin.Agent, TunnelOrigin.Managed {
-    record Agent(AssignedAgent data) implements TunnelOrigin {}
-    record Managed(AssignedManaged data) implements TunnelOrigin {}
+public sealed interface TunnelOrigin permits TunnelOrigin.Agent, TunnelOrigin.Managed
+{
+	record Agent( AssignedAgent data ) implements TunnelOrigin
+	{
+	}
+	record Managed( AssignedManaged data ) implements TunnelOrigin
+	{
+	}
 }

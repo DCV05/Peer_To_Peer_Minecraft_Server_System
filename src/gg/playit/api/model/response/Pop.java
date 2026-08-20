@@ -5,4 +5,6 @@ import gg.playit.api.model.enums.PlayitNetwork;
 import gg.playit.api.model.enums.PlayitPop;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record Pop(PlayitPop pop, String name, PlayitNetwork region, boolean online, boolean ip4_premium) {}
+public record Pop( PlayitPop pop, String name, PlayitNetwork region, boolean online, boolean ip4_premium )
+{
+}

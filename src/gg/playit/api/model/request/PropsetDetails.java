@@ -7,10 +7,15 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
 @JsonSubTypes({
-    @JsonSubTypes.Type(value = PropsetDetails.HostnameVerifyLevel.class, name = "hostname_verify_level"),
-    @JsonSubTypes.Type(value = PropsetDetails.CustomTunnelDetails.class, name = "custom_tunnel_details")
+		@JsonSubTypes.Type(value = PropsetDetails.HostnameVerifyLevel.class, name = "hostname_verify_level"),
+		@JsonSubTypes.Type(value = PropsetDetails.CustomTunnelDetails.class, name = "custom_tunnel_details")
 })
-public sealed interface PropsetDetails permits PropsetDetails.HostnameVerifyLevel, PropsetDetails.CustomTunnelDetails {
-    record HostnameVerifyLevel(HostnameVerifyLevel value) implements PropsetDetails {}
-    record CustomTunnelDetails(String value) implements PropsetDetails {}
+public sealed interface PropsetDetails permits PropsetDetails.HostnameVerifyLevel, PropsetDetails.CustomTunnelDetails
+{
+	record HostnameVerifyLevel( HostnameVerifyLevel value ) implements PropsetDetails
+	{
+	}
+	record CustomTunnelDetails( String value ) implements PropsetDetails
+	{
+	}
 }

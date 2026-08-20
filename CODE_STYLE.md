@@ -1,7 +1,7 @@
 # Guía de estilo del proyecto
 
-> Identificadores en inglés, comentarios en español. Aplica a `src/` y `tests/`
-> EXCEPTO `src/gg/**` (código de terceros vendorizado: no se toca su estilo).
+> Identificadores en inglés, comentarios en español. Aplica a TODO el código
+> del repo (`src/` y `tests/`, incluido el vendorizado).
 
 ## Formato
 

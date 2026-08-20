@@ -7,10 +7,15 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
 @JsonSubTypes({
-    @JsonSubTypes.Type(value = PublicAllocation.PortAllocationType.class, name = "PortAllocation"),
-    @JsonSubTypes.Type(value = PublicAllocation.GatewayType.class, name = "Gateway")
+		@JsonSubTypes.Type(value = PublicAllocation.PortAllocationType.class, name = "PortAllocation"),
+		@JsonSubTypes.Type(value = PublicAllocation.GatewayType.class, name = "Gateway")
 })
-public sealed interface PublicAllocation permits PublicAllocation.PortAllocationType, PublicAllocation.GatewayType {
-    record PortAllocationType(PortAllocation details) implements PublicAllocation {}
-    record GatewayType(GatewayAllocation details) implements PublicAllocation {}
+public sealed interface PublicAllocation permits PublicAllocation.PortAllocationType, PublicAllocation.GatewayType
+{
+	record PortAllocationType( PortAllocation details ) implements PublicAllocation
+	{
+	}
+	record GatewayType( GatewayAllocation details ) implements PublicAllocation
+	{
+	}
 }

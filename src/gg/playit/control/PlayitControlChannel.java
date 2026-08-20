@@ -19,129 +19,153 @@ import java.util.Arrays;
 import java.util.Optional;
 import java.util.logging.Logger;
 
-public class PlayitControlChannel implements Closeable {
-    static Logger log = Logger.getLogger(ChannelSetup.class.getName());
+public class PlayitControlChannel implements Closeable
+{
+	static Logger log = Logger.getLogger( ChannelSetup.class.getName() );
 
-    ApiClient apiClient;
-    DatagramSocket socket;
-    InetAddress controlAddress;
-    int controlPort;
-    ControlFeedReader.Pong ogPong;
-    ControlFeedReader.Pong latestPong;
-    ControlFeedReader.AgentRegistered registered;
+	ApiClient apiClient;
+	DatagramSocket socket;
+	InetAddress controlAddress;
+	int controlPort;
+	ControlFeedReader.Pong ogPong;
+	ControlFeedReader.Pong latestPong;
+	ControlFeedReader.AgentRegistered registered;
 
-    private final ByteBuffer sendBuffer = ByteBuffer.allocate(2048);
+	private final ByteBuffer sendBuffer = ByteBuffer.allocate( 2048 );
 
-    private long lastKeepAlive;
-    private long lastPing;
+	private long lastKeepAlive;
+	private long lastPing;
 
-    /**
-     * Set up an authenticated control channel.
-     *
-     * @param secretKey    the agent secret key
-     * @param agentVersion the agent version for proto register, or null to use the default
-     */
-    public static PlayitControlChannel setup(String secretKey, AgentVersion agentVersion) throws IOException {
-        try {
-            return ChannelSetup
-                    .start(secretKey, agentVersion)
-                    .findChannel()
-                    .authenticate(secretKey);
-        } catch (DecodeException | BufferUnderflowException error) {
-            throw new IOException("failed to encoding / decoding data", error);
-        }
-    }
+	/**
+	 * Set up an authenticated control channel.
+	 *
+	 * @param secretKey    the agent secret key
+	 * @param agentVersion the agent version for proto register, or null to use the default
+	 */
+	public static PlayitControlChannel setup( String secretKey, AgentVersion agentVersion ) throws IOException
+	{
+		try
+		{
+			return ChannelSetup
+					.start( secretKey, agentVersion )
+					.findChannel()
+					.authenticate( secretKey );
+		}
+		catch( DecodeException | BufferUnderflowException error )
+		{
+			throw new IOException( "failed to encoding / decoding data", error );
+		}
+	}
 
-    public Optional<ControlFeedReader.ControlFeed> update() throws IOException {
-        try {
-            var now = Instant.now().toEpochMilli();
+	public Optional<ControlFeedReader.ControlFeed> update() throws IOException
+	{
+		try
+		{
+			var now = Instant.now().toEpochMilli();
 
-            /* Ping every 1s per protocol v2 */
-            if (now - lastPing > 1_000) {
-                lastPing = now;
-                this.sendPing(now);
-            }
+			/* Ping every 1s per protocol v2 */
+			if( now - lastPing > 1_000 )
+			{
+				lastPing = now;
+				this.sendPing( now );
+			}
 
-            var tillExpire = this.registered.expiresAt - now;
-            if (tillExpire < 60_000 && 10_000 < now - lastKeepAlive) {
-                log.info("send keep alive");
-                lastKeepAlive = now;
+			var tillExpire = this.registered.expiresAt - now;
+			if( tillExpire < 60_000 && 10_000 < now - lastKeepAlive )
+			{
+				log.info( "send keep alive" );
+				lastKeepAlive = now;
 
-                this.sendKeepAlive();
-            }
+				this.sendKeepAlive();
+			}
 
-            this.socket.setSoTimeout(3_000);
+			this.socket.setSoTimeout( 3_000 );
 
-            DatagramPacket rxPacket = new DatagramPacket(new byte[2048], 0, 2048);
+			DatagramPacket rxPacket = new DatagramPacket( new byte[2048], 0, 2048 );
 
-            try {
-                this.socket.receive(rxPacket);
-            } catch (SocketTimeoutException ignore) {
-                return Optional.empty();
-            }
+			try
+			{
+				this.socket.receive( rxPacket );
+			}
+			catch( SocketTimeoutException ignore )
+			{
+				return Optional.empty();
+			}
 
-            if (!Arrays.equals(rxPacket.getAddress().getAddress(), this.controlAddress.getAddress()) || rxPacket.getPort() != controlPort) {
-                log.warning("got packet from unexpected source: " + rxPacket.getAddress() + ", port: " + rxPacket.getPort());
-                return Optional.empty();
-            }
+			if( !Arrays.equals( rxPacket.getAddress().getAddress(), this.controlAddress.getAddress() )
+					|| rxPacket.getPort() != controlPort )
+			{
+				log.warning( "got packet from unexpected source: " + rxPacket.getAddress() + ", port: " + rxPacket.getPort() );
+				return Optional.empty();
+			}
 
-            var buffer = ByteBuffer.wrap(
-                    rxPacket.getData(),
-                    rxPacket.getOffset(),
-                    rxPacket.getLength()
-            );
+			var buffer = ByteBuffer.wrap(
+					rxPacket.getData(),
+					rxPacket.getOffset(),
+					rxPacket.getLength() );
 
-            var read = ControlFeedReader.read(buffer);
+			var read = ControlFeedReader.read( buffer );
 
-            if (read instanceof ControlFeedReader.Pong pong) {
-                this.latestPong = pong;
+			if( read instanceof ControlFeedReader.Pong pong )
+			{
+				this.latestPong = pong;
 
-                if (pong.sessionExpireAt != 0) {
-                    this.registered.expiresAt = pong.sessionExpireAt;
-                }
-            } else if (read instanceof ControlFeedReader.AgentRegistered registered) {
-                this.registered = registered;
-            }
+				if( pong.sessionExpireAt != 0 )
+				{
+					this.registered.expiresAt = pong.sessionExpireAt;
+				}
+			}
+			else if( read instanceof ControlFeedReader.AgentRegistered registered )
+			{
+				this.registered = registered;
+			}
 
-            return Optional.of(read);
-        } catch (Exception e) {
-            throw new IOException("got unexpected error", e);
-        }
-    }
+			return Optional.of( read );
+		}
+		catch( Exception e )
+		{
+			throw new IOException( "got unexpected error", e );
+		}
+	}
 
-    private void sendPing(long now) throws IOException {
-        sendBuffer.clear();
-        ControlRequestWriter.requestId(sendBuffer, 200).ping(now, this.registered.id);
-        this.sendPacket();
-    }
+	private void sendPing( long now ) throws IOException
+	{
+		sendBuffer.clear();
+		ControlRequestWriter.requestId( sendBuffer, 200 ).ping( now, this.registered.id );
+		this.sendPacket();
+	}
 
-    private void sendKeepAlive() throws IOException {
-        sendBuffer.clear();
-        ControlRequestWriter.requestId(sendBuffer, 100).keepAlive(this.registered.id);
-        this.sendPacket();
-    }
+	private void sendKeepAlive() throws IOException
+	{
+		sendBuffer.clear();
+		ControlRequestWriter.requestId( sendBuffer, 100 ).keepAlive( this.registered.id );
+		this.sendPacket();
+	}
 
-    private void sendPacket() throws IOException {
-        DatagramPacket p = new DatagramPacket(sendBuffer.array(), sendBuffer.arrayOffset(), sendBuffer.position());
-        p.setAddress(this.controlAddress);
-        p.setPort(controlPort);
-        this.socket.send(p);
-    }
+	private void sendPacket() throws IOException
+	{
+		DatagramPacket p = new DatagramPacket( sendBuffer.array(), sendBuffer.arrayOffset(), sendBuffer.position() );
+		p.setAddress( this.controlAddress );
+		p.setPort( controlPort );
+		this.socket.send( p );
+	}
 
-    @Override
-    public String toString() {
-        return "ControlChannel{" +
-                "apiClient=" + apiClient +
-                ", socket=" + socket +
-                ", controlAddress=" + controlAddress +
-                ", ogPong=" + ogPong +
-                ", latestPong=" + latestPong +
-                ", registered=" + registered +
-                '}';
-    }
+	@Override
+	public String toString()
+	{
+		return "ControlChannel{" +
+				"apiClient=" + apiClient +
+				", socket=" + socket +
+				", controlAddress=" + controlAddress +
+				", ogPong=" + ogPong +
+				", latestPong=" + latestPong +
+				", registered=" + registered +
+				'}';
+	}
 
-    @Override
-    public void close() throws IOException {
-        this.socket.close();
-    }
+	@Override
+	public void close() throws IOException
+	{
+		this.socket.close();
+	}
 }

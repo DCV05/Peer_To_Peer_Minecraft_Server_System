@@ -6,4 +6,6 @@ import gg.playit.api.model.enums.PlayitNetwork;
 import java.util.List;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record PlayitPops(List<Pop> pops, List<PlayitNetwork> regions) {}
+public record PlayitPops( List<Pop> pops, List<PlayitNetwork> regions )
+{
+}

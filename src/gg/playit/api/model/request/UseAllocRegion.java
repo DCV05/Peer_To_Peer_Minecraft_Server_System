@@ -4,4 +4,6 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import gg.playit.api.model.enums.PlayitNetwork;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record UseAllocRegion(PlayitNetwork region, Integer port) {}
+public record UseAllocRegion( PlayitNetwork region, Integer port )
+{
+}
