@@ -25,6 +25,8 @@ import jgit.TokenStore;
 import minecraftServerManagement.FabricInstaller;
 import minecraftServerManagement.ForgeUtils;
 import minecraftServerManagement.LoaderKind;
+import playit.PlayitAgentFile;
+import playit.PlayitTunnel;
 import minecraftServerManagement.PlayerPresenceTracker;
 import minecraftServerManagement.WorldImportService;
 import vpn.DiscoveryResponder;
@@ -109,6 +111,7 @@ public class MainFrame {
 	public static JMenuItem cloudInUseReminderMenuText;
 	public static MainFrame window = null;
 	private static java.util.Timer hostLockHeartbeatTimer = null;
+	private static PlayitTunnel activePlayitTunnel = null;
 
 	private JFrame frame;
 	private MinecraftDashboard dashboard;
@@ -1278,19 +1281,19 @@ public class MainFrame {
 		configDialog.getContentPane().setLayout(new BorderLayout());
 		configDialog.setResizable(false);
 		int configDialogWidht = 300;
-		int configDialogHeight = 240;
+		int configDialogHeight = 280;
 		configDialog.setSize(configDialogWidht, configDialogHeight);
 		configDialog.setLocationRelativeTo(fatherFrame);
 		configDialog.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-		
+
 		//Array for the autoSaveSelect
 		String[] autoSaveIntervalsTexts = { "Off", "5 mins", "10 mins", "30 mins", "1 h", "2 h" };
 		int[] autoSaveIntervalsInts = { 0, 5 * 60, 10 * 60, 30 * 60, 1 * 60 * 60, 2 * 60 * 60 };
-		
-		JPanel contentPane = new JPanel(new GridLayout(8, 1));
+
+		JPanel contentPane = new JPanel(new GridLayout(10, 1));
 		JPanel buttonsPane = new JPanel(new FlowLayout(FlowLayout.RIGHT));
 		JScrollPane scroll = new JScrollPane(contentPane);
-		scroll.setPreferredSize(new Dimension(300, 165));
+		scroll.setPreferredSize(new Dimension(300, 205));
 		scroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
 		scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
 		JLabel networkIDLabel = new JLabel("Nombre de la red");
@@ -1305,6 +1308,13 @@ public class MainFrame {
 
 		int savedIntervalIndex = Arrays.binarySearch(autoSaveIntervalsInts, GitUtils.getSavedAutoSaveInteval());
 		autoSaveIntervalSelect.setSelectedIndex(savedIntervalIndex >= 0 ? savedIntervalIndex : 2 /* 10 mins */);
+
+		PlayitAgentFile playitAgent = PlayitAgentFile.load(serverOpenedDirectory.toPath());
+		javax.swing.JCheckBox publicUrlCheck = new javax.swing.JCheckBox("Enable via playit.gg");
+		publicUrlCheck.setSelected(playitAgent != null && playitAgent.enabled);
+		JLabel publicUrlLabel = new JLabel(playitAgent != null && playitAgent.tunnel_address != null
+				? "<html>URL pública: <b>" + playitAgent.tunnel_address + "</b></html>"
+				: "URL pública (amigos sin VPN ni la app)");
 		JButton saveBtn = new JButton("Save");
 		
 		contentPane.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
@@ -1321,6 +1331,8 @@ public class MainFrame {
 		contentPane.add(serverRamAllocInput);
 		contentPane.add(autoSaveIntervalLabel);
 		contentPane.add(autoSaveIntervalSelect);
+		contentPane.add(publicUrlLabel);
+		contentPane.add(publicUrlCheck);
 		buttonsPane.add(saveBtn);
 		configDialog.getContentPane().add(scroll, BorderLayout.NORTH);
 		configDialog.getContentPane().add(buttonsPane, BorderLayout.SOUTH);
@@ -1354,6 +1366,22 @@ public class MainFrame {
 			int selectedAutosaveInteval = autoSaveIntervalsInts[autoSaveIntervalSelect.getSelectedIndex()];
 			if(GitUtils.getSavedAutoSaveInteval() != selectedAutosaveInteval) {
 				GitUtils.setAutoSaveInterval(selectedAutosaveInteval);
+			}
+			PlayitAgentFile storedAgent = PlayitAgentFile.load(serverOpenedDirectory.toPath());
+			boolean publicUrlEnabled = storedAgent != null && storedAgent.enabled;
+			if(publicUrlCheck.isSelected() != publicUrlEnabled) {
+				if(publicUrlCheck.isSelected()) {
+					enablePublicUrl(storedAgent);
+				} else if(storedAgent != null) {
+					storedAgent.enabled = false;
+					try {
+						storedAgent.save(serverOpenedDirectory.toPath());
+						appendDashboardActivity("Public URL disabled for this world");
+					} catch(IOException failure) {
+						appendDashboardActivity("Public URL could not be disabled: " + failure.getMessage());
+					}
+					stopPlayitTunnel();
+				}
 			}
 			configDialog.dispose();
 			actualServerPort = ForgeUtils.getServerPort(serverOpenedDirectory.toPath());
@@ -1439,6 +1467,7 @@ public class MainFrame {
 		setDashboardPhase(Phase.STOPPING, "Waiting for Forge to save and close the world");
 		appendDashboardActivity("Stop requested; waiting for the Forge process");
 		stopHostLockHeartbeat();
+		stopPlayitTunnel();
 		GitUtils.stopAutoSaveAndWait();
 		ForgeUtils.sendCommand("/stop", serverProcess, serverWriter);
 		new Thread(() ->{
@@ -1553,6 +1582,7 @@ public class MainFrame {
 		if(GitUtils.autoSaveSecondsInterval > 0 && isGitHubSelected() && TokenStore.sessionIsOpened()) {
 			GitUtils.activeAutoSave();
 		}
+		startPlayitTunnelIfConfigured();
 	}
 
 	private static void stopHostLockHeartbeat() {
@@ -1560,6 +1590,73 @@ public class MainFrame {
 			hostLockHeartbeatTimer.cancel();
 			hostLockHeartbeatTimer = null;
 		}
+	}
+
+	/** Brings the optional public playit.gg tunnel up when this world has it enabled. */
+	private void startPlayitTunnelIfConfigured() {
+		if(serverOpenedDirectory == null) return;
+		PlayitAgentFile agent = PlayitAgentFile.load(serverOpenedDirectory.toPath());
+		if(agent == null || !agent.readyToStart()) return;
+		stopPlayitTunnel();
+		activePlayitTunnel = new PlayitTunnel(agent.secret_key, actualServerPort, this::appendDashboardActivity);
+		activePlayitTunnel.start();
+		appendDashboardActivity("Starting the public playit.gg tunnel…");
+	}
+
+	private static void stopPlayitTunnel() {
+		if(activePlayitTunnel != null) {
+			activePlayitTunnel.stop();
+			activePlayitTunnel = null;
+		}
+	}
+
+	/** Enables the public URL for this world; claims a playit agent in the browser when needed. */
+	private void enablePublicUrl(PlayitAgentFile existingAgent) {
+		Path serverDirectory = serverOpenedDirectory.toPath();
+		if(existingAgent != null && existingAgent.secret_key != null) {
+			existingAgent.enabled = true;
+			try {
+				existingAgent.save(serverDirectory);
+			} catch(IOException failure) {
+				appendDashboardActivity("Public URL could not be saved: " + failure.getMessage());
+				return;
+			}
+			appendDashboardActivity(existingAgent.tunnel_address != null
+					? "Public URL enabled: " + existingAgent.tunnel_address
+					: "Public URL enabled; it will go online with the server");
+			if(serverIsOn) startPlayitTunnelIfConfigured();
+			return;
+		}
+
+		String claimCode = PlayitTunnel.newClaimCode();
+		ForgeUtils.openURL(PlayitTunnel.claimUrl(claimCode));
+		appendDashboardActivity("Authorize the playit.gg tunnel in the opened browser tab (guest works): "
+				+ PlayitTunnel.claimUrl(claimCode));
+		new Thread(() -> {
+			PlayitTunnel.ClaimOutcome outcome = PlayitTunnel.claimAgent(claimCode, 10 * 60);
+			if(!outcome.ok()) {
+				appendDashboardActivity("playit.gg authorization failed: " + outcome.error());
+				return;
+			}
+			PlayitAgentFile agent = new PlayitAgentFile();
+			agent.enabled = true;
+			agent.secret_key = outcome.secretKey();
+			try {
+				agent.tunnel_address = PlayitTunnel.ensureTunnel(outcome.secretKey());
+			} catch(IOException tunnelFailure) {
+				appendDashboardActivity("playit authorized, but the tunnel is not ready yet: " + tunnelFailure.getMessage());
+			}
+			try {
+				agent.save(serverDirectory);
+			} catch(IOException failure) {
+				appendDashboardActivity("Public URL could not be saved: " + failure.getMessage());
+				return;
+			}
+			appendDashboardActivity(agent.tunnel_address != null
+					? "Public URL ready for every host of this world: " + agent.tunnel_address
+					: "playit authorized; the address will appear when the tunnel starts");
+			if(serverIsOn) startPlayitTunnelIfConfigured();
+		}, "p2pmss-playit-claim").start();
 	}
 
 }
