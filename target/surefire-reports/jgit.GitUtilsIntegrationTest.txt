@@ -1,4 +1,4 @@
 -------------------------------------------------------------------------------
 Test set: jgit.GitUtilsIntegrationTest
 -------------------------------------------------------------------------------
-Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.541 s -- in jgit.GitUtilsIntegrationTest
+Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.605 s -- in jgit.GitUtilsIntegrationTest

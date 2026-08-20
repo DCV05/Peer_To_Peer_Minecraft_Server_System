@@ -133,7 +133,8 @@ public class GitWindows {
 			}
 
 			if(!TokenStore.saveUserData(authenticatedLogin, email, token)) {
-				tokenLabel.setText(String.format(errorMessageTemplate, tokenLabelText, "The session could not be saved."));
+				tokenLabel.setText(String.format(errorMessageTemplate, tokenLabelText,
+						"Cannot write the 'data' folder here. Run the app from a folder you own (not inside a ZIP or Program Files)."));
 				return;
 			}
 

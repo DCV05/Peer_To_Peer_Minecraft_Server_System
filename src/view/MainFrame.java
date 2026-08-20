@@ -1373,13 +1373,23 @@ public class MainFrame {
 	}
 	
 	public static void checkIfExistsDataFolder() {
-		if(!(Files.exists(Paths.get("data")))) {
-			try {
-				Files.createDirectory(Paths.get("data"));
-			}
-			catch(IOException e) {
-				JOptionPane.showMessageDialog(null, "File not found or inaccessible", "Error", JOptionPane.ERROR_MESSAGE);
-			}
+		try {
+			Files.createDirectories(Paths.get("data"));
+			// Probar escritura real: existir no garantiza poder escribir (zip sin
+			// extraer, Program Files, consola en carpeta protegida...)
+			Path probe = Paths.get("data", ".write-probe");
+			Files.writeString(probe, "ok");
+			Files.deleteIfExists(probe);
+		}
+		catch(IOException cannotWrite) {
+			JOptionPane.showMessageDialog(null,
+					"P2PMSS cannot write next to where it is running:\n"
+					+ Paths.get("").toAbsolutePath() + "\n\n"
+					+ "Move the app to a normal folder you own (for example Desktop or\n"
+					+ "C:\\Users\\you\\p2pmss) — extract it fully if it came in a ZIP —\n"
+					+ "and launch it from there. The app stores its session and settings\n"
+					+ "in a 'data' folder created beside itself.",
+					"Folder not writable", JOptionPane.ERROR_MESSAGE);
 		}
 	}
 	
