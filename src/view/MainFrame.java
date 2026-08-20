@@ -750,14 +750,30 @@ public class MainFrame {
 		consoleArea = dashboard.consoleArea();
 	}
 
-	/** Startup update check against the public GitHub releases; stays silent unless a newer version exists. */
+	private volatile String lastOfferedUpdateVersion = null;
+
+	/**
+	 * Update check against the public GitHub releases: once on startup and then
+	 * every minute while the app stays open (long hosting sessions would miss a
+	 * startup-only check). Each new version is offered exactly once; silent
+	 * otherwise.
+	 */
 	private void checkForUpdatesAsync() {
+		runUpdateCheck();
+		javax.swing.Timer periodicUpdateCheck = new javax.swing.Timer(60 * 1000, event -> runUpdateCheck());
+		periodicUpdateCheck.setRepeats(true);
+		periodicUpdateCheck.start();
+	}
+
+	private void runUpdateCheck() {
 		Thread checker = new Thread(() -> app.UpdateChecker.findNewerRelease().ifPresent(release -> SwingUtilities.invokeLater(() -> {
+			if(release.version().equals(lastOfferedUpdateVersion)) return;
+			lastOfferedUpdateVersion = release.version();
 			String[] options = { "DOWNLOAD UPDATE", "LATER" };
 			int choice = JOptionPane.showOptionDialog(
 					frame,
 					"P2PMSS " + release.version() + " is available (you are running " + app.UpdateChecker.currentVersion() + ").\n"
-							+ "Download the new jar and replace the one you are using.",
+							+ "Download the new installer and replace the one you are using.",
 					"Update available",
 					JOptionPane.YES_NO_OPTION,
 					JOptionPane.INFORMATION_MESSAGE,
