@@ -102,12 +102,18 @@ public final class UpdateChecker
 			do
 			{
 				HttpClient client = HttpClient.newBuilder().connectTimeout( REQUEST_TIMEOUT ).build();
-				HttpRequest request = HttpRequest.newBuilder()
+				HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
 						.uri( URI.create( apiBase() + "/repos/" + releasesRepo() + "/releases/latest" ) )
 						.timeout( REQUEST_TIMEOUT )
 						.header( "Accept", "application/vnd.github+json" )
-						.GET()
-						.build();
+						.GET();
+				// Sin token, GitHub limita a 60 peticiones/hora POR IP: con el chequeo
+				// periodico de cada minuto se agota solo y las actualizaciones dejan de
+				// ofrecerse en silencio. Con la sesion abierta el limite sube a 5000/h
+				String token = sessionToken();
+				if( token != null )
+					requestBuilder.header( "Authorization", "Bearer " + token );
+				HttpRequest request = requestBuilder.build();
 
 				HttpResponse<String> response = client.send( request, HttpResponse.BodyHandlers.ofString() );
 				if( response.statusCode() != 200 )
@@ -133,6 +139,25 @@ public final class UpdateChecker
 		{
 			// Sin red o API caida: silencio, el siguiente chequeo periodico reintenta
 			result = Optional.empty();
+		}
+		return result;
+	}
+
+	/**
+	 * Token de la sesion de GitHub guardada, o null si no hay ninguna abierta.
+	 * Fallo tolerado: sin token el chequeo sigue funcionando, solo que con el
+	 * limite anonimo de la API.
+	 */
+	private static String sessionToken()
+	{
+		String result = null;
+		try
+		{
+			result = jgit.TokenStore.getSavedUserData().get( "token" );
+		}
+		catch( Exception noSession )
+		{
+			// Sin sesion abierta: se consulta la API de forma anonima
 		}
 		return result;
 	}
