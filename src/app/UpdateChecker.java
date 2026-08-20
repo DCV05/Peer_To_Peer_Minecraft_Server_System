@@ -90,6 +90,10 @@ public final class UpdateChecker {
 
 			String pageUrl = release.path("html_url").asText("https://github.com/" + releasesRepo() + "/releases");
 			String downloadUrl = pickDownloadUrl(release.path("assets"), System.getProperty("os.name", ""));
+			// La release se publica unos minutos antes de que el CI adjunte los
+			// instaladores: hasta que no exista el asset de ESTA plataforma no se
+			// ofrece nada; el siguiente chequeo periodico la recogera ya completa
+			if(downloadUrl == null) return Optional.empty();
 			return Optional.of(new ReleaseInfo(version, pageUrl, downloadUrl));
 		} catch(Exception unreachable) {
 			return Optional.empty();

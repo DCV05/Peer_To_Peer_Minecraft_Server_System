@@ -82,6 +82,14 @@ class UpdateCheckerTest {
 	}
 
 	@Test
+	void releaseWithoutAPlatformInstallerIsNotOfferedYet() throws Exception {
+		// El CI adjunta los instaladores minutos despues de publicarse la release:
+		// sin asset compatible no hay oferta, y el siguiente chequeo la recogera
+		serveLatestRelease("{ \"tag_name\": \"v99.0.0-p2p\", \"assets\": [] }", 200);
+		assertTrue(UpdateChecker.findNewerRelease().isEmpty());
+	}
+
+	@Test
 	void malformedTagMeansNoUpdate() throws Exception {
 		serveLatestRelease("{ \"tag_name\": \"latest-build\", \"assets\": [] }", 200);
 		assertTrue(UpdateChecker.findNewerRelease().isEmpty());
