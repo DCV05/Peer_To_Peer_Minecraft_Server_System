@@ -96,4 +96,21 @@ class ForgeUtilsTest {
         assertEquals("-Xmx2048M", ForgeUtils.getServerRAMAlloc(server));
         assertEquals("world-sentinel", Files.readString(world.resolve("level.dat")));
     }
+
+    @Test
+    void serverReadyLineMatchesOnlyTheRealDoneBanner() {
+        assertTrue(ForgeUtils.isServerReadyLine("[16:47:07] [Server thread/INFO]: Done (1.614s)! For help, type \"help\""));
+        assertTrue(ForgeUtils.isServerReadyLine("[Server thread/INFO]: Done (12.345s)!"));
+        org.junit.jupiter.api.Assertions.assertFalse(ForgeUtils.isServerReadyLine("[16:50:00] [Server thread/INFO]: <Victor> Done"));
+        org.junit.jupiter.api.Assertions.assertFalse(ForgeUtils.isServerReadyLine("Done deal, moving on"));
+        org.junit.jupiter.api.Assertions.assertFalse(ForgeUtils.isServerReadyLine(null));
+    }
+
+    @Test
+    void presencePollResponsesAreConsoleNoise() {
+        assertTrue(ForgeUtils.isPresencePollNoise("[17:03:08] [Server thread/INFO]: There are 0 of a max of 20 players online: "));
+        assertTrue(ForgeUtils.isPresencePollNoise("There are 3 of a max of 20 players online: a, b, c"));
+        org.junit.jupiter.api.Assertions.assertFalse(ForgeUtils.isPresencePollNoise("[17:03:08] [Server thread/INFO]: Victor joined the game"));
+        org.junit.jupiter.api.Assertions.assertFalse(ForgeUtils.isPresencePollNoise(null));
+    }
 }

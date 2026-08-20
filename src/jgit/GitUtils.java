@@ -59,6 +59,10 @@ public class GitUtils {
 	public static final Path JOINED_REPOS = app.AppPaths.dataFile("joined_repos.properties");
 	private static final String GITHUB_API_PROPERTY = "p2pmss.githubApiBase";
 	static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
+	// Sin timeout, una red colgada a medias deja push/pull bloqueados para siempre
+	// (y con ellos el boton STOP). Valores generosos para mundos grandes.
+	static final int REMOTE_GIT_TIMEOUT_SECONDS = 600;
+	static final int CLONE_TIMEOUT_SECONDS = 1800;
 	static final HttpClient HTTP_CLIENT = HttpClient.newBuilder().connectTimeout(REQUEST_TIMEOUT).build();
 	static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 	private static final String BACKUP_IGNORE_START = "# BEGIN P2PMSS MANAGED BACKUP EXCLUDES";
@@ -630,6 +634,7 @@ public class GitUtils {
 				.setURI(cloneUrl)
 				.setDirectory(clonePath.toFile())
 				.setCredentialsProvider(credentials)
+				.setTimeout(CLONE_TIMEOUT_SECONDS)
 				.call()) {
 
 			if(!setLocalIdentity(git, userdata)) return false;
@@ -773,7 +778,7 @@ public class GitUtils {
 		PushCheckResult first = pushOnce(git, credentials);
 		if(first.success() || !first.nonFastForward()) return first;
 		try {
-			git.fetch().setCredentialsProvider(credentials).call();
+			git.fetch().setCredentialsProvider(credentials).setTimeout(REMOTE_GIT_TIMEOUT_SECONDS).call();
 			String branch = git.getRepository().getBranch();
 			// Rebase normal; solo los ficheros en CONFLICTO se resuelven a favor del
 			// backup local (THEIRS durante un rebase = los commits que se reaplican):
@@ -797,7 +802,7 @@ public class GitUtils {
 	}
 
 	private static PushCheckResult pushOnce(Git git, UsernamePasswordCredentialsProvider credentials) throws GitAPIException {
-		Iterable<PushResult> pushResults = git.push().setCredentialsProvider(credentials).call();
+		Iterable<PushResult> pushResults = git.push().setCredentialsProvider(credentials).setTimeout(REMOTE_GIT_TIMEOUT_SECONDS).call();
 		boolean updateFound = false;
 		for(PushResult pushResult : pushResults) {
 			for(RemoteRefUpdate update : pushResult.getRemoteUpdates()) {
@@ -840,7 +845,9 @@ public class GitUtils {
 		autoSaveSecondsInterval = seconds;
 		saveAutoSaveInterval();
 		if(serverAutoSaveIsActive) {
-			serverAutoSaveIsActive = false;
+			// Parar y ESPERAR al hilo anterior: si no, el viejo sigue vivo y se
+			// duplican los ciclos de save-off/push por cada cambio de intervalo
+			stopAutoSaveAndWait();
 			activeAutoSave();
 		}
 	}
@@ -947,12 +954,22 @@ public class GitUtils {
 		}
 	}
 
-	/** Stops the autosave loop and waits for any in-flight snapshot before the stop backup runs. */
+	/**
+	 * Stops the autosave loop and waits (bounded) for any in-flight snapshot
+	 * before the stop backup runs. The join is bounded above the remote git
+	 * timeout so a hung network can never freeze the STOP button forever.
+	 */
 	public static void stopAutoSaveAndWait() {
 		serverAutoSaveIsActive = false;
 		Thread process = autoSaveProcess;
-		if(process != null) process.interrupt();
-		synchronized(LIVE_SAVE_MUTEX) { /* espera al lote en vuelo */ }
+		if(process != null) {
+			process.interrupt();
+			try {
+				process.join((REMOTE_GIT_TIMEOUT_SECONDS + 120) * 1000L);
+			} catch(InterruptedException interrupted) {
+				Thread.currentThread().interrupt();
+			}
+		}
 		autoSaveProcess = null;
 	}
 	
@@ -963,7 +980,7 @@ public class GitUtils {
 		
 		try (Git git = Git.open(repoPath.toFile())) {
 
-		    git.fetch().setCredentialsProvider(credentials).call();
+		    git.fetch().setCredentialsProvider(credentials).setTimeout(REMOTE_GIT_TIMEOUT_SECONDS).call();
 
 		    Repository repo = git.getRepository();
 		  
@@ -998,6 +1015,7 @@ public class GitUtils {
 			if(!git.status().call().isClean() || !hasRemoteOrigin(repoPath)) return false;
 			PullResult result = git.pull()
 				.setCredentialsProvider(credentials)
+				.setTimeout(REMOTE_GIT_TIMEOUT_SECONDS)
 				.call();
 			return result.isSuccessful();
 		} catch (Exception e) {

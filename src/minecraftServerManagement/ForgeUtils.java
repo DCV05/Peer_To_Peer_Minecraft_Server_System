@@ -300,11 +300,20 @@ public class ForgeUtils {
 		return getServerOutputs(serverProcess, consoleArea, line -> {});
 	}
 
-	/** Streams Forge output to both the console and an optional state observer. */
+	/** True only for the real server-ready line, e.g. Done (1.614s)! — chat containing "Done" must not match. */
+	static boolean isServerReadyLine(String line) {
+		return line != null && line.matches(".*\\bDone \\(.*\\)!.*");
+	}
+
+	/**
+	 * Streams Forge output to both the console and an optional state observer.
+	 * The whole loop body is exception-proof: if this thread dies, nobody reads
+	 * the child's pipe, the buffer fills up and the server freezes for players.
+	 */
 	public static Thread getServerOutputs(Process serverProcess, JTextArea consoleArea, Consumer<String> outputObserver) {
 		 Thread consoleThread = new Thread(() -> {
 		     try (BufferedReader reader = new BufferedReader(new InputStreamReader(serverProcess.getInputStream()))) {
-		
+
 		         String line;
 		         while ((line = reader.readLine()) != null) {
 		             String finalLine = line;
@@ -314,19 +323,31 @@ public class ForgeUtils {
 						observerFailure.printStackTrace();
 		             }
 		             noteConsoleLine(finalLine);
-		             if(finalLine.contains("> \\")) CustomCommands.processCustomCommand(finalLine);
-		             if(finalLine.contains("Done")) {
-						MainFrame.responder = new DiscoveryResponder(MainFrame.networkName,
-								() -> MainFrame.window == null ? "" : MainFrame.window.playerDiscoveryPayload())
-								.listenAsync(MainFrame.actualServerPort);
-		                	MainFrame.window.checkServerStatus();
-		                	MainFrame.window.startHostServices();
-		                	
-							if(ZipUtils.existsDirectory(GeneralConfigurationsWindows.USER_OPS_PATH)) {
-								for(String nickname : ZipUtils.getDataFromPropertiesFile("userOps", GeneralConfigurationsWindows.USER_OPS_PATH).split(", ")) {
-									ForgeUtils.sendCommand("/op " + nickname, MainFrame.serverProcess, MainFrame.serverWriter);
+		             try {
+		                 if(finalLine.contains("> \\")) CustomCommands.processCustomCommand(finalLine);
+		             } catch(RuntimeException commandFailure) {
+						commandFailure.printStackTrace();
+		             }
+		             if(isServerReadyLine(finalLine)) {
+						// El arranque de los servicios de host puede tardar segundos: fuera
+						// del hilo lector, que su unico trabajo es vaciar el pipe del server
+						new Thread(() -> {
+							try {
+								MainFrame.responder = new DiscoveryResponder(MainFrame.networkName,
+										() -> MainFrame.window == null ? "" : MainFrame.window.playerDiscoveryPayload())
+										.listenAsync(MainFrame.actualServerPort);
+								MainFrame.window.checkServerStatus();
+								MainFrame.window.startHostServices();
+
+								if(ZipUtils.existsDirectory(GeneralConfigurationsWindows.USER_OPS_PATH)) {
+									for(String nickname : ZipUtils.getDataFromPropertiesFile("userOps", GeneralConfigurationsWindows.USER_OPS_PATH).split(", ")) {
+										ForgeUtils.sendCommand("/op " + nickname, MainFrame.serverProcess, MainFrame.serverWriter);
+									}
 								}
+							} catch(RuntimeException hostServicesFailure) {
+								hostServicesFailure.printStackTrace();
 							}
+						}, "p2pmss-host-services").start();
 		             }
 		             // La respuesta al sondeo de jugadores (un "list" cada pocos segundos)
 		             // alimenta al tracker pero no se pinta: solo ensucia la consola

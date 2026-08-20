@@ -1219,7 +1219,14 @@ public final class MinecraftDashboard extends JPanel {
         }
     }
 
+    private List<ServerEntry> renderedServerEntries = null;
+
     private void updateServers() {
+        List<ServerEntry> incoming = state.recentServers();
+        // Reconstruir paneles y listeners en cada refresco (cada pocos segundos durante
+        // horas) es churn puro de Swing: solo se rehace cuando la lista cambia de verdad
+        if(incoming.equals(renderedServerEntries)) return;
+        renderedServerEntries = new ArrayList<>(incoming);
         serversList.removeAll();
         List<ServerEntry> entries = new ArrayList<>(state.recentServers());
         if (entries.isEmpty()) {

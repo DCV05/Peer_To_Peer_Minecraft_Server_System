@@ -154,6 +154,34 @@ public class MainFrame {
 	public MainFrame() {
 		initialize();
 		configurePlayerPolling();
+		installShutdownCleanup();
+	}
+
+	/**
+	 * Last-resort cleanup for kill/forced-close/OS shutdown: without it the Forge
+	 * child keeps running orphaned and the GitHub host lock stays taken until the
+	 * lease expires (today's real incident). SIGKILL and power loss still skip
+	 * this; the lease expiry covers those.
+	 */
+	private void installShutdownCleanup() {
+		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+			Process orphan = serverProcess;
+			if(orphan != null && orphan.isAlive()) {
+				// destroy() es TERM: el server de Minecraft guarda el mundo en su propio shutdown hook
+				orphan.destroy();
+				try {
+					orphan.waitFor(20, java.util.concurrent.TimeUnit.SECONDS);
+				} catch(InterruptedException ignored) {
+					Thread.currentThread().interrupt();
+				}
+			}
+			String lockRepo = activeHostLockRepo;
+			if(lockRepo != null) {
+				try {
+					HostLock.release(lockRepo);
+				} catch(RuntimeException releaseFailure) {}
+			}
+		}, "p2pmss-shutdown-cleanup"));
 	}
 
 	/**
@@ -690,7 +718,7 @@ public class MainFrame {
 
 		boolean loaded = serverOpenedDirectory != null;
 		boolean authenticated = TokenStore.sessionIsOpened();
-		boolean linked = loaded && GitUtils.repoExistInPath(serverOpenedDirectory.toPath()) && GitUtils.hasRemoteOrigin(serverOpenedDirectory.toPath());
+		boolean linked = loaded && linkedRepoStatusCached(serverOpenedDirectory.toPath());
 		String account = "NOT CONNECTED";
 		if(authenticated) {
 			try {
@@ -780,12 +808,49 @@ public class MainFrame {
 					null,
 					options,
 					options[0]);
-			if(choice == JOptionPane.YES_OPTION) {
-				ForgeUtils.openURL(release.downloadUrl() != null ? release.downloadUrl() : release.pageUrl());
+			if(choice != JOptionPane.YES_OPTION) return;
+			String downloadUrl = release.downloadUrl() != null ? release.downloadUrl() : release.pageUrl();
+			if(serverIsOn) {
+				// Actualizar mientras se hostea: se cierra el mundo con el ciclo completo
+				// (backup verificado + liberacion del lock) antes de instalar nada
+				int confirmed = JOptionPane.showConfirmDialog(frame,
+						"You are hosting right now. To update safely, the world will be stopped,\n"
+								+ "fully backed up to GitHub and the host lock released — then the app\n"
+								+ "closes so you can install the new version. Nothing is lost.",
+						"Safe update", JOptionPane.OK_CANCEL_OPTION, JOptionPane.INFORMATION_MESSAGE);
+				if(confirmed != JOptionPane.OK_OPTION) {
+					// Que se lo vuelva a ofrecer en el siguiente chequeo
+					lastOfferedUpdateVersion = null;
+					return;
+				}
+				ForgeUtils.openURL(downloadUrl);
+				saveAndClose();
+			} else {
+				ForgeUtils.openURL(downloadUrl);
 			}
 		})), "p2pmss-update-check");
 		checker.setDaemon(true);
 		checker.start();
+	}
+
+	private volatile String linkedRepoCacheKey = null;
+	private volatile boolean linkedRepoCacheValue = false;
+	private volatile long linkedRepoCacheAtMillis = 0;
+
+	/**
+	 * The dashboard refresh runs every few seconds and each JGit open walks the
+	 * whole world repo (thousands of files, worse with Windows antivirus). The
+	 * repo-linked status barely ever changes, so it is cached for 30 seconds.
+	 */
+	private boolean linkedRepoStatusCached(Path serverDirectory) {
+		String key = serverDirectory.toString();
+		long now = System.currentTimeMillis();
+		if(key.equals(linkedRepoCacheKey) && now - linkedRepoCacheAtMillis < 30_000) return linkedRepoCacheValue;
+		boolean linked = GitUtils.repoExistInPath(serverDirectory) && GitUtils.hasRemoteOrigin(serverDirectory);
+		linkedRepoCacheKey = key;
+		linkedRepoCacheValue = linked;
+		linkedRepoCacheAtMillis = now;
+		return linked;
 	}
 
 	/** True when a BlueMap jar is present in the server's mods folder. */
@@ -799,10 +864,23 @@ public class MainFrame {
 		return false;
 	}
 
+	private volatile List<MinecraftDashboard.ServerEntry> recentServersCache = null;
+	private volatile String recentServersCacheKey = null;
+
 	private List<MinecraftDashboard.ServerEntry> readRecentServers() {
+		// El refresco del dashboard llama esto cada pocos segundos: relee el fichero y
+		// re-detecta el loader de cada server solo cuando el fichero o la seleccion cambian
+		Path recentServersPath = app.AppPaths.dataFile("recentServers.properties");
+		long fileStamp = 0;
+		try {
+			if(Files.exists(recentServersPath)) fileStamp = Files.getLastModifiedTime(recentServersPath).toMillis();
+		} catch(IOException ignored) {}
+		String cacheKey = fileStamp + "|" + (serverOpenedDirectory == null ? "" : serverOpenedDirectory.getAbsolutePath());
+		List<MinecraftDashboard.ServerEntry> cached = recentServersCache;
+		if(cached != null && cacheKey.equals(recentServersCacheKey)) return cached;
+
 		List<MinecraftDashboard.ServerEntry> entries = new ArrayList<>();
 		List<String> paths = new ArrayList<>();
-		Path recentServersPath = app.AppPaths.dataFile("recentServers.properties");
 		Properties properties = new Properties();
 		if(Files.exists(recentServersPath)) {
 			try(FileInputStream input = new FileInputStream(recentServersPath.toFile())) {
@@ -827,6 +905,8 @@ public class MainFrame {
 					: "MISSING STARTUP SCRIPT";
 			entries.add(new MinecraftDashboard.ServerEntry(name, path, detail, selected));
 		}
+		recentServersCache = entries;
+		recentServersCacheKey = cacheKey;
 		return entries;
 	}
 
@@ -1211,11 +1291,28 @@ public class MainFrame {
 		else SwingUtilities.invokeLater(update);
 	}
 
+	private final java.util.concurrent.ExecutorService remoteRosterRefreshExecutor =
+			java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
+				Thread worker = new Thread(runnable, "p2pmss-remote-roster-refresh");
+				worker.setDaemon(true);
+				return worker;
+			});
+	private final java.util.concurrent.atomic.AtomicBoolean remoteRosterRefreshRunning = new java.util.concurrent.atomic.AtomicBoolean(false);
+
 	private void configurePlayerPolling() {
 		playerRefreshTimer = new javax.swing.Timer(10_000, event -> {
 			if(serverIsOn && dashboardPhase == Phase.ONLINE) requestPlayerList();
 			else if(dashboardPhase == Phase.REMOTE_HOST) {
-				new Thread(this::checkServerStatus, "p2pmss-remote-roster-refresh").start();
+				// Un solo worker reutilizado y sin apilar ticks si la red va lenta
+				if(remoteRosterRefreshRunning.compareAndSet(false, true)) {
+					remoteRosterRefreshExecutor.submit(() -> {
+						try {
+							checkServerStatus();
+						} finally {
+							remoteRosterRefreshRunning.set(false);
+						}
+					});
+				}
 			}
 		});
 		playerRefreshTimer.setInitialDelay(2_000);
@@ -1253,6 +1350,10 @@ public class MainFrame {
 		if(processToStop != null) {
 			setDashboardPhase(Phase.STOPPING, "Waiting for Forge to save before closing the application");
 			appendDashboardActivity("Application close requested; saving the active world");
+			// Mismo desmontaje que el boton STOP: sin esto la X dejaba el heartbeat
+			// y el tunel vivos y el lock colgado hasta caducar
+			stopHostLockHeartbeat();
+			stopPlayitTunnel();
 			GitUtils.serverAutoSaveIsActive = false;
 			ForgeUtils.sendCommand("/stop", serverProcess, serverWriter);
 		}
@@ -1291,6 +1392,12 @@ public class MainFrame {
 				syncState = "UP TO DATE";
 				lastSync = "PUSH CONFIRMED";
 				appendDashboardActivity(backup.message());
+			}
+
+			String lockRepo = activeHostLockRepo;
+			if(processToStop != null && lockRepo != null) {
+				if(HostLock.release(lockRepo)) appendDashboardActivity("GitHub host lock released before exit");
+				activeHostLockRepo = null;
 			}
 
 			SwingUtilities.invokeLater(() -> {
@@ -1608,15 +1715,27 @@ public class MainFrame {
 			stopHostLockHeartbeat();
 			hostLockHeartbeatTimer = new java.util.Timer("p2pmss-host-lock-heartbeat", true);
 			hostLockHeartbeatTimer.scheduleAtFixedRate(new java.util.TimerTask() {
+				private int consecutiveFailures = 0;
 				@Override public void run() {
 					if(!serverIsOn || serverProcess == null || !serverProcess.isAlive()) {
 						// Forge murió solo: sin server no se sostiene el lease; caducará y otro podrá hostear
 						stopHostLockHeartbeat();
 						return;
 					}
-					if(HostLock.heartbeat(repoFullName)) appendDashboardActivity("Host lock heartbeat confirmed on GitHub");
-					else appendDashboardActivity("Host lock heartbeat failed; the lease may expire in "
-							+ (HostLock.DEFAULT_LEASE_SECONDS / 60) + " minutes");
+					if(HostLock.heartbeat(repoFullName)) {
+						consecutiveFailures = 0;
+						appendDashboardActivity("Host lock heartbeat confirmed on GitHub");
+					} else {
+						consecutiveFailures++;
+						appendDashboardActivity("Host lock heartbeat failed; the lease may expire in "
+								+ (HostLock.DEFAULT_LEASE_SECONDS / 60) + " minutes");
+						// 3 fallos seguidos = 15 min sin renovar: el lease ya caducó y otro peer
+						// podría arrancar el mismo mundo — esto tiene que verse, no solo loguearse
+						if(consecutiveFailures >= 3) {
+							setDashboardFailure("GitHub unreachable: the host lock lease expired. "
+									+ "Check your connection — another peer could start this world in parallel.");
+						}
+					}
 				}
 			}, HostLock.HEARTBEAT_SECONDS * 1000L, HostLock.HEARTBEAT_SECONDS * 1000L);
 		}

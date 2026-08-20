@@ -257,9 +257,46 @@ class MinecraftDashboardTest {
     }
 
     private static MinecraftDashboard.State stateFor(MinecraftDashboard.Phase phase) {
+        return stateWithServers(phase, List.of());
+    }
+
+    private static MinecraftDashboard.State stateWithServers(MinecraftDashboard.Phase phase,
+            List<MinecraftDashboard.ServerEntry> servers) {
         return new MinecraftDashboard.State(true, phase, phase.label(), "minecraft-friends",
                 "/servers/minecraft-friends", phase == MinecraftDashboard.Phase.REMOTE_HOST ? "100.64.0.8" : "—",
                 "25565", "4G", "friends-vpn", "FORGE / JAVA 21", true, true, true,
-                "player-one", "player-one/minecraft-friends", "UP TO DATE", "JUST NOW", "", List.of());
+                "player-one", "player-one/minecraft-friends", "UP TO DATE", "JUST NOW", "", servers);
+    }
+
+    private static Component[] serversListChildren(MinecraftDashboard dashboard) throws Exception {
+        java.lang.reflect.Field field = MinecraftDashboard.class.getDeclaredField("serversList");
+        field.setAccessible(true);
+        return ((Container) field.get(dashboard)).getComponents();
+    }
+
+    @Test
+    void reusesServerRowsWhenTheListDidNotChange() throws Exception {
+        AtomicReference<MinecraftDashboard> reference = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() -> reference.set(new MinecraftDashboard(new MinecraftDashboard.Actions() {})));
+        MinecraftDashboard dashboard = reference.get();
+
+        List<MinecraftDashboard.ServerEntry> servers =
+                List.of(new MinecraftDashboard.ServerEntry("one", "/tmp/one", "FABRIC READY", true));
+        SwingUtilities.invokeAndWait(() -> dashboard.setState(stateWithServers(MinecraftDashboard.Phase.OFFLINE, servers)));
+        Component[] first = serversListChildren(dashboard);
+        assertTrue(first.length > 0);
+
+        // Mismo listado: las filas NO se reconstruyen (misma instancia de componente)
+        SwingUtilities.invokeAndWait(() -> dashboard.setState(stateWithServers(MinecraftDashboard.Phase.OFFLINE, servers)));
+        Component[] second = serversListChildren(dashboard);
+        assertEquals(first.length, second.length);
+        assertTrue(first[0] == second[0]);
+
+        // Listado distinto: ahora sí se rehace
+        List<MinecraftDashboard.ServerEntry> changed = List.of(
+                new MinecraftDashboard.ServerEntry("one", "/tmp/one", "FABRIC READY", true),
+                new MinecraftDashboard.ServerEntry("two", "/tmp/two", "FORGE READY", false));
+        SwingUtilities.invokeAndWait(() -> dashboard.setState(stateWithServers(MinecraftDashboard.Phase.OFFLINE, changed)));
+        assertTrue(serversListChildren(dashboard).length > second.length);
     }
 }
