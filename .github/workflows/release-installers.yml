@@ -16,7 +16,39 @@ permissions:
   contents: write
 
 jobs:
+  # Gate: si la suite falla en cualquier modulo, NO se construye ni se adjunta
+  # ningun instalador — el error se detecta en el despliegue, no en casa de nadie
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolver tag
+        id: tag
+        shell: bash
+        env:
+          RAW_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+        run: |
+          if ! printf "%s" "$RAW_TAG" | grep -Eq "^v?[0-9]+(\.[0-9]+)*(-[A-Za-z0-9.-]+)?$"; then
+            echo "Tag no valido: $RAW_TAG" >&2
+            exit 1
+          fi
+          echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Suite completa (display virtual para los tests de Swing)
+        shell: bash
+        run: xvfb-run -a mvn -B test
+
   installers:
+    needs: tests
     strategy:
       fail-fast: false
       matrix:
@@ -72,6 +104,7 @@ jobs:
           VERSION: ${{ steps.tag.outputs.version }}
         run: |
           jpackage --type dmg --name P2PMSS --app-version "$VERSION" \
+            --icon packaging/P2PMSS.icns \
             --input stage --main-jar P2PMSS.jar --main-class view.MainFrame --dest dist
           for built in dist/*.dmg; do
             [ "$built" = "dist/P2PMSS-$VERSION.dmg" ] || mv "$built" "dist/P2PMSS-$VERSION.dmg"
@@ -83,9 +116,13 @@ jobs:
         env:
           VERSION: ${{ steps.tag.outputs.version }}
         run: |
+          # El upgrade-uuid FIJO hace que cada version REEMPLACE a la anterior en el
+          # mismo directorio: los accesos directos sobreviven a las actualizaciones
           jpackage --type exe --name P2PMSS --app-version "$VERSION" \
+            --vendor P2PMSS --win-upgrade-uuid 61CF6467-CAD1-4F24-B033-3BD205D8D7CE \
+            --icon packaging/P2PMSS.ico \
             --input stage --main-jar P2PMSS.jar --main-class view.MainFrame \
-            --win-shortcut --win-menu --dest dist
+            --win-shortcut --win-menu --win-per-user-install --dest dist
           for built in dist/*.exe; do
             [ "$built" = "dist/P2PMSS-$VERSION.exe" ] || mv "$built" "dist/P2PMSS-$VERSION.exe"
           done
