@@ -1280,8 +1280,8 @@ public class MainFrame {
 		JDialog configDialog = new JDialog(frame, "Server Configurations");
 		configDialog.getContentPane().setLayout(new BorderLayout());
 		configDialog.setResizable(false);
-		int configDialogWidht = 300;
-		int configDialogHeight = 280;
+		int configDialogWidht = 340;
+		int configDialogHeight = 420;
 		configDialog.setSize(configDialogWidht, configDialogHeight);
 		configDialog.setLocationRelativeTo(fatherFrame);
 		configDialog.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
@@ -1293,7 +1293,7 @@ public class MainFrame {
 		JPanel contentPane = new JPanel(new GridLayout(10, 1));
 		JPanel buttonsPane = new JPanel(new FlowLayout(FlowLayout.RIGHT));
 		JScrollPane scroll = new JScrollPane(contentPane);
-		scroll.setPreferredSize(new Dimension(300, 205));
+		scroll.setPreferredSize(new Dimension(340, 340));
 		scroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
 		scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
 		JLabel networkIDLabel = new JLabel("Nombre de la red");
