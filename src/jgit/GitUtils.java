@@ -1360,62 +1360,70 @@ public final class GitUtils
 	{
 	}
 
+	/** Ciclos de fetch+rebase+push ante un remoto que avanza mientras subimos. */
+	private static final int PUSH_RECOVERY_ATTEMPTS = 3;
+
 	/**
 	 * Empuja y, cuando el remoto ha avanzado mientras tanto (otro peer o un backup
 	 * fuera de la aplicación), hace fetch, rebasa el backup local sobre el estado
-	 * remoto y reintenta UNA vez. Durante el rebase ganan los ficheros del host
-	 * activo: la máquina que corre el mundo manda sobre su estado actual.
+	 * remoto y reintenta hasta {@link #PUSH_RECOVERY_ATTEMPTS} veces: con un solo
+	 * reintento, dos pushes ajenos seguidos bastaban para tumbar el backup.
+	 * Durante el rebase ganan los ficheros del host activo: la máquina que corre
+	 * el mundo manda sobre su estado actual.
 	 */
 	private static PushCheckResult pushAndCheckDetailed( Git git, UsernamePasswordCredentialsProvider credentials ) throws GitAPIException
 	{
 		PushCheckResult result;
 		do
 		{
-			PushCheckResult first = pushOnce( git, credentials );
-			// Solo el rechazo por non-fast-forward es recuperable; cualquier otro
-			// fallo se devuelve tal cual para no enmascarar el motivo real
-			if( first.success() || !first.nonFastForward() )
-			{
-				result = first;
-				break;
-			}
+			result = pushOnce( git, credentials );
 
-			try
+			for( int attempt = 1; attempt <= PUSH_RECOVERY_ATTEMPTS; attempt++ )
 			{
-				git.fetch().setCredentialsProvider( credentials ).setTimeout( REMOTE_GIT_TIMEOUT_SECONDS ).call();
-				String branch = git.getRepository().getBranch();
-				// Rebase normal; solo los ficheros en CONFLICTO se resuelven a favor del
-				// backup local (THEIRS durante un rebase = los commits que se reaplican):
-				// la maquina que corre el mundo es la autoridad sobre su estado actual
-				RebaseResult rebase = git.rebase()
-						.setUpstream( "refs/remotes/origin/" + branch )
-						.setContentMergeStrategy( org.eclipse.jgit.merge.ContentMergeStrategy.THEIRS )
-						.call();
-				if( !rebase.getStatus().isSuccessful() )
+				// Solo el rechazo por non-fast-forward es recuperable; cualquier otro
+				// fallo se devuelve tal cual para no enmascarar el motivo real
+				if( result.success() || !result.nonFastForward() )
+					break;
+
+				try
 				{
-					// Abortar deja el repositorio como estaba: es preferible un backup
-					// fallido a un rebase a medias que bloquee los siguientes
-					try
+					git.fetch().setCredentialsProvider( credentials ).setTimeout( REMOTE_GIT_TIMEOUT_SECONDS ).call();
+					String branch = git.getRepository().getBranch();
+					// Rebase normal; solo los ficheros en CONFLICTO se resuelven a favor del
+					// backup local (THEIRS durante un rebase = los commits que se reaplican):
+					// la maquina que corre el mundo es la autoridad sobre su estado actual
+					RebaseResult rebase = git.rebase()
+							.setUpstream( "refs/remotes/origin/" + branch )
+							.setContentMergeStrategy( org.eclipse.jgit.merge.ContentMergeStrategy.THEIRS )
+							.call();
+					if( !rebase.getStatus().isSuccessful() )
 					{
-						git.rebase().setOperation( RebaseCommand.Operation.ABORT ).call();
+						// Abortar deja el repositorio como estaba: es preferible un backup
+						// fallido a un rebase a medias que bloquee los siguientes
+						try
+						{
+							git.rebase().setOperation( RebaseCommand.Operation.ABORT ).call();
+						}
+						catch( GitAPIException unwindFailure )
+						{
+							app.Log.event( "GIT_BACKUP", "No se pudo abortar el rebase de recuperacion", unwindFailure );
+						}
+						result = new PushCheckResult( false,
+								result.message() + " Automatic rebase onto the new remote state failed (" + rebase.getStatus() + ").",
+								true );
+						break;
 					}
-					catch( GitAPIException unwindFailure )
-					{
-						app.Log.event( "GIT_BACKUP", "No se pudo abortar el rebase de recuperacion", unwindFailure );
-					}
+				}
+				catch( Exception recoveryFailure )
+				{
 					result = new PushCheckResult( false,
-							first.message() + " Automatic rebase onto the new remote state failed (" + rebase.getStatus() + ").", true );
+							result.message() + " Automatic recovery failed: " + recoveryFailure.getMessage(), true );
 					break;
 				}
-			}
-			catch( Exception recoveryFailure )
-			{
-				result = new PushCheckResult( false,
-						first.message() + " Automatic recovery failed: " + recoveryFailure.getMessage(), true );
-				break;
-			}
 
-			result = pushOnce( git, credentials );
+				app.Log.event( "GIT_BACKUP", "Push rechazado por non-fast-forward; reintento " + attempt + "/" + PUSH_RECOVERY_ATTEMPTS );
+				result = pushOnce( git, credentials );
+			}
 		} while( false );
 		return result;
 	}
