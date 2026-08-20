@@ -140,6 +140,7 @@ public class MainFrame {
 				try {
 					window = new MainFrame();
 					window.frame.setVisible(true);
+					window.checkForUpdatesAsync();
 				} catch (Exception e) {
 					e.printStackTrace();
 				}
@@ -747,6 +748,28 @@ public class MainFrame {
 		dashboard.showWorldMap(loaded && blueMapInstalled(serverOpenedDirectory.toPath()), serverIsOn);
 		turnOnOffBtn = dashboard.primaryActionButton();
 		consoleArea = dashboard.consoleArea();
+	}
+
+	/** Startup update check against the public GitHub releases; stays silent unless a newer version exists. */
+	private void checkForUpdatesAsync() {
+		Thread checker = new Thread(() -> app.UpdateChecker.findNewerRelease().ifPresent(release -> SwingUtilities.invokeLater(() -> {
+			String[] options = { "DOWNLOAD UPDATE", "LATER" };
+			int choice = JOptionPane.showOptionDialog(
+					frame,
+					"P2PMSS " + release.version() + " is available (you are running " + app.UpdateChecker.currentVersion() + ").\n"
+							+ "Download the new jar and replace the one you are using.",
+					"Update available",
+					JOptionPane.YES_NO_OPTION,
+					JOptionPane.INFORMATION_MESSAGE,
+					null,
+					options,
+					options[0]);
+			if(choice == JOptionPane.YES_OPTION) {
+				ForgeUtils.openURL(release.downloadUrl() != null ? release.downloadUrl() : release.pageUrl());
+			}
+		})), "p2pmss-update-check");
+		checker.setDaemon(true);
+		checker.start();
 	}
 
 	/** True when a BlueMap jar is present in the server's mods folder. */

@@ -2,10 +2,12 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>Peer_To_Peer_Minecraft_Server_System</groupId>
   <artifactId>Peer_To_Peer_Minecraft_Server_System</artifactId>
-  <version>1.6.1.1</version>
+  <version>1.7.1</version>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    <!-- Repo de GitHub cuyas releases consulta el update checker; cada fork pone el suyo al compilar -->
+    <p2pmss.releasesRepo>DCV05/Peer_To_Peer_Minecraft_Server_System</p2pmss.releasesRepo>
   </properties>
   <dependencies>
 	<dependency>
@@ -63,6 +65,16 @@
 	      <includes>
 	        <include>**/*</include>
 	      </includes>
+	      <excludes>
+	        <exclude>p2pmss-update.properties</exclude>
+	      </excludes>
+	    </resource>
+	    <resource>
+	      <directory>src/resources</directory>
+	      <includes>
+	        <include>p2pmss-update.properties</include>
+	      </includes>
+	      <filtering>true</filtering>
 	    </resource>
   	</resources>
     <plugins>

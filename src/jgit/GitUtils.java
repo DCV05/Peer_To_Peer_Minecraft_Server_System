@@ -68,6 +68,8 @@ public class GitUtils {
 			"/crash-reports/",
 			"/world-import-backups/",
 			"/.p2pmss-import-*/",
+			"/bluemap/",
+			"/.fabric/",
 			"**/session.lock",
 			"**/*.tmp",
 			"**/.DS_Store",
