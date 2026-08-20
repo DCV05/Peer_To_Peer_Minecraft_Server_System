@@ -57,7 +57,7 @@ public class GoogleDriveCloudProvider implements CloudStorageProvider{
 	private static final String APPLICATION_NAME = "PeerToPeerMinecraftServerSystem";
 	private static final GsonFactory JSON_FACTORY = GsonFactory.getDefaultInstance();
 	private static final List<String> SCOPES = List.of(DriveScopes.DRIVE);
-	private static final String CREDENTIALS_FOLDER = "data/google_tokens";
+	private static final String CREDENTIALS_FOLDER = app.AppPaths.dataFile("google_tokens").toString();
 	private static final Map<String, String> metadata = new HashMap<>();
 	private static final Map<String, String> metadataChildren = new HashMap<>();
 	

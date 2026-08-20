@@ -51,7 +51,7 @@ import vpn.DiscoveryResponder;
 
 public class ForgeUtils {
 	
-	public static final Path DIR_INSTALLERS = Paths.get("forge_installers");
+	public static final Path DIR_INSTALLERS = app.AppPaths.dataFile("forge_installers");
 	private static final String FORGE_METADATA_URL = "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml";
 	private static final int DOWNLOAD_TIMEOUT_MILLIS = 30_000;
 		
@@ -495,9 +495,9 @@ public class ForgeUtils {
 	}
 	
 	public static boolean checkIfExistsNetworkNameFileAndCreateIfNot() {
-		if(!(Files.exists(Paths.get("data/networkName.properties")))) {
+		if(!(Files.exists(app.AppPaths.dataFile("networkName.properties")))) {
 			try {
-				Files.createFile(Paths.get("data/networkName.properties"));
+				Files.createFile(app.AppPaths.dataFile("networkName.properties"));
 				return false;
 			} catch (IOException e) {
 				JOptionPane.showMessageDialog(null, "File not found or inaccessible (networkName.properties)", "Error", JOptionPane.ERROR_MESSAGE);
@@ -509,7 +509,7 @@ public class ForgeUtils {
 	public static String getNetworkName() {
 		if(checkIfExistsNetworkNameFileAndCreateIfNot()) {
 			Properties props = new Properties();
-			File file = new File("data/networkName.properties");
+			File file = app.AppPaths.dataFile("networkName.properties").toFile();
 			try(FileInputStream in = new FileInputStream(file)){
 				props.load(in);
 				if(!(props.containsKey("networkName"))) {
@@ -530,7 +530,7 @@ public class ForgeUtils {
 	public static void setNetworkName(String newNetworkName) {
 		if(checkIfExistsNetworkNameFileAndCreateIfNot()) {
 			Properties props = new Properties();
-			File file = new File("data/networkName.properties");
+			File file = app.AppPaths.dataFile("networkName.properties").toFile();
 			try(FileInputStream in = new FileInputStream(file)){
 				props.load(in);
 				props.setProperty("networkName", newNetworkName);
@@ -548,7 +548,7 @@ public class ForgeUtils {
 	public static void setNetworkNameChecked(String newNetworkName) throws IOException {
 		String normalized = newNetworkName == null ? "" : newNetworkName.trim();
 		if(normalized.isBlank()) throw new IllegalArgumentException("Network name cannot be empty.");
-		Path dataDirectory = Path.of("data");
+		Path dataDirectory = app.AppPaths.data();
 		Files.createDirectories(dataDirectory);
 		Path file = dataDirectory.resolve("networkName.properties");
 		Properties properties = new Properties();
@@ -631,7 +631,7 @@ public class ForgeUtils {
 	private static int getSavedServerPort() {
 		if(checkIfExistsNetworkNameFileAndCreateIfNot()) {
 			Properties props = new Properties();
-			File file = new File("data/networkName.properties");
+			File file = app.AppPaths.dataFile("networkName.properties").toFile();
 			try(FileInputStream in = new FileInputStream(file)){
 				props.load(in);
 				if(!(props.containsKey("server-port"))) props.setProperty("server-port", "25565");
@@ -647,7 +647,7 @@ public class ForgeUtils {
 	private static void setSavedServerPort(int port) {
 		if(checkIfExistsNetworkNameFileAndCreateIfNot()) {
 			Properties props = new Properties();
-			File file = new File("data/networkName.properties");
+			File file = app.AppPaths.dataFile("networkName.properties").toFile();
 			try(FileInputStream in = new FileInputStream(file)){
 				props.load(in);
 				if(!(props.containsKey("server-port"))) props.setProperty("server-port", "25565");

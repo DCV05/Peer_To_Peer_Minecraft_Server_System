@@ -23,8 +23,8 @@ import view.MainFrame;
 
 public class ZipUtils {
 	
-	public static final Path BACKUPS_ZIPS_FOLDER = Path.of("data/backups_zips");
-	public static final Path DOWNLOADS_BACKUPS_ZIPS_FOLDER = Path.of("data/download_backups_zips");
+	public static final Path BACKUPS_ZIPS_FOLDER = app.AppPaths.dataFile("backups_zips");
+	public static final Path DOWNLOADS_BACKUPS_ZIPS_FOLDER = app.AppPaths.dataFile("download_backups_zips");
 	
 	public static void createZip(Path sourceDir, Path zipFilePath){
 		deleteDirectory(BACKUPS_ZIPS_FOLDER);

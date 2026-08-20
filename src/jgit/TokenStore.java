@@ -171,7 +171,7 @@ public class TokenStore {
 	}
 
 	private static Path dataDirectory() {
-		return Path.of(System.getProperty(DATA_DIRECTORY_PROPERTY, "data"));
+		return app.AppPaths.data();
 	}
 
 	private static Path tokenFile() {

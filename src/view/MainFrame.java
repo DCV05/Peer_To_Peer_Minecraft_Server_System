@@ -100,7 +100,7 @@ public class MainFrame {
 	public static DiscoveryResponder responder = null;
 	public static JPanel contentPane = null;
 	public static JButton createServerBackupsFolderInCloud = null;
-	public static final Path CLOUD_PROVIDER_IN_USE_PATH = Path.of("data/cloudProviderInUse.properties");
+	public static final Path CLOUD_PROVIDER_IN_USE_PATH = app.AppPaths.dataFile("cloudProviderInUse.properties");
 	public static File serverOpenedDirectory = null;
 	public static BufferedWriter serverWriter = null;
 	public static Process serverProcess = null;
@@ -162,7 +162,7 @@ public class MainFrame {
 		checkIfExistsDataFolder();
 		//Initialize networkName
 		networkName = ForgeUtils.getNetworkName();
-		if(ZipUtils.existsDirectory(Path.of("data/google_tokens/StoredCredential"))) {
+		if(ZipUtils.existsDirectory(app.AppPaths.dataFile("google_tokens/StoredCredential"))) {
 			cloudProvider = new GoogleDriveCloudProvider();
 			cloudProvider.authenticate();
 		}
@@ -748,7 +748,7 @@ public class MainFrame {
 	private List<MinecraftDashboard.ServerEntry> readRecentServers() {
 		List<MinecraftDashboard.ServerEntry> entries = new ArrayList<>();
 		List<String> paths = new ArrayList<>();
-		Path recentServersPath = Path.of("data/recentServers.properties");
+		Path recentServersPath = app.AppPaths.dataFile("recentServers.properties");
 		Properties properties = new Properties();
 		if(Files.exists(recentServersPath)) {
 			try(FileInputStream input = new FileInputStream(recentServersPath.toFile())) {
@@ -818,7 +818,7 @@ public class MainFrame {
 	}
 
 	private void rememberRecentServer(File serverDirectory) {
-		Path recentServersPath = Path.of("data/recentServers.properties");
+		Path recentServersPath = app.AppPaths.dataFile("recentServers.properties");
 		Properties properties = new Properties();
 		try {
 			Files.createDirectories(recentServersPath.getParent());
@@ -1374,28 +1374,24 @@ public class MainFrame {
 	
 	public static void checkIfExistsDataFolder() {
 		try {
-			Files.createDirectories(Paths.get("data"));
-			// Probar escritura real: existir no garantiza poder escribir (zip sin
-			// extraer, Program Files, consola en carpeta protegida...)
-			Path probe = Paths.get("data", ".write-probe");
+			Files.createDirectories(app.AppPaths.data());
+			// Probar escritura real por si el home estuviera restringido
+			Path probe = app.AppPaths.dataFile(".write-probe");
 			Files.writeString(probe, "ok");
 			Files.deleteIfExists(probe);
 		}
 		catch(IOException cannotWrite) {
 			JOptionPane.showMessageDialog(null,
-					"P2PMSS cannot write next to where it is running:\n"
-					+ Paths.get("").toAbsolutePath() + "\n\n"
-					+ "Move the app to a normal folder you own (for example Desktop or\n"
-					+ "C:\\Users\\you\\p2pmss) — extract it fully if it came in a ZIP —\n"
-					+ "and launch it from there. The app stores its session and settings\n"
-					+ "in a 'data' folder created beside itself.",
+					"P2PMSS cannot write its data folder:\n"
+					+ app.AppPaths.data() + "\n\n"
+					+ "Check the permissions of your user home directory.",
 					"Folder not writable", JOptionPane.ERROR_MESSAGE);
 		}
 	}
 	
 	private void recentServerListGenerator() {
 		recentServersMenu.removeAll();
-		File file = new File("data/recentServers.properties");
+		File file = app.AppPaths.dataFile("recentServers.properties").toFile();
 		Properties props = new Properties();
 		try(FileInputStream in = new FileInputStream(file)) {
 			props.load(in);

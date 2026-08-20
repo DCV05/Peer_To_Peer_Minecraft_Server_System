@@ -26,7 +26,7 @@ import view.dashboard.DashboardDialogSupport;
 
 public class GeneralConfigurationsWindows {
 	
-	public static final Path USER_OPS_PATH = Path.of("data/userOps.properties");
+	public static final Path USER_OPS_PATH = app.AppPaths.dataFile("userOps.properties");
 	private static boolean hasErrors = false;
 	
 	public static void generalConfigurations() {

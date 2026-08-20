@@ -172,6 +172,7 @@ gg/playit/api/model/enums/ClaimSetupResponse.class
 gg/playit/api/ApiClient$17.class
 gg/playit/api/model/enums/TunnelEnableError.class
 gg/playit/api/model/response/ConnectAddr6.class
+app/AppPaths.class
 gg/playit/api/model/response/ObjectId.class
 gg/playit/api/model/request/ReqClaimExchange.class
 gg/playit/api/ApiClient$32.class

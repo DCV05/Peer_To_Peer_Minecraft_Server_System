@@ -8,7 +8,7 @@ import com.google.api.services.drive.Drive;
 
 public interface CloudStorageProvider {
 	
-	public static Path lastServerBackUpDate = Path.of("data/lastServersBackupDate.properties");
+	public static Path lastServerBackUpDate = app.AppPaths.dataFile("lastServersBackupDate.properties");
 	
 	void authenticate();
 	

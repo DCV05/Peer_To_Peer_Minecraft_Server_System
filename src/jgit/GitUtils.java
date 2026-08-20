@@ -54,7 +54,7 @@ public class GitUtils {
 	public static int autoSaveSecondsInterval = 10/*minutes*/ * 60; // Default 10 min: pierde poco y no infla el repo.
 	public static Thread autoSaveProcess = null; //By default.
 
-	public static final Path JOINED_REPOS = Path.of("data/joined_repos.properties");
+	public static final Path JOINED_REPOS = app.AppPaths.dataFile("joined_repos.properties");
 	private static final String GITHUB_API_PROPERTY = "p2pmss.githubApiBase";
 	static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
 	static final HttpClient HTTP_CLIENT = HttpClient.newBuilder().connectTimeout(REQUEST_TIMEOUT).build();
@@ -814,7 +814,7 @@ public class GitUtils {
 	public static void saveAutoSaveInterval(int seconds) {
 		if(seconds != 0 && seconds < 2 * 60) throw new RuntimeException("Autosave interval can not be lower than 2 minutes");
 		
-		Path networkNamePath = Path.of("data/networkName.properties");
+		Path networkNamePath = app.AppPaths.dataFile("networkName.properties");
 		if(!(Files.exists(networkNamePath))) return;
 		
 		Properties props = new Properties();
@@ -835,7 +835,7 @@ public class GitUtils {
 	}
 	
 	public static int getSavedAutoSaveInteval() {
-		Path networkNamePath = Path.of("data/networkName.properties");
+		Path networkNamePath = app.AppPaths.dataFile("networkName.properties");
 		if(!(Files.exists(networkNamePath))) return autoSaveSecondsInterval;
 		
 		Properties props = new Properties();
@@ -985,7 +985,7 @@ public class GitUtils {
 	}
 
 	private static Path joinedReposPath() {
-		return Path.of(System.getProperty("p2pmss.dataDirectory", "data")).resolve("joined_repos.properties");
+		return app.AppPaths.dataFile("joined_repos.properties");
 	}
 
 	static String encodePathSegment(String value) {
