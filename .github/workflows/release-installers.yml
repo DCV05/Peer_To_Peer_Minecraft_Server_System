@@ -73,7 +73,9 @@ jobs:
         run: |
           jpackage --type dmg --name P2PMSS --app-version "$VERSION" \
             --input stage --main-jar P2PMSS.jar --main-class view.MainFrame --dest dist
-          mv dist/*.dmg "dist/P2PMSS-$VERSION.dmg"
+          for built in dist/*.dmg; do
+            [ "$built" = "dist/P2PMSS-$VERSION.dmg" ] || mv "$built" "dist/P2PMSS-$VERSION.dmg"
+          done
 
       - name: Instalador EXE (Windows)
         if: matrix.kind == 'exe'
@@ -84,7 +86,9 @@ jobs:
           jpackage --type exe --name P2PMSS --app-version "$VERSION" \
             --input stage --main-jar P2PMSS.jar --main-class view.MainFrame \
             --win-shortcut --win-menu --dest dist
-          mv dist/*.exe "dist/P2PMSS-$VERSION.exe"
+          for built in dist/*.exe; do
+            [ "$built" = "dist/P2PMSS-$VERSION.exe" ] || mv "$built" "dist/P2PMSS-$VERSION.exe"
+          done
 
       - name: Jar portable (cualquier sistema)
         if: matrix.kind == 'jar'
