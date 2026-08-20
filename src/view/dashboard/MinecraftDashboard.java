@@ -444,7 +444,8 @@ public final class MinecraftDashboard extends JPanel {
         brand.setLayout(new BoxLayout(brand, BoxLayout.Y_AXIS));
         brand.setBorder(BorderFactory.createEmptyBorder(19, 20, 18, 16));
         JLabel name = DashboardTheme.label("P2P MINECRAFT", TEXT, 14, Font.PLAIN);
-        JLabel descriptor = DashboardTheme.label("/ SERVER CONTROL", TEXT_DIM, 10, Font.PLAIN);
+        JLabel descriptor = DashboardTheme.label(
+                "/ SERVER CONTROL · v" + app.UpdateChecker.currentVersion(), TEXT_DIM, 10, Font.PLAIN);
         name.setAlignmentX(Component.LEFT_ALIGNMENT);
         descriptor.setAlignmentX(Component.LEFT_ALIGNMENT);
         brand.add(name);
