@@ -1,0 +1,102 @@
+# Construye los instaladores de cada plataforma cuando se publica una release
+# y los adjunta a la propia release: DMG (macOS), EXE (Windows) y JAR portable.
+# El update checker de la app elige el asset segun el sistema del usuario.
+name: Release installers
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag de la release (p. ej. v1.7.2-p2p)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  installers:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            kind: jar
+          - os: macos-latest
+            kind: dmg
+          - os: windows-latest
+            kind: exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Resolver tag y version
+        id: tag
+        shell: bash
+        env:
+          RAW_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+        run: |
+          if ! printf "%s" "$RAW_TAG" | grep -Eq "^v?[0-9]+(\.[0-9]+)*(-[A-Za-z0-9.-]+)?$"; then
+            echo "Tag no valido: $RAW_TAG" >&2
+            exit 1
+          fi
+          VERSION="${RAW_TAG#v}"
+          VERSION="${VERSION%%-*}"
+          echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Compilar jar sombreado
+        shell: bash
+        run: mvn -B -q package -DskipTests
+
+      - name: Preparar staging
+        shell: bash
+        run: |
+          mkdir -p stage dist
+          cp target/Peer_To_Peer_Minecraft_Server_System-*.jar stage/
+          rm -f stage/original-*.jar
+          mv stage/Peer_To_Peer_Minecraft_Server_System-*.jar stage/P2PMSS.jar
+
+      - name: Instalador DMG (macOS)
+        if: matrix.kind == 'dmg'
+        shell: bash
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          jpackage --type dmg --name P2PMSS --app-version "$VERSION" \
+            --input stage --main-jar P2PMSS.jar --main-class view.MainFrame --dest dist
+          mv dist/*.dmg "dist/P2PMSS-$VERSION.dmg"
+
+      - name: Instalador EXE (Windows)
+        if: matrix.kind == 'exe'
+        shell: bash
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          jpackage --type exe --name P2PMSS --app-version "$VERSION" \
+            --input stage --main-jar P2PMSS.jar --main-class view.MainFrame \
+            --win-shortcut --win-menu --dest dist
+          mv dist/*.exe "dist/P2PMSS-$VERSION.exe"
+
+      - name: Jar portable (cualquier sistema)
+        if: matrix.kind == 'jar'
+        shell: bash
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: cp stage/P2PMSS.jar "dist/P2PMSS-$VERSION.jar"
+
+      - name: Adjuntar asset a la release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: gh release upload "$TAG" dist/P2PMSS-* --clobber
