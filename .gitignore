@@ -3,3 +3,5 @@ tokens/
 /target/classes/credentials
 /data
 /data
+/target/
+dependency-reduced-pom.xml
