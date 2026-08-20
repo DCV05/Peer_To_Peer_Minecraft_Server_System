@@ -4,12 +4,17 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
-import com.google.api.services.drive.Drive;
-
+/**
+ * Contrato de cualquier nube donde se guarden las copias del servidor. La app
+ * habla siempre contra esta interfaz para poder anadir proveedores nuevos sin
+ * tocar la vista: hoy solo existe Google Drive.
+ */
 public interface CloudStorageProvider
 {
 
-	public static Path lastServerBackUpDate = app.AppPaths.dataFile( "lastServersBackupDate.properties" );
+	// Marca de la ultima copia por servidor y proveedor: es lo unico que permite
+	// saber si la copia remota es mas nueva que la local sin descargarla entera
+	Path lastServerBackUpDate = app.AppPaths.dataFile( "lastServersBackupDate.properties" );
 
 	void authenticate();
 

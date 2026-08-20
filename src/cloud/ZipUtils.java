@@ -3,14 +3,12 @@ package cloud;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.Properties;
 import java.util.zip.ZipEntry;
@@ -19,19 +17,26 @@ import java.util.zip.ZipOutputStream;
 
 import javax.swing.JOptionPane;
 
-import view.MainFrame;
-
-public class ZipUtils
+/**
+ * Empaquetado y desempaquetado de las carpetas de servidor, mas los utilitarios
+ * de disco que necesitan los proveedores de nube. Todo lo que falla aqui avisa
+ * al usuario con un dialogo (es una accion que el ha pedido) y deja rastro en el
+ * log con la causa completa, porque el fallo suele ser de permisos o de disco
+ * lleno en la maquina del usuario y solo tenemos su consola para diagnosticar.
+ */
+public final class ZipUtils
 {
 
 	public static final Path BACKUPS_ZIPS_FOLDER = app.AppPaths.dataFile( "backups_zips" );
 	public static final Path DOWNLOADS_BACKUPS_ZIPS_FOLDER = app.AppPaths.dataFile( "download_backups_zips" );
 
+	// ---- FASE 1 — Empaquetado y desempaquetado ------------------------------
+
 	public static void createZip( Path sourceDir, Path zipFilePath )
 	{
 		deleteDirectory( BACKUPS_ZIPS_FOLDER );
 		createFie( BACKUPS_ZIPS_FOLDER );
-		try (ZipOutputStream zos = new ZipOutputStream( new BufferedOutputStream( Files.newOutputStream( zipFilePath ) ) ))
+		try (ZipOutputStream zipOutput = new ZipOutputStream( new BufferedOutputStream( Files.newOutputStream( zipFilePath ) ) ))
 		{
 			Files.walk( sourceDir ).forEach( path ->
 			{
@@ -43,23 +48,25 @@ public class ZipUtils
 					if( shouldExclude( relativePath ) )
 						return;
 
+					// Separador '/' siempre: un zip creado en Windows tiene que abrirse
+					// tal cual en el Linux del que clona el servidor
 					ZipEntry zipEntry = new ZipEntry( relativePath.toString().replace( "\\", "/" ) );
-					zos.putNextEntry( zipEntry );
-					Files.copy( path, zos );
-					zos.closeEntry();
+					zipOutput.putNextEntry( zipEntry );
+					Files.copy( path, zipOutput );
+					zipOutput.closeEntry();
 				}
-				catch( IOException e )
+				catch( IOException entryFailure )
 				{
-					throw new UncheckedIOException( e );
+					throw new UncheckedIOException( entryFailure );
 				}
 			} );
 		}
-		catch( IOException e )
+		catch( IOException zipFailure )
 		{
 			JOptionPane.showMessageDialog( null,
 					"File " + sourceDir + " or " + zipFilePath + " not found or inaccessible or another thing went wrong, try again.",
 					"Error", JOptionPane.ERROR_MESSAGE );
-			e.printStackTrace();
+			app.Log.event( "CLOUD_BACKUP", "No se pudo comprimir " + sourceDir + " en " + zipFilePath, zipFailure );
 		}
 	}
 
@@ -72,15 +79,16 @@ public class ZipUtils
 			return;
 		}
 
-		try (ZipInputStream zis = new ZipInputStream( new BufferedInputStream( Files.newInputStream( zipFilePath ) ) ))
+		try (ZipInputStream zipInput = new ZipInputStream( new BufferedInputStream( Files.newInputStream( zipFilePath ) ) ))
 		{
 
 			ZipEntry zipEntry;
 
-			while( (zipEntry = zis.getNextEntry()) != null )
+			while( (zipEntry = zipInput.getNextEntry()) != null )
 			{
 				Path resolvePath = targetDir.resolve( zipEntry.getName() ).normalize();
 
+				// Zip slip: una entrada con ../ escribiria fuera de la carpeta destino
 				if( !resolvePath.startsWith( targetDir ) )
 					throw new IOException( "Zip enty out of destinatary folder: " + zipEntry.getName() );
 
@@ -90,24 +98,26 @@ public class ZipUtils
 				{
 					Files.createDirectories( resolvePath.getParent() );
 
-					try (OutputStream os = Files.newOutputStream( resolvePath ))
+					try (OutputStream entryOutput = Files.newOutputStream( resolvePath ))
 					{
-						zis.transferTo( os );
+						zipInput.transferTo( entryOutput );
 					}
 				}
 
-				zis.closeEntry();
+				zipInput.closeEntry();
 			}
 		}
-		catch( IOException e )
+		catch( IOException unzipFailure )
 		{
 			JOptionPane.showMessageDialog( null,
 					"File " + targetDir + " or " + zipFilePath + " not found or inaccessible or another thing went wrong, try again.",
 					"Error", JOptionPane.ERROR_MESSAGE );
-			e.printStackTrace();
+			app.Log.event( "CLOUD_BACKUP", "No se pudo descomprimir " + zipFilePath + " en " + targetDir, unzipFailure );
 		}
 
 	}
+
+	// ---- FASE 2 — Utilitarios de disco --------------------------------------
 
 	public static void createDirectory( Path dir )
 	{
@@ -115,7 +125,7 @@ public class ZipUtils
 		{
 			Files.createDirectory( dir );
 		}
-		catch( IOException e )
+		catch( IOException creationFailure )
 		{
 			JOptionPane.showMessageDialog( null, "Path " + dir + " not found or inaccessible or another thing went wrong, try again.",
 					"Error", JOptionPane.ERROR_MESSAGE );
@@ -128,7 +138,7 @@ public class ZipUtils
 		{
 			Files.createFile( file );
 		}
-		catch( IOException e )
+		catch( IOException creationFailure )
 		{
 			JOptionPane.showMessageDialog( null, "Path " + file + " not found or inaccessible or another thing went wrong, try again.",
 					"Error", JOptionPane.ERROR_MESSAGE );
@@ -137,32 +147,38 @@ public class ZipUtils
 
 	public static boolean deleteDirectory( Path dir )
 	{
-		if( !Files.exists( dir ) )
-			return false;
-
-		try
+		boolean result = false;
+		do
 		{
-			Files.walk( dir )
-					.sorted( Comparator.reverseOrder() )
-					.forEach( path ->
-					{
-						try
-						{
-							Files.delete( path );
-						}
-						catch( IOException e )
-						{
-							throw new UncheckedIOException( e );
-						}
-					} );
-		}
-		catch( IOException e )
-		{
-			e.printStackTrace();
-			return false;
-		}
+			if( !Files.exists( dir ) )
+				break;
 
-		return true;
+			try
+			{
+				// Orden inverso: los hijos antes que el padre, o el delete del padre falla
+				Files.walk( dir )
+						.sorted( Comparator.reverseOrder() )
+						.forEach( path ->
+						{
+							try
+							{
+								Files.delete( path );
+							}
+							catch( IOException deleteFailure )
+							{
+								throw new UncheckedIOException( deleteFailure );
+							}
+						} );
+			}
+			catch( IOException walkFailure )
+			{
+				app.Log.event( "CLOUD_BACKUP", "No se pudo recorrer " + dir + " para borrarla", walkFailure );
+				break;
+			}
+
+			result = true;
+		} while( false );
+		return result;
 	}
 
 	public static boolean existsDirectory( Path directory )
@@ -170,71 +186,83 @@ public class ZipUtils
 		return Files.exists( directory );
 	}
 
+	// ---- FASE 3 — Ficheros de propiedades -----------------------------------
+
 	public static void createOrModiFyPropertiesFile( String property, String data, Path propertiesFilePath )
 	{
-		if( !Files.exists( propertiesFilePath ) )
-			try
+		do
+		{
+			if( !Files.exists( propertiesFilePath ) )
 			{
-				Files.createFile( propertiesFilePath );
-			}
-			catch( IOException e )
-			{
-				JOptionPane.showMessageDialog( null, "Something went wrong, try again.", "Error", JOptionPane.ERROR_MESSAGE );
-				return;
+				try
+				{
+					Files.createFile( propertiesFilePath );
+				}
+				catch( IOException creationFailure )
+				{
+					JOptionPane.showMessageDialog( null, "Something went wrong, try again.", "Error", JOptionPane.ERROR_MESSAGE );
+					break;
+				}
 			}
 
-		Properties props = new Properties();
-		try (FileInputStream in = new FileInputStream( propertiesFilePath.toFile() ))
-		{
-			props.load( in );
-
-			props.setProperty( property, data );
-			try (FileOutputStream out = new FileOutputStream( propertiesFilePath.toFile() ))
+			Properties properties = new Properties();
+			try (FileInputStream propertiesInput = new FileInputStream( propertiesFilePath.toFile() ))
 			{
-				props.store( out, "Modify property:" + property + " with data: '" + data + "'." );
+				properties.load( propertiesInput );
+
+				properties.setProperty( property, data );
+				// La escritura va anidada dentro de la lectura a proposito: se relee y
+				// se reescribe el fichero entero para no perder las otras propiedades
+				try (FileOutputStream propertiesOutput = new FileOutputStream( propertiesFilePath.toFile() ))
+				{
+					properties.store( propertiesOutput, "Modify property:" + property + " with data: '" + data + "'." );
+				}
 			}
-		}
-		catch( IOException e )
-		{
-			JOptionPane.showMessageDialog( null,
-					"File " + propertiesFilePath + " not found or inaccessible or another thing went wrong, try again.", "Error",
-					JOptionPane.ERROR_MESSAGE );
-		}
+			catch( IOException writeFailure )
+			{
+				JOptionPane.showMessageDialog( null,
+						"File " + propertiesFilePath + " not found or inaccessible or another thing went wrong, try again.", "Error",
+						JOptionPane.ERROR_MESSAGE );
+			}
+		} while( false );
 	}
 
 	public static String getDataFromPropertiesFile( String property, Path propertiesFilePath )
 	{
-		if( !Files.exists( propertiesFilePath ) )
-			return null;
-
-		Properties props = new Properties();
-
-		try (FileInputStream in = new FileInputStream( propertiesFilePath.toFile() ))
+		String result = null;
+		do
 		{
-			props.load( in );
-			if( !props.containsKey( property ) )
-				return null;
-			String prString = props.getProperty( property );
-			return props.getProperty( property );
-		}
-		catch( IOException e )
-		{
-			JOptionPane.showMessageDialog( null,
-					"File " + propertiesFilePath + " not found or inaccessible or another thing went wrong, try again.", "Error",
-					JOptionPane.ERROR_MESSAGE );
-		}
-		return null;
+			if( !Files.exists( propertiesFilePath ) )
+				break;
+
+			Properties properties = new Properties();
+			try (FileInputStream propertiesInput = new FileInputStream( propertiesFilePath.toFile() ))
+			{
+				properties.load( propertiesInput );
+				if( !properties.containsKey( property ) )
+					break;
+				result = properties.getProperty( property );
+			}
+			catch( IOException readFailure )
+			{
+				JOptionPane.showMessageDialog( null,
+						"File " + propertiesFilePath + " not found or inaccessible or another thing went wrong, try again.", "Error",
+						JOptionPane.ERROR_MESSAGE );
+			}
+		} while( false );
+		return result;
 	}
 
+	/** Lo que no vale la pena subir: se regenera solo o multiplica el tamano del zip. */
 	private static boolean shouldExclude( Path relativePath )
 	{
-		String p = relativePath.toString().replace( "\\", "/" ).toLowerCase();
+		String normalizedPath = relativePath.toString().replace( "\\", "/" ).toLowerCase();
 
-		return p.startsWith( "logs/" )
-				|| p.startsWith( "crash-reports/" )
-				|| p.startsWith( "versions/" )
-				|| p.endsWith( ".log" )
-				|| p.contains( "/cache/" )
-				|| p.contains( "/.git/" );
+		return normalizedPath.startsWith( "logs/" )
+				|| normalizedPath.startsWith( "crash-reports/" )
+				|| normalizedPath.startsWith( "versions/" )
+				|| normalizedPath.endsWith( ".log" )
+				|| normalizedPath.contains( "/cache/" )
+				|| normalizedPath.contains( "/.git/" );
 	}
 }

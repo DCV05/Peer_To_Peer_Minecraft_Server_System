@@ -1,0 +1,25 @@
+# Suite completa en cada push: cualquier error en cualquier modulo se detecta
+# antes de llegar a una release. Los tests de Swing necesitan display: xvfb.
+name: Tests
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Suite completa (display virtual para los tests de Swing)
+        run: xvfb-run -a mvn -B test

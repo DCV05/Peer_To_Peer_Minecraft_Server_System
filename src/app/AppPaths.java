@@ -47,31 +47,41 @@ public final class AppPaths
 	{
 		Path legacy = Path.of( "data" ).toAbsolutePath();
 		Path home = Path.of( System.getProperty( "user.home" ), ".p2pmss", "data" );
-
-		if( Files.isDirectory( home ) )
-			return home;
-
-		try
+		Path result = home;
+		do
 		{
-			Files.createDirectories( home );
-		}
-		catch( IOException homeUnavailable )
-		{
-			return legacy;
-		}
+			// Si el home ya existe no hay nada que migrar: es el caso de todos los
+			// arranques menos el primero
+			if( Files.isDirectory( home ) )
+				break;
 
-		if( Files.isDirectory( legacy ) && !legacy.equals( home ) )
-		{
 			try
 			{
-				migrateLegacyData( legacy, home );
+				Files.createDirectories( home );
 			}
-			catch( IOException partialMigration )
+			catch( IOException homeUnavailable )
 			{
-				// Migracion incompleta: se sigue con lo copiado; el legacy queda intacto
+				// Home no escribible (permisos, perfil movil): se degrada al ./data
+				// de al lado del jar en vez de dejar la app sin almacenamiento
+				Log.event( "APP_PATHS", "No se pudo crear " + home + ", se usa el data local " + legacy, homeUnavailable );
+				result = legacy;
+				break;
 			}
-		}
-		return home;
+
+			if( Files.isDirectory( legacy ) && !legacy.equals( home ) )
+			{
+				try
+				{
+					migrateLegacyData( legacy, home );
+				}
+				catch( IOException partialMigration )
+				{
+					// Migracion incompleta: se sigue con lo copiado; el legacy queda intacto
+					Log.event( "APP_PATHS", "Migracion parcial de " + legacy + " a " + home, partialMigration );
+				}
+			}
+		} while( false );
+		return result;
 	}
 
 	/** Copies the legacy tree into the home directory without deleting the original. */

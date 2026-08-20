@@ -45,6 +45,8 @@ public final class FabricInstaller
 		return System.getProperty( "p2pmss.fabricMetaBase", "https://meta.fabricmc.net" );
 	}
 
+	// ---- FASE 1 — Catalogo de versiones estables ---------------------------
+
 	/** Loads stable game and loader versions, newest first, from the Fabric meta API. */
 	public static Catalog loadCatalogChecked() throws IOException
 	{
@@ -56,6 +58,8 @@ public final class FabricInstaller
 		}
 		return new Catalog( gameVersions, loaderVersions );
 	}
+
+	// ---- FASE 2 — Instalacion del servidor ---------------------------------
 
 	/**
 	 * Downloads the single-jar Fabric server launcher into the destination and
@@ -79,15 +83,17 @@ public final class FabricInstaller
 		Path serverJar = destination.resolve( SERVER_JAR_NAME );
 		Path partial = destination.resolve( SERVER_JAR_NAME + ".part" );
 		URLConnection connection = openConnection( url );
-		try (InputStream in = connection.getInputStream())
+		// Se baja a .part y se mueve al final: una descarga cortada no puede dejar
+		// un fabric-server.jar a medias que luego el arranque tomaria por valido
+		try (InputStream download = connection.getInputStream())
 		{
-			Files.copy( in, partial, StandardCopyOption.REPLACE_EXISTING );
+			Files.copy( download, partial, StandardCopyOption.REPLACE_EXISTING );
 			Files.move( partial, serverJar, StandardCopyOption.REPLACE_EXISTING );
 		}
-		catch( IOException failure )
+		catch( IOException downloadFailure )
 		{
 			Files.deleteIfExists( partial );
-			throw new IOException( "Fabric server could not be downloaded. Check the connection and retry.", failure );
+			throw new IOException( "Fabric server could not be downloaded. Check the connection and retry.", downloadFailure );
 		}
 
 		writeDefaultJvmArgs( destination );
@@ -133,16 +139,18 @@ public final class FabricInstaller
 		return version != null && version.matches( "[0-9A-Za-z._+-]+" );
 	}
 
+	// ---- FASE 3 — Acceso a la meta API de Fabric ---------------------------
+
 	private static JsonNode fetchJson( String apiPath ) throws IOException
 	{
 		URLConnection connection = openConnection( metaBase() + apiPath );
-		try (InputStream in = connection.getInputStream())
+		try (InputStream responseBody = connection.getInputStream())
 		{
-			return JSON_MAPPER.readTree( in.readAllBytes() );
+			return JSON_MAPPER.readTree( responseBody.readAllBytes() );
 		}
-		catch( IOException failure )
+		catch( IOException requestFailure )
 		{
-			throw new IOException( "Fabric versions could not be loaded. Check the connection and retry.", failure );
+			throw new IOException( "Fabric versions could not be loaded. Check the connection and retry.", requestFailure );
 		}
 	}
 

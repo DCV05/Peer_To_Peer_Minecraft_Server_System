@@ -11,15 +11,25 @@ import jgit.TokenStore;
 import view.GeneralConfigurationsWindows;
 import view.MainFrame;
 
-public class CustomCommands
+/**
+ * Backslash commands typed in the Minecraft chat and executed by the host app.
+ * Every action reads the invocation through the static userNickname/command
+ * pair because the console reader hands over one line at a time: the dispatch
+ * is single-threaded by design and the state lives for one invocation only.
+ */
+public final class CustomCommands
 {
+
+	// ---- FASE 1 — Estado de la invocacion en curso -------------------------
+
 	private static Map<String, Runnable> commandsActions;
 	private static Map<String, String> commandsInfo;
 	private static List<String> directions;
 	private static String userNickname = null;
 	private static String command = null;
 
-	//Global variables for playerFillCommand
+	// El relleno con bots sobrevive a varias invocaciones (\playerFill y luego
+	// \nextFill), por eso su estado es de clase y no local a la accion
 	private static double[] coords1;
 	private static double[] coords2;
 	private static String direction;
@@ -27,7 +37,11 @@ public class CustomCommands
 	private static boolean fillInProcess = false;
 	private static double currentChangingCoord = 0;
 
+	// Comandos que llevan argumentos: se buscan en el mapa solo por su primera
+	// palabra y luego se les devuelve la linea completa antes de ejecutarlos
 	private static String directCommands = "\\player\\op\\playerFill";
+
+	// ---- FASE 2 — Acciones de cada comando ---------------------------------
 
 	private static Runnable customHelpCommand = () ->
 	{
@@ -47,11 +61,12 @@ public class CustomCommands
 					+ ".\",\"bold\":true,\"color\":\"#ccff11\"}", MainFrame.serverProcess, MainFrame.serverWriter );
 		ForgeUtils.sendCommand( "/title @a title {\"text\":\"Server is shutting down.\",\"bold\":true,\"color\":\"#ff8000\"}",
 				MainFrame.serverProcess, MainFrame.serverWriter );
+		// La pausa da tiempo a que los jugadores lean el aviso antes del apagado
 		try
 		{
 			Thread.sleep( 2000 );
 		}
-		catch( InterruptedException e )
+		catch( InterruptedException shutdownNoticeInterrupted )
 		{
 		}
 		MainFrame.window.turnOffServer();
@@ -107,12 +122,13 @@ public class CustomCommands
 		}
 		ForgeUtils.sendCommand( "/" + command.substring( 1 ) + spawnInSurvival, MainFrame.serverProcess, MainFrame.serverWriter );
 		ForgeUtils.sendCommand( "/gamemode survival " + userToSpawn, MainFrame.serverProcess, MainFrame.serverWriter );
+		// El bot tarda un instante en aparecer: teletransportarlo antes no surte efecto
 		if( userToSpawn != null )
 			try
 			{
 				Thread.sleep( 200 );
 			}
-			catch( InterruptedException e )
+			catch( InterruptedException spawnWaitInterrupted )
 			{
 			}
 		ForgeUtils.sendCommand( "/tp " + userToSpawn + " " + userNickname, MainFrame.serverProcess, MainFrame.serverWriter );
@@ -127,14 +143,17 @@ public class CustomCommands
 					+ ".\",\"bold\":true,\"color\":\"#ccff11\"}", MainFrame.serverProcess, MainFrame.serverWriter );
 		ForgeUtils.sendCommand( "/title @a title {\"text\":\"Server is restarting.\",\"bold\":true,\"color\":\"#ff8000\"}",
 				MainFrame.serverProcess, MainFrame.serverWriter );
+		// La pausa da tiempo a que los jugadores lean el aviso antes del reinicio
 		try
 		{
 			Thread.sleep( 2000 );
 		}
-		catch( InterruptedException e )
+		catch( InterruptedException restartNoticeInterrupted )
 		{
 		}
 		MainFrame.window.turnOffServer();
+		// El apagado es asincrono: se espera fuera del hilo de la consola a que el
+		// proceso muera de verdad antes de pulsar el boton de encendido
 		new Thread( () ->
 		{
 			while( true )
@@ -143,7 +162,7 @@ public class CustomCommands
 				{
 					Thread.sleep( 100 );
 				}
-				catch( InterruptedException e )
+				catch( InterruptedException pollInterrupted )
 				{
 				}
 				if( MainFrame.serverProcess == null )
@@ -188,11 +207,14 @@ public class CustomCommands
 					throw new RuntimeException( "Unknown direction, posible values: (north | south | east | west)." );
 				fillInProcess = true;
 			}
-			catch( Exception e )
+			catch( Exception argumentsFailure )
 			{
-				if( e instanceof RuntimeException )
+				// Los fallos con mensaje propio (direccion desconocida, numero mal
+				// escrito) se le devuelven al jugador tal cual; el resto cae al aviso
+				// generico de sintaxis
+				if( argumentsFailure instanceof RuntimeException )
 				{
-					ForgeUtils.sendCommand( "/msg " + userNickname + " " + e.getMessage(), MainFrame.serverProcess,
+					ForgeUtils.sendCommand( "/msg " + userNickname + " " + argumentsFailure.getMessage(), MainFrame.serverProcess,
 							MainFrame.serverWriter );
 					return;
 				}
@@ -256,6 +278,8 @@ public class CustomCommands
 	};
 
 
+	// ---- FASE 3 — Registro de comandos y de su ayuda -----------------------
+
 	static
 	{
 		commandsActions = new HashMap<>();
@@ -288,88 +312,107 @@ public class CustomCommands
 		directions.add( "west" );
 	}
 
+	// ---- FASE 4 — Despacho de la linea de chat -----------------------------
+
 	public static boolean processCustomCommand( String line )
 	{
+		boolean result = false;
 		int lastColonPos = line.lastIndexOf( ':' );
 		String infoPostColon = line.substring( lastColonPos + 1 );
 		userNickname = infoPostColon.substring( 2, infoPostColon.lastIndexOf( ">" ) );
 		command = infoPostColon.substring( infoPostColon.lastIndexOf( "\\" ) ).trim();
-		String localCommand = command;
-		if( directCommands.contains( command.trim().split( " " )[0] ) )
-			command = command.trim().split( " " )[0];
+		String fullCommandLine = command;
+		String firstWord = command.trim().split( " " )[0];
+		if( directCommands.contains( firstWord ) )
+			command = firstWord;
 
-		if( commandsActions.containsKey( command ) )
+		do
 		{
-
-			if( !command.equals( "\\help" ) )
+			if( !commandsActions.containsKey( command ) )
 			{
-				String customCommandsOps = ZipUtils.getDataFromPropertiesFile( "usersOpsForCustomCommands",
-						GeneralConfigurationsWindows.USER_OPS_PATH );
-				if( customCommandsOps != null && !customCommandsOps.isBlank() && !customCommandsOps.contains( userNickname ) )
-				{
-					ForgeUtils.sendCommand(
-							"/msg " + userNickname + " You do not have permission to execute this command. Ask an operator to add you.",
-							MainFrame.serverProcess, MainFrame.serverWriter );
-					return false;
-				}
+				ForgeUtils.sendCommand( "/msg " + userNickname + " Unknown command '" + command + "', use \\help to get more information.",
+						MainFrame.serverProcess, MainFrame.serverWriter );
+				clearInvocationState();
+				break;
+			}
+
+			// \help queda siempre abierto: es la unica forma de que un jugador sin
+			// permisos descubra a quien pedirselos
+			if( !command.equals( "\\help" ) && !callerIsOperator() )
+			{
+				ForgeUtils.sendCommand(
+						"/msg " + userNickname + " You do not have permission to execute this command. Ask an operator to add you.",
+						MainFrame.serverProcess, MainFrame.serverWriter );
+				// Comportamiento historico conservado: esta salida NO limpia el estado
+				break;
 			}
 
 			Runnable action = commandsActions.get( command );
+			// Los comandos con argumentos se buscaron por su primera palabra: la
+			// accion necesita recuperar la linea entera antes de ejecutarse
 			if( directCommands.contains( command ) )
-				command = localCommand;
+				command = fullCommandLine;
 			action.run();
-			command = null;
-			userNickname = null;
-			return true;
+			clearInvocationState();
+			result = true;
+		} while( false );
+		return result;
+	}
 
-		}
-		else
-			ForgeUtils.sendCommand( "/msg " + userNickname + " Unknown command '" + command + "', use \\help to get more information.",
-					MainFrame.serverProcess, MainFrame.serverWriter );
+	/** An empty operators list means the feature is still open to everybody. */
+	private static boolean callerIsOperator()
+	{
+		String customCommandsOps = ZipUtils.getDataFromPropertiesFile( "usersOpsForCustomCommands",
+				GeneralConfigurationsWindows.USER_OPS_PATH );
+		return customCommandsOps == null || customCommandsOps.isBlank() || customCommandsOps.contains( userNickname );
+	}
 
+	private static void clearInvocationState()
+	{
 		command = null;
 		userNickname = null;
-		return false;
 	}
+
+	// ---- FASE 5 — Geometria de las direcciones del relleno -----------------
 
 	public static String getOppositeDirection( String direction )
 	{
-		switch( direction )
+		return switch( direction )
 		{
-			case "north" :
-				return "south";
-			case "south" :
-				return "north";
-			case "east" :
-				return "west";
-			case "west" :
-				return "east";
-			default :
-				return null;
-		}
+			case "north" -> "south";
+			case "south" -> "north";
+			case "east" -> "west";
+			case "west" -> "east";
+			default -> null;
+		};
 	}
 
-	public static String getLookAtCommand( String bot, double x, double y, double z, String dir )
+	/**
+	 * Builds the carpet-mod "look at" command: the bot must aim at a point below
+	 * and ahead of itself so it places blocks while shift-walking backwards.
+	 */
+	public static String getLookAtCommand( String bot, double x, double y, double z, String direction )
 	{
+		// Cualquier distancia > 1 vale: solo fija el sentido de la mirada
+		final double LOOK_DISTANCE = 10.0;
+		// Este es el unico valor que hay que ajustar para calibrar la inclinacion
+		final double VERTICAL_OFFSET = 60;
 
-		final double DIST = 10.0; // cualquier valor > 1 sirve
-		final double Y_OFFSET = 60; // este es el único valor que irás ajustando
+		double targetX = x;
+		double targetY = y - VERTICAL_OFFSET;
+		double targetZ = z;
 
-		double tx = x;
-		double ty = y - Y_OFFSET;
-		double tz = z;
-
-		switch( dir )
+		switch( direction )
 		{
-			case "north" -> tz -= DIST;
-			case "south" -> tz += DIST;
-			case "east" -> tx += DIST;
-			case "west" -> tx -= DIST;
+			case "north" -> targetZ -= LOOK_DISTANCE;
+			case "south" -> targetZ += LOOK_DISTANCE;
+			case "east" -> targetX += LOOK_DISTANCE;
+			case "west" -> targetX -= LOOK_DISTANCE;
 		}
 
 		return String.format( Locale.US,
 				"/player %s look at %.3f %.3f %.3f",
-				bot, tx, ty, tz );
+				bot, targetX, targetY, targetZ );
 	}
 
 

@@ -4,7 +4,14 @@ import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.function.Supplier;
 
-public class DiscoveryResponder
+/**
+ * Lado servidor del descubrimiento por UDP: escucha los broadcast "DISCOVER" de
+ * la red y contesta "HERE" mientras el servidor de Minecraft siga levantado.
+ * El estado (jugadores conectados) se pide por Supplier en cada respuesta para
+ * no publicar datos rancios, y un host viejo puede seguir contestando "HERE" a
+ * secas porque el sufijo es opcional.
+ */
+public final class DiscoveryResponder
 {
 
 	private final String myNetworkName;
@@ -26,43 +33,45 @@ public class DiscoveryResponder
 	{
 		socket = new DatagramSocket( port );
 
-		byte[] buf = new byte[512];
+		byte[] buffer = new byte[512];
 
 		while( true )
 		{
-			System.out.println( "Escuchando..." );
-			DatagramPacket packet = new DatagramPacket( buf, buf.length );
+			app.Log.event( "NETWORK_DISCOVERY", "Escuchando en el puerto " + port );
+			DatagramPacket packet = new DatagramPacket( buffer, buffer.length );
 			socket.receive( packet );
 
-			String msg = new String( packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8 );
+			String message = new String( packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8 );
+			String expectedMessage = "DISCOVER: " + myNetworkName;
 
-			if( msg.equals( ("DISCOVER: " + myNetworkName) ) )
+			if( message.equals( expectedMessage ) )
 			{
-				if( isPortActive( port ) )
+				// El puerto cerrado es la senal de que el servidor ya no esta: se deja
+				// de responder y se sale del bucle para no anunciar un host muerto
+				if( !isPortActive( port ) )
 				{
-					String payload;
-					try
-					{
-						payload = "HERE" + statusPayload.get();
-					}
-					catch( RuntimeException ignored )
-					{
-						payload = "HERE";
-					}
-					byte[] response = payload.getBytes( StandardCharsets.UTF_8 );
-					DatagramPacket resp = new DatagramPacket(
-							response, response.length,
-							packet.getAddress(), packet.getPort() );
-
-					socket.send( resp );
-					System.out.println( "Respondí a " + packet.getAddress() );
-					/*At least one server opened*/
-				}
-				else
-				{
-					System.out.println( "No respondí, puerto cerrado" );
+					app.Log.event( "NETWORK_DISCOVERY", "Puerto " + port + " cerrado: se deja de anunciar el host" );
 					break;
 				}
+
+				String payload;
+				try
+				{
+					payload = "HERE" + statusPayload.get();
+				}
+				catch( RuntimeException statusUnavailable )
+				{
+					// Sin estado se responde el "HERE" pelado: perder la lista de
+					// jugadores es preferible a no aparecer en el descubrimiento
+					payload = "HERE";
+				}
+				byte[] response = payload.getBytes( StandardCharsets.UTF_8 );
+				DatagramPacket responsePacket = new DatagramPacket(
+						response, response.length,
+						packet.getAddress(), packet.getPort() );
+
+				socket.send( responsePacket );
+				app.Log.event( "NETWORK_DISCOVERY", "Respondido a " + packet.getAddress() );
 			}
 		}
 	}
@@ -82,27 +91,31 @@ public class DiscoveryResponder
 			{
 				listen( port );
 			}
-			catch( SocketException e )
+			catch( SocketException socketClosed )
 			{
+				// closeListeningSocket() cierra el socket con receive() bloqueado: la
+				// excepcion es el final normal del hilo, no un fallo
 			}
-			catch( Exception e )
+			catch( Exception listenFailure )
 			{
-				e.printStackTrace();
+				app.Log.event( "NETWORK_DISCOVERY", "El respondedor del puerto " + port + " se detuvo", listenFailure );
 			}
 		} ).start();
 		return this;
 	}
 
+	/** El servidor de Minecraft se da por vivo si acepta una conexion en su puerto. */
 	private boolean isPortActive( int port )
 	{
-		try (Socket s = new Socket( "localhost", port ))
+		boolean result;
+		try (Socket probe = new Socket( "localhost", port ))
 		{
-			return true;
-
+			result = true;
 		}
-		catch( Exception e )
+		catch( Exception portUnreachable )
 		{
-			return false;
+			result = false;
 		}
+		return result;
 	}
 }

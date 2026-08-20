@@ -2,7 +2,6 @@ package view;
 
 import java.awt.BorderLayout;
 import java.awt.Cursor;
-import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
 import java.awt.Image;
@@ -25,25 +24,27 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
-import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 import javax.swing.JTextPane;
 
-import com.google.api.services.drive.Drive.About;
-
 import cloud.google.GoogleDriveCloudProvider;
-import jgit.GitUtils;
-import jgit.TokenStore;
 import view.dashboard.DashboardDialogSupport;
 
-public class GoogleWindows
+/**
+ * Dialogos de la integracion con Google Drive: invitar a otro host, ver el
+ * perfil conectado y clonar una carpeta de servidor compartida. Todo lo que
+ * toca la red (invitar, descargar) se lanza fuera del hilo de Swing o con el
+ * cursor de espera puesto, porque son operaciones de varios segundos.
+ */
+public final class GoogleWindows
 {
 
 	private static boolean hasErrors = false;
 
+	// ---- FASE 1 — Invitacion de hosts ---------------------------------------
+
 	public static void addHostingUser()
 	{
-		//Dialog creation and configurations.
 		JDialog addHostingUserDialog = new JDialog();
 		addHostingUserDialog.setTitle( "Add hosting user to this server" );
 		addHostingUserDialog.getContentPane().setLayout( new BorderLayout() );
@@ -54,23 +55,18 @@ public class GoogleWindows
 		addHostingUserDialog.setLocationRelativeTo( null );
 		addHostingUserDialog.setDefaultCloseOperation( JFrame.DISPOSE_ON_CLOSE );
 
-		//General layout for the components.
 		JPanel contentPane = new JPanel( new GridLayout( 2, 1 ) );
 		JPanel buttonsPane = new JPanel( new FlowLayout( FlowLayout.RIGHT ) );
 
-		//Labels and Inputs
 		String googleDriveEmailLabelText = "Google account email";
 		JLabel googleDriveEmailLabel = new JLabel( googleDriveEmailLabelText );
 		JTextField googleDriveEmailInput = new JTextField();
 
-		//Buttons
 		JButton cancelBtn = new JButton( "Cancel" );
 		JButton addUserBtn = new JButton( "Add user" );
 
-		//Components configurations.
 		contentPane.setBorder( BorderFactory.createEmptyBorder( 20, 20, 20, 20 ) );
 
-		//Push the general containers and all its children.
 		contentPane.add( googleDriveEmailLabel );
 		contentPane.add( googleDriveEmailInput );
 
@@ -80,16 +76,15 @@ public class GoogleWindows
 		addHostingUserDialog.add( contentPane, BorderLayout.NORTH );
 		addHostingUserDialog.add( buttonsPane, BorderLayout.SOUTH );
 
-		//Event listeners
-		addUserBtn.addActionListener( addUsrBtn ->
+		addUserBtn.addActionListener( addUserEvent ->
 		{
 			hasErrors = false;
 			String errorMessageTemplate = "<html>%s - <span style='color:#fa4545'>%s</span></html>";
 
 			boolean emailIsEmpty = fieldIsEmpty( googleDriveEmailLabel, googleDriveEmailInput );
-			Pattern pattern = Pattern.compile( "[a-zA-Z0-9._]+@[a-zA-Z]+(([.][a-z]+)*)[.][a-z]{2,}" );
-			Matcher matcher = pattern.matcher( googleDriveEmailInput.getText() );
-			if( !matcher.find() && !emailIsEmpty )
+			Pattern emailPattern = Pattern.compile( "[a-zA-Z0-9._]+@[a-zA-Z]+(([.][a-z]+)*)[.][a-z]{2,}" );
+			Matcher emailMatcher = emailPattern.matcher( googleDriveEmailInput.getText() );
+			if( !emailMatcher.find() && !emailIsEmpty )
 			{
 				googleDriveEmailLabel
 						.setText( String.format( errorMessageTemplate, googleDriveEmailLabelText, "Use a valid email format." ) );
@@ -99,8 +94,9 @@ public class GoogleWindows
 			if( hasErrors )
 				return;
 
+			// La invitacion manda un correo real al invitado: se confirma antes
 			Object[] confirmButtons = {"Cancel", "Accept"};
-			int opt = JOptionPane.showOptionDialog(
+			int chosenOption = JOptionPane.showOptionDialog(
 					null,
 					"Are you sure do you want to add the user '" + googleDriveEmailInput.getText() + "' to the hosting list?",
 					"Invitation confirmation",
@@ -110,7 +106,8 @@ public class GoogleWindows
 					confirmButtons,
 					confirmButtons[0] );
 
-			if( opt == 1 )
+			boolean userAccepted = chosenOption == 1;
+			if( userAccepted )
 			{
 				boolean invitedSuccessfully = MainFrame.cloudProvider.inviteUser( googleDriveEmailInput.getText() );
 				if( invitedSuccessfully )
@@ -132,16 +129,17 @@ public class GoogleWindows
 			addHostingUserDialog.dispose();
 		} );
 
-		cancelBtn.addActionListener( cnlbtn ->
+		cancelBtn.addActionListener( cancelEvent ->
 		{
 			addHostingUserDialog.dispose();
 		} );
 		DashboardDialogSupport.show( addHostingUserDialog );
 	}
 
+	// ---- FASE 2 — Perfil conectado ------------------------------------------
+
 	public static void googleProfileWnd()
 	{
-		//Dialog creation and configurations.
 		JDialog googleDriveProfileDialog = new JDialog();
 		googleDriveProfileDialog.setTitle( "Google profile" );
 		googleDriveProfileDialog.getContentPane().setLayout( new BorderLayout() );
@@ -152,41 +150,37 @@ public class GoogleWindows
 		googleDriveProfileDialog.setLocationRelativeTo( null );
 		googleDriveProfileDialog.setDefaultCloseOperation( JFrame.DISPOSE_ON_CLOSE );
 
-		//General layout for the components.
 		JPanel contentPane = new JPanel( new GridLayout( 2, 1 ) );
 		JPanel buttonsPane = new JPanel( new FlowLayout( FlowLayout.RIGHT ) );
 
-		//Labels and Inputs
 		JLabel googleEmailLabel = new JLabel( "Logged as:" );
 		JTextPane googleEmailInput = new JTextPane();
 
-		//Default data
 		Map<String, Object> userData = ((GoogleDriveCloudProvider) MainFrame.cloudProvider).getUserInfo();
 
-		ImageIcon icon;
+		ImageIcon profileIcon;
 		JLabel imageLabel;
 		try
 		{
-			icon = new ImageIcon( URL.of( URI.create( (String) userData.get( "profilePhoto" ) ), null ) );
-			Image image = icon.getImage().getScaledInstance( 64, 64, Image.SCALE_SMOOTH );
-			imageLabel = new JLabel( new ImageIcon( image ) );
+			profileIcon = new ImageIcon( URL.of( URI.create( (String) userData.get( "profilePhoto" ) ), null ) );
+			Image scaledPhoto = profileIcon.getImage().getScaledInstance( 64, 64, Image.SCALE_SMOOTH );
+			imageLabel = new JLabel( new ImageIcon( scaledPhoto ) );
 		}
-		catch( MalformedURLException | NullPointerException e )
+		catch( MalformedURLException | NullPointerException photoUnavailable )
 		{
+			// Sin foto (cuenta sin avatar o URL rara) el dialogo se muestra igual:
+			// el email es lo unico que el usuario necesita ver aqui
 			imageLabel = null;
 		}
 
 		googleEmailInput.setText( (String) userData.get( "email" ) );
 
 
-		//Buttons
 		JButton closeBtn = new JButton( "Close" );
 
-		//Components configurations.
 		contentPane.setBorder( BorderFactory.createEmptyBorder( 20, 20, 20, 20 ) );
 		googleEmailInput.setEditable( false );
 
-		//Push the general containers and all its children.
 		contentPane.add( googleEmailLabel );
 		if( imageLabel != null )
 			contentPane.add( imageLabel );
@@ -197,18 +191,17 @@ public class GoogleWindows
 		googleDriveProfileDialog.add( contentPane, BorderLayout.NORTH );
 		googleDriveProfileDialog.add( buttonsPane, BorderLayout.SOUTH );
 
-		//Event Listeners
-		closeBtn.addActionListener( clsBtn ->
+		closeBtn.addActionListener( closeEvent ->
 		{
 			googleDriveProfileDialog.dispose();
 		} );
 		DashboardDialogSupport.show( googleDriveProfileDialog );
 	}
 
+	// ---- FASE 3 — Clonado de carpetas compartidas ---------------------------
+
 	public static void cloneServerFolderWnd( JFrame frame )
 	{
-		//First the user selects one of the repositories that he has joined.
-		//Dialog creation and configurations.
 		JDialog googleDriveServerFoldersCloneListDialog = new JDialog();
 		googleDriveServerFoldersCloneListDialog.setTitle( "Server invited folders" );
 		googleDriveServerFoldersCloneListDialog.getContentPane().setLayout( new BorderLayout() );
@@ -220,37 +213,34 @@ public class GoogleWindows
 		googleDriveServerFoldersCloneListDialog.setLocationRelativeTo( null );
 		googleDriveServerFoldersCloneListDialog.setDefaultCloseOperation( JFrame.DISPOSE_ON_CLOSE );
 
-		//We get the folders list
 		List<String> serverFolderlist = MainFrame.cloudProvider.getInvitedFolderList();
 
-		//General layout for the components.
 		JPanel contentPane;
-		if( serverFolderlist != null && serverFolderlist.size() > 0 )
+		boolean hasFolders = serverFolderlist != null && serverFolderlist.size() > 0;
+		if( hasFolders )
 		{
-			contentPane = new JPanel( new GridLayout( serverFolderlist.size(), 1 ) ); //We use the 'serverFolderlist' size so we always get a grid that has the same number of rows than the length.
+			// Una fila por carpeta: el grid se dimensiona con el tamano de la lista
+			contentPane = new JPanel( new GridLayout( serverFolderlist.size(), 1 ) );
 			contentPane.setBorder( BorderFactory.createEmptyBorder( 5, 5, 0, 5 ) );
 		}
 		else
 		{
+			// Sin carpetas el borde grande centra el mensaje de lista vacia
 			contentPane = new JPanel( new BorderLayout() );
 			contentPane.setBorder( BorderFactory.createEmptyBorder( 70, 200, 70, 200 ) );
 		}
 
 		JPanel buttonsPane = new JPanel( new FlowLayout( FlowLayout.RIGHT ) );
 
-		//Buttons
 		createClonelistComponents( contentPane, frame, googleDriveServerFoldersCloneListDialog, serverFolderlist );
 		JButton closeBtn = new JButton( "Close" );
-
-		//Push the general containers and all its children.
 
 		buttonsPane.add( closeBtn );
 
 		googleDriveServerFoldersCloneListDialog.add( contentPane, BorderLayout.NORTH );
 		googleDriveServerFoldersCloneListDialog.add( buttonsPane, BorderLayout.SOUTH );
 
-		//Event Listeners
-		closeBtn.addActionListener( clsBtn ->
+		closeBtn.addActionListener( closeEvent ->
 		{
 			googleDriveServerFoldersCloneListDialog.dispose();
 		} );
@@ -278,20 +268,22 @@ public class GoogleWindows
 			JLabel textLabel = new JLabel( String.format( labelTextTemplate, names.get( 0 ), names.get( 1 ) ) );
 			JButton cloneBtn = new JButton( "clone" );
 
-			//Push all the children.
 			cloneContainer.add( textLabel );
 			cloneContainer.add( cloneBtn );
 			contentPane.add( cloneContainer );
 
-			cloneBtn.addActionListener( clnBtn ->
+			cloneBtn.addActionListener( cloneEvent ->
 			{
 				JFileChooser chooser = new JFileChooser();
 				chooser.setFileSelectionMode( JFileChooser.DIRECTORIES_ONLY );
-				int result = chooser.showOpenDialog( frame );
-				if( result == JFileChooser.APPROVE_OPTION )
+				int chooserResult = chooser.showOpenDialog( frame );
+				if( chooserResult == JFileChooser.APPROVE_OPTION )
 				{
 					File cloneDirectory = chooser.getSelectedFile();
-					if( cloneDirectory.isDirectory() && cloneDirectory.list().length != 0 )
+					// El clonado borra y reescribe el destino: si no esta vacio se
+					// perderian los ficheros que ya hubiera dentro
+					boolean directoryIsNotEmpty = cloneDirectory.isDirectory() && cloneDirectory.list().length != 0;
+					if( directoryIsNotEmpty )
 					{
 						JOptionPane.showMessageDialog(
 								cloneContainer,
@@ -302,10 +294,13 @@ public class GoogleWindows
 					else
 					{
 						frame.setCursor( Cursor.getPredefinedCursor( Cursor.WAIT_CURSOR ) );
+						// La descarga va en su propio hilo para no congelar la ventana
 						new Thread( () ->
 						{
 							File cloneDirectoryServer = Path.of( cloneDirectory.toString(), names.get( 1 ) ).toFile();
 							MainFrame.serverOpenedDirectory = cloneDirectoryServer;
+							// Marca al proveedor de que buscamos la copia de otro dueno:
+							// sin ella descartaria los backups por fecha y no clonaria nada
 							GoogleDriveCloudProvider.isSearchingBackUpForClonning = true;
 							boolean clonedSuccessfully = MainFrame.cloudProvider.downloadServerBackup( cloneDirectoryServer.toPath() );
 							GoogleDriveCloudProvider.isSearchingBackUpForClonning = false;
@@ -337,13 +332,13 @@ public class GoogleWindows
 
 	private static boolean fieldIsEmpty( JLabel errorLabel, JTextField input )
 	{
-		if( input.getText().trim().isEmpty() )
+		boolean result = input.getText().trim().isEmpty();
+		if( result )
 		{
 			errorLabel.setText( String.format( "<html>%s - <span style='color:#fa4545'>%s</span></html>", errorLabel.getText(),
 					"Field can not be empty." ) );
 			hasErrors = true;
-			return true;
 		}
-		return false;
+		return result;
 	}
 }

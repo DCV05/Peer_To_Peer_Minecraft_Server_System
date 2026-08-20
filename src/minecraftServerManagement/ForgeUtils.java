@@ -49,12 +49,23 @@ import view.MainFrame;
 import vpn.DiscoveryResponder;
 
 
-public class ForgeUtils
+/**
+ * Everything the app needs from a Forge server folder: installer download,
+ * version catalogue, launch command, console pump and the server.properties
+ * settings surfaced in the dashboard. Each operation comes in two flavours: a
+ * checked variant that throws with an actionable message, and a legacy variant
+ * that shows a dialog and degrades to a safe default for the older call sites.
+ */
+public final class ForgeUtils
 {
 
 	public static final Path DIR_INSTALLERS = app.AppPaths.dataFile( "forge_installers" );
 	private static final String FORGE_METADATA_URL = "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml";
 	private static final int DOWNLOAD_TIMEOUT_MILLIS = 30_000;
+	/** Orden de busqueda del -Xmx; getServerJarName usa el suyo propio a proposito. */
+	private static final String[] MEMORY_SCRIPT_NAMES = {"run.bat", "start.bat", "run.sh", "start.sh"};
+
+	// ---- FASE 1 — Descarga e instalacion de Forge --------------------------
 
 	public static Path downloadForgeInstaller( String version )
 	{
@@ -82,15 +93,17 @@ public class ForgeUtils
 		Path destination = DIR_INSTALLERS.resolve( String.format( "forge-%s-installer.jar", version ) );
 		Path partial = DIR_INSTALLERS.resolve( destination.getFileName() + ".part" );
 		URLConnection connection = openConnection( url );
-		try (InputStream in = connection.getInputStream())
+		// Se baja a .part y se mueve al final: una descarga cortada no puede dejar
+		// un instalador a medias que luego se ejecutaria como si estuviera completo
+		try (InputStream download = connection.getInputStream())
 		{
-			Files.copy( in, partial, StandardCopyOption.REPLACE_EXISTING );
+			Files.copy( download, partial, StandardCopyOption.REPLACE_EXISTING );
 			Files.move( partial, destination, StandardCopyOption.REPLACE_EXISTING );
 		}
-		catch( IOException failure )
+		catch( IOException downloadFailure )
 		{
 			Files.deleteIfExists( partial );
-			throw new IOException( "Forge installer could not be downloaded. Check the connection and retry.", failure );
+			throw new IOException( "Forge installer could not be downloaded. Check the connection and retry.", downloadFailure );
 		}
 		return destination;
 	}
@@ -124,40 +137,46 @@ public class ForgeUtils
 		{
 			throw new IOException( "The selected server folder is not accessible." );
 		}
-		ProcessBuilder pb = new ProcessBuilder(
+		ProcessBuilder installerProcess = new ProcessBuilder(
 				"java",
 				"-jar",
 				forgeInstallerFile.toAbsolutePath().toString(),
 				"--installServer" );
 
-		pb.directory( forgeServerInstalationDirectory.toFile() );
-		pb.inheritIO();
+		installerProcess.directory( forgeServerInstalationDirectory.toFile() );
+		installerProcess.inheritIO();
 
 		try
 		{
-			Process process = pb.start();
+			Process process = installerProcess.start();
 			int exitCode = process.waitFor();
 			if( exitCode != 0 )
 				throw new IOException( "Forge installer exited with code " + exitCode + "." );
 		}
 		finally
 		{
+			// El instalador pesa cientos de MB y ya no sirve de nada: se borra pase
+			// lo que pase para no acumular uno por cada intento de instalacion
 			Files.deleteIfExists( forgeInstallerFile );
 		}
 	}
 
+	/** Sin eula=true el servidor arranca y se apaga solo, sin decir por que. */
 	public static boolean acceptEULA( Path forgeServerInstalationDirectory )
 	{
+		boolean result = true;
 		Path eula = forgeServerInstalationDirectory.resolve( "eula.txt" );
-		if( !(Files.exists( eula )) )
+		if( !Files.exists( eula ) )
+		{
 			try
 			{
 				Files.createFile( eula );
 			}
-			catch( IOException e )
+			catch( IOException creationFailure )
 			{
 				JOptionPane.showMessageDialog( null, "File not found or inaccessible (eula.txt)", "Error", JOptionPane.ERROR_MESSAGE );
 			}
+		}
 
 		try
 		{
@@ -165,12 +184,15 @@ public class ForgeUtils
 					"#By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).\r\n"
 							+ "eula=true" );
 		}
-		catch( IOException e )
+		catch( IOException writeFailure )
 		{
-			return false;
+			app.Log.event( "FORGE", "eula.txt could not be written at " + eula, writeFailure );
+			result = false;
 		}
-		return true;
+		return result;
 	}
+
+	// ---- FASE 2 — Catalogo de versiones de Forge ---------------------------
 
 	public static String downloadForgeMetadata()
 	{
@@ -188,13 +210,13 @@ public class ForgeUtils
 	public static String downloadForgeMetadataChecked() throws IOException
 	{
 		URLConnection connection = openConnection( FORGE_METADATA_URL );
-		try (InputStream in = connection.getInputStream())
+		try (InputStream metadataBody = connection.getInputStream())
 		{
-			return new String( in.readAllBytes(), StandardCharsets.UTF_8 );
+			return new String( metadataBody.readAllBytes(), StandardCharsets.UTF_8 );
 		}
-		catch( IOException failure )
+		catch( IOException requestFailure )
 		{
-			throw new IOException( "Forge versions could not be loaded. Check the connection and retry.", failure );
+			throw new IOException( "Forge versions could not be loaded. Check the connection and retry.", requestFailure );
 		}
 	}
 
@@ -210,40 +232,41 @@ public class ForgeUtils
 	public static List<String> getForgeVersionsList( String forgeMetadata )
 	{
 		List<String> forgeVersions = new ArrayList<>();
-		if( forgeMetadata == null || forgeMetadata.isBlank() )
-			return forgeVersions;
+		do
+		{
+			if( forgeMetadata == null || forgeMetadata.isBlank() )
+				break;
 
-		DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-		DocumentBuilder builder = null;
-		Document document = null;
+			DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+			Document document = null;
 
-		try
-		{
-			builder = factory.newDocumentBuilder();
-			document = builder.parse( new ByteArrayInputStream( forgeMetadata.getBytes() ) );
-		}
-		catch( ParserConfigurationException p )
-		{
-			JOptionPane.showMessageDialog( null, "XML metadata parser error", "Error", JOptionPane.ERROR_MESSAGE );
-		}
-		catch( SAXException e )
-		{
-			JOptionPane.showMessageDialog( null, "XML metadata parser error", "Error", JOptionPane.ERROR_MESSAGE );
-		}
-		catch( IOException e )
-		{
-			JOptionPane.showMessageDialog( null, "File not found or inaccessible (forgeMetadata)", "Error", JOptionPane.ERROR_MESSAGE );
-		}
+			try
+			{
+				DocumentBuilder builder = factory.newDocumentBuilder();
+				document = builder.parse( new ByteArrayInputStream( forgeMetadata.getBytes() ) );
+			}
+			catch( ParserConfigurationException | SAXException parserFailure )
+			{
+				app.Log.event( "FORGE", "Forge maven-metadata.xml could not be parsed", parserFailure );
+				JOptionPane.showMessageDialog( null, "XML metadata parser error", "Error", JOptionPane.ERROR_MESSAGE );
+			}
+			catch( IOException readFailure )
+			{
+				app.Log.event( "FORGE", "Forge maven-metadata.xml could not be read", readFailure );
+				JOptionPane.showMessageDialog( null, "File not found or inaccessible (forgeMetadata)", "Error", JOptionPane.ERROR_MESSAGE );
+			}
 
-		if( document != null )
-		{
+			// Un catalogo vacio deja el desplegable sin versiones, pero la ventana
+			// sigue viva: preferible a tumbar el asistente de instalacion
+			if( document == null )
+				break;
+
 			NodeList versionNodes = document.getElementsByTagName( "version" );
-
 			for( int i = 0; i < versionNodes.getLength(); i++ )
 			{
 				forgeVersions.add( versionNodes.item( i ).getTextContent() );
 			}
-		}
+		} while( false );
 
 		return forgeVersions;
 	}
@@ -267,12 +290,14 @@ public class ForgeUtils
 	{
 		List<String> forgeVersionsFilteredList = new ArrayList<>();
 		Stream<String> forgeVersionsFilteredStream = forgeVersions.stream()
-				.filter( fgVer -> fgVer.split( "-" )[0].equals( minecraftVersion ) );
+				.filter( forgeVersion -> forgeVersion.split( "-" )[0].equals( minecraftVersion ) );
 		forgeVersionsFilteredList.addAll( forgeVersionsFilteredStream.toList() );
 		forgeVersionsFilteredList.add( 0, "Select a Forge version" );
 
 		return forgeVersionsFilteredList;
 	}
+
+	// ---- FASE 3 — Utilidades de escritorio ---------------------------------
 
 	public static void openURL( String url )
 	{
@@ -284,23 +309,28 @@ public class ForgeUtils
 				desktop.browse( new URI( url ) );
 			}
 		}
-		catch( Exception e )
+		catch( Exception browseFailure )
 		{
-			e.printStackTrace();
+			// Sin navegador (headless, Linux sin xdg-open) no se puede hacer mas que
+			// dejar constancia: la URL ya esta visible en la interfaz para copiarla
+			app.Log.event( "FORGE", "The browser could not be opened for " + url, browseFailure );
 		}
 	}
 
 	public static void openModsFolder( Path serverDirectory )
 	{
 		File modsDirectory = serverDirectory.resolve( "mods" ).toFile();
-		if( !(Files.exists( modsDirectory.toPath() )) )
+		// Un servidor recien instalado no tiene carpeta mods: la primera pulsacion
+		// la crea y la segunda ya la abre en el explorador de archivos
+		if( !Files.exists( modsDirectory.toPath() ) )
 		{
 			try
 			{
 				Files.createDirectories( modsDirectory.toPath() );
 			}
-			catch( IOException e )
+			catch( IOException creationFailure )
 			{
+				app.Log.event( "FORGE", "The mods folder could not be created at " + modsDirectory, creationFailure );
 				JOptionPane.showMessageDialog( null, "Directory not found or inaccessible (mods folder)", "Error",
 						JOptionPane.ERROR_MESSAGE );
 			}
@@ -311,13 +341,16 @@ public class ForgeUtils
 			{
 				Desktop.getDesktop().open( modsDirectory );
 			}
-			catch( IOException e )
+			catch( IOException openFailure )
 			{
+				app.Log.event( "FORGE", "The mods folder could not be opened at " + modsDirectory, openFailure );
 				JOptionPane.showMessageDialog( null, "Directory not found or inaccessible (mods folder)", "Error",
 						JOptionPane.ERROR_MESSAGE );
 			}
 		}
 	}
+
+	// ---- FASE 4 — Arranque del proceso del servidor ------------------------
 
 	public static boolean hasServerStartupCommand( Path serverDirectory )
 	{
@@ -326,37 +359,49 @@ public class ForgeUtils
 
 	public static Process executeMinecraftServer( Path serverDirectory )
 	{
+		Process result = null;
 		try
 		{
 			List<String> command = buildStartupCommand( serverDirectory, isWindows() );
-			if( command == null )
-				return null;
-			ProcessBuilder pb = new ProcessBuilder( command );
-
-			pb.directory( serverDirectory.toFile() );
-			pb.redirectErrorStream( true );
-			return pb.start();
+			if( command != null )
+			{
+				ProcessBuilder serverLauncher = new ProcessBuilder( command );
+				serverLauncher.directory( serverDirectory.toFile() );
+				// stderr fundido con stdout: la consola de la app lee un unico pipe
+				serverLauncher.redirectErrorStream( true );
+				result = serverLauncher.start();
+			}
 		}
-		catch( IOException e )
+		catch( IOException startFailure )
 		{
-			return null;
+			// null significa "no se pudo arrancar" para toda la interfaz
+			app.Log.event( "FORGE", "The Minecraft server process could not be started at " + serverDirectory, startFailure );
 		}
+		return result;
 	}
 
+	/** El script de arranque manda sobre el jar: trae los argumentos que Forge necesita. */
 	static List<String> buildStartupCommand( Path serverDirectory, boolean windows )
 	{
-		Path startupScript = findStartupScript( serverDirectory, windows );
-		if( startupScript != null )
+		List<String> result = null;
+		do
 		{
-			return windows
-					? List.of( "cmd.exe", "/c", startupScript.getFileName().toString(), "nogui" )
-					: List.of( "/bin/sh", startupScript.getFileName().toString(), "nogui" );
-		}
+			Path startupScript = findStartupScript( serverDirectory, windows );
+			if( startupScript != null )
+			{
+				String scriptName = startupScript.getFileName().toString();
+				result = windows
+						? List.of( "cmd.exe", "/c", scriptName, "nogui" )
+						: List.of( "/bin/sh", scriptName, "nogui" );
+				break;
+			}
 
-		String serverJarName = getServerJarName( serverDirectory );
-		return serverJarName == null
-				? null
-				: List.of( "java", getServerRAMAlloc( serverDirectory ), "-jar", serverJarName, "nogui" );
+			String serverJarName = getServerJarName( serverDirectory );
+			if( serverJarName == null )
+				break;
+			result = List.of( "java", getServerRAMAlloc( serverDirectory ), "-jar", serverJarName, "nogui" );
+		} while( false );
+		return result;
 	}
 
 	private static Path findStartupScript( Path serverDirectory, boolean windows )
@@ -364,19 +409,25 @@ public class ForgeUtils
 		String[] candidates = windows
 				? new String[]{"run.bat", "start.bat"}
 				: new String[]{"run.sh", "start.sh"};
+		Path result = null;
 		for( String candidate : candidates )
 		{
 			Path script = serverDirectory.resolve( candidate );
 			if( Files.isRegularFile( script ) )
-				return script;
+			{
+				result = script;
+				break;
+			}
 		}
-		return null;
+		return result;
 	}
 
 	private static boolean isWindows()
 	{
 		return System.getProperty( "os.name", "" ).toLowerCase().contains( "win" );
 	}
+
+	// ---- FASE 5 — Consola del servidor y volcado del mundo -----------------
 
 	public static Thread getServerOutputs( Process serverProcess, JTextArea consoleArea )
 	{
@@ -414,7 +465,9 @@ public class ForgeUtils
 					}
 					catch( RuntimeException observerFailure )
 					{
-						observerFailure.printStackTrace();
+						// Un observador roto no puede matar al lector: si este hilo
+						// muere, nadie vacia el pipe y el servidor se congela
+						app.Log.event( "FORGE", "A console output observer failed on one line", observerFailure );
 					}
 					noteConsoleLine( finalLine );
 					try
@@ -424,7 +477,8 @@ public class ForgeUtils
 					}
 					catch( RuntimeException commandFailure )
 					{
-						commandFailure.printStackTrace();
+						// Un comando de barra mal escrito no puede tumbar el lector
+						app.Log.event( "FORGE", "A backslash command failed: " + finalLine, commandFailure );
 					}
 					if( isServerReadyLine( finalLine ) )
 					{
@@ -452,7 +506,8 @@ public class ForgeUtils
 							}
 							catch( RuntimeException hostServicesFailure )
 							{
-								hostServicesFailure.printStackTrace();
+								app.Log.event( "FORGE", "Host services could not be started after the server was ready",
+										hostServicesFailure );
 							}
 						}, "p2pmss-host-services" ).start();
 					}
@@ -470,16 +525,18 @@ public class ForgeUtils
 				}
 
 			}
-			catch( IOException e )
+			catch( IOException pipeClosed )
 			{
+				// El pipe se cierra en cada apagado del servidor: es el final normal
+				// de este hilo, no un error que merezca ruido en el log
 			}
 		}, "ServerOutputReader" );
 		consoleThread.start();
 		return consoleThread;
 	}
 
-	private static final java.util.regex.Pattern PRESENCE_POLL_NOISE = java.util.regex.Pattern.compile(
-			"There are\\s+\\d+\\s+of a max of\\s+\\d+\\s+players online", java.util.regex.Pattern.CASE_INSENSITIVE );
+	private static final Pattern PRESENCE_POLL_NOISE = Pattern.compile(
+			"There are\\s+\\d+\\s+of a max of\\s+\\d+\\s+players online", Pattern.CASE_INSENSITIVE );
 	private static final int CONSOLE_MAX_LINES = 1200;
 	private static final int CONSOLE_KEEP_LINES = 800;
 
@@ -501,6 +558,8 @@ public class ForgeUtils
 		}
 		catch( javax.swing.text.BadLocationException unreachable )
 		{
+			// El offset sale del propio documento: si esto salta, recortar es lo de
+			// menos, asi que se ignora antes que arriesgar la consola entera
 		}
 	}
 
@@ -522,22 +581,25 @@ public class ForgeUtils
 	 */
 	public static boolean flushWorldToDisk( Process serverProcess, BufferedWriter serverWriter, long timeoutSeconds )
 	{
+		boolean result = false;
 		java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch( 1 );
 		savedTheGameLatch = latch;
 		try
 		{
 			sendCommand( "/save-all flush", serverProcess, serverWriter );
-			return latch.await( timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS );
+			result = latch.await( timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS );
 		}
-		catch( InterruptedException e )
+		catch( InterruptedException waitInterrupted )
 		{
+			// Sin confirmacion no se puede prometer un mundo integro: false obliga a
+			// quien llama a no subir el backup
 			Thread.currentThread().interrupt();
-			return false;
 		}
 		finally
 		{
 			savedTheGameLatch = null;
 		}
+		return result;
 	}
 
 	public static BufferedWriter configureServerWriter( Process serverProcess, BufferedWriter serverWriter )
@@ -556,67 +618,70 @@ public class ForgeUtils
 				serverWriter.newLine();
 				serverWriter.flush();
 			}
-			catch( IOException e )
+			catch( IOException writeFailure )
 			{
-				e.printStackTrace();
+				app.Log.event( "FORGE", "The command could not be sent to the server: " + command, writeFailure );
 			}
 		}
 	}
 
+	// ---- FASE 6 — Memoria y jar del servidor -------------------------------
+
+	/** -Xmx efectivo: manda user_jvm_args.txt y, si no lo trae, los scripts de arranque. */
 	public static String getServerRAMAlloc( Path serverDirectory )
 	{
 		Pattern memoryPattern = Pattern.compile( "-Xmx[0-9]+[GM]", Pattern.CASE_INSENSITIVE );
 		Path jvmArgs = serverDirectory.resolve( "user_jvm_args.txt" );
-		if( Files.isRegularFile( jvmArgs ) )
+		String result = findMemoryOption( jvmArgs, memoryPattern );
+		if( result == null )
 		{
-			try
+			for( String scriptName : MEMORY_SCRIPT_NAMES )
 			{
-				for( String line : Files.readAllLines( jvmArgs ) )
-				{
-					if( isCommentedLine( line ) )
-						continue;
-					Matcher matcher = memoryPattern.matcher( line );
-					if( matcher.find() )
-						return matcher.group();
-				}
-			}
-			catch( IOException ignored )
-			{
+				result = findMemoryOption( serverDirectory.resolve( scriptName ), memoryPattern );
+				if( result != null )
+					break;
 			}
 		}
+		// Default cuando aun no hay un -Xmx explicito (las instalaciones nuevas de
+		// Forge lo traen comentado): 1G ahoga un mundo con mods, 4G es mas sensato
+		return result == null ? "-Xmx4G" : result;
+	}
 
-		for( String scriptName : new String[]{"run.bat", "start.bat", "run.sh", "start.sh"} )
+	/** Returns the first uncommented -Xmx of the file, or null when it has none. */
+	private static String findMemoryOption( Path file, Pattern memoryPattern )
+	{
+		String result = null;
+		if( Files.isRegularFile( file ) )
 		{
-			Path script = serverDirectory.resolve( scriptName );
-			if( !Files.isRegularFile( script ) )
-				continue;
 			try
 			{
-				for( String line : Files.readAllLines( script ) )
+				for( String line : Files.readAllLines( file ) )
 				{
 					if( isCommentedLine( line ) )
 						continue;
 					Matcher matcher = memoryPattern.matcher( line );
 					if( matcher.find() )
-						return matcher.group();
+					{
+						result = matcher.group();
+						break;
+					}
 				}
 			}
-			catch( IOException ignored )
+			catch( IOException unreadable )
 			{
+				// Un fichero ilegible no corta la busqueda: puede haber otro candidato
 			}
 		}
-		// Default when no explicit -Xmx exists yet (fresh Forge installs ship it commented out).
-		// 1G starves a real modded world; 4G is a safer launch default for hosts.
-		return "-Xmx4G";
+		return result;
 	}
 
 	public static void setServerRAMAlloc( Path serverDirectory, int gb ) throws Exception
 	{
 		String memoryUnit = "G";
-		// Values up to the installed GB are interpreted as GB; larger values as MB.
-		// Available/free memory is not a reliable launch limit on macOS and Linux.
-		OperatingSystemMXBean os = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
-		long totalRamGb = (long) (os.getTotalMemorySize() / (Math.pow( 1024L, 3 )));
+		// Los valores hasta los GB instalados se leen como GB y los mayores como MB.
+		// El limite se toma de la RAM total: la libre no es fiable en macOS ni Linux
+		OperatingSystemMXBean operatingSystem = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
+		long totalRamGb = (long) (operatingSystem.getTotalMemorySize() / (Math.pow( 1024L, 3 )));
 
 		if( gb <= 0 )
 			throw new Exception( "Ram exceeded" );
@@ -639,8 +704,8 @@ public class ForgeUtils
 		long requestedBytes = "G".equals( allocationMatcher.group( 2 ) )
 				? amount * 1024L * 1024L * 1024L
 				: amount * 1024L * 1024L;
-		OperatingSystemMXBean os = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
-		if( requestedBytes <= 0 || requestedBytes > os.getTotalMemorySize() )
+		OperatingSystemMXBean operatingSystem = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
+		if( requestedBytes <= 0 || requestedBytes > operatingSystem.getTotalMemorySize() )
 			throw new Exception( "Ram exceeded" );
 
 		Path jvmArgs = serverDirectory.resolve( "user_jvm_args.txt" );
@@ -649,13 +714,14 @@ public class ForgeUtils
 			throw new IOException( "No JVM arguments or startup script found" );
 		List<String> lines = Files.readAllLines( path );
 		String replacement = "-Xmx" + normalized;
+		Pattern memoryPattern = Pattern.compile( "-Xmx[0-9]+[GM]", Pattern.CASE_INSENSITIVE );
 		boolean replaced = false;
 		for( int i = 0; i < lines.size(); i++ )
 		{
-			if( !isCommentedLine( lines.get( i ) )
-					&& Pattern.compile( "-Xmx[0-9]+[GM]", Pattern.CASE_INSENSITIVE ).matcher( lines.get( i ) ).find() )
+			String line = lines.get( i );
+			if( !isCommentedLine( line ) && memoryPattern.matcher( line ).find() )
 			{
-				lines.set( i, lines.get( i ).replaceAll( "(?i)-Xmx[0-9]+[GM]", replacement ) );
+				lines.set( i, line.replaceAll( "(?i)-Xmx[0-9]+[GM]", replacement ) );
 				replaced = true;
 			}
 		}
@@ -673,64 +739,99 @@ public class ForgeUtils
 
 	private static Path findMemoryConfigurationScript( Path serverDirectory )
 	{
-		for( String scriptName : new String[]{"run.bat", "start.bat", "run.sh", "start.sh"} )
+		Path result = null;
+		for( String scriptName : MEMORY_SCRIPT_NAMES )
 		{
 			Path script = serverDirectory.resolve( scriptName );
 			if( Files.isRegularFile( script ) )
-				return script;
+			{
+				result = script;
+				break;
+			}
 		}
-		return null;
+		return result;
 	}
 
 
+	/**
+	 * Jar with which the server is launched. The startup scripts are the source
+	 * of truth; only when none names a jar does the folder listing decide.
+	 */
 	public static String getServerJarName( Path serverDirectory )
 	{
+		// Orden propio: start.* antes que run.*, al reves que la busqueda del -Xmx
+		String result = null;
 		for( String scriptName : new String[]{"start.bat", "start.sh", "run.bat", "run.sh"} )
 		{
-			Path script = serverDirectory.resolve( scriptName );
-			if( !Files.isRegularFile( script ) )
-				continue;
+			result = findJarNameInScript( serverDirectory.resolve( scriptName ) );
+			if( result != null )
+				break;
+		}
+
+		if( result == null )
+		{
+			try (Stream<Path> files = Files.list( serverDirectory ))
+			{
+				// El instalador queda descartado y los forge-* van primero: son los
+				// unicos jars arrancables de una instalacion normal
+				result = files.filter( Files::isRegularFile )
+						.map( path -> path.getFileName().toString() )
+						.filter( name -> name.endsWith( ".jar" ) && !name.contains( "installer" ) )
+						.sorted( ( left, right ) -> Boolean.compare( right.startsWith( "forge-" ), left.startsWith( "forge-" ) ) )
+						.findFirst()
+						.orElse( null );
+			}
+			catch( IOException unreadableDirectory )
+			{
+				// Carpeta ilegible: se devuelve null y la interfaz avisa de que no
+				// hay forma de arrancar el servidor
+			}
+		}
+		return result;
+	}
+
+	/** Returns the jar named in a java line of the script, or null when there is none. */
+	private static String findJarNameInScript( Path script )
+	{
+		String result = null;
+		if( Files.isRegularFile( script ) )
+		{
+			Pattern jarPattern = Pattern.compile( "(?:^|\\s)([^\\s\"']+\\.jar)(?:\\s|$)" );
 			try
 			{
 				for( String line : Files.readAllLines( script ) )
 				{
 					if( !line.contains( "java" ) )
 						continue;
-					Matcher matcher = Pattern.compile( "(?:^|\\s)([^\\s\"']+\\.jar)(?:\\s|$)" ).matcher( line );
+					Matcher matcher = jarPattern.matcher( line );
 					if( matcher.find() )
-						return matcher.group( 1 );
+					{
+						result = matcher.group( 1 );
+						break;
+					}
 				}
 			}
-			catch( IOException ignored )
+			catch( IOException unreadable )
 			{
+				// Un script ilegible no corta la busqueda: puede haber otro candidato
 			}
 		}
-
-		try (Stream<Path> files = Files.list( serverDirectory ))
-		{
-			return files.filter( Files::isRegularFile )
-					.map( path -> path.getFileName().toString() )
-					.filter( name -> name.endsWith( ".jar" ) && !name.contains( "installer" ) )
-					.sorted( ( left, right ) -> Boolean.compare( right.startsWith( "forge-" ), left.startsWith( "forge-" ) ) )
-					.findFirst()
-					.orElse( null );
-		}
-		catch( IOException ignored )
-		{
-		}
-		return null;
+		return result;
 	}
 
+	// ---- FASE 7 — Nombre de red y server.properties ------------------------
+
+	/** False solo la primera vez, cuando el fichero acaba de crearse vacio. */
 	public static boolean checkIfExistsNetworkNameFileAndCreateIfNot()
 	{
-		if( !(Files.exists( app.AppPaths.dataFile( "networkName.properties" ) )) )
+		if( !Files.exists( app.AppPaths.dataFile( "networkName.properties" ) ) )
 		{
 			try
 			{
 				Files.createFile( app.AppPaths.dataFile( "networkName.properties" ) );
 				return false;
 			}
-			catch( IOException e )
+			catch( IOException creationFailure )
 			{
 				JOptionPane.showMessageDialog( null, "File not found or inaccessible (networkName.properties)", "Error",
 						JOptionPane.ERROR_MESSAGE );
@@ -757,7 +858,7 @@ public class ForgeUtils
 				}
 				return props.getProperty( "networkName" );
 			}
-			catch( IOException e )
+			catch( IOException readFailure )
 			{
 				JOptionPane.showMessageDialog( null, "File not found or inaccessible (networkName.properties)", "Error",
 						JOptionPane.ERROR_MESSAGE );
@@ -780,7 +881,7 @@ public class ForgeUtils
 				props.store( out, "Network name updated" );
 				out.close();
 			}
-			catch( IOException e )
+			catch( IOException writeFailure )
 			{
 				JOptionPane.showMessageDialog( null, "File not found or inaccessible (networkName.properties)", "Error",
 						JOptionPane.ERROR_MESSAGE );
@@ -823,7 +924,7 @@ public class ForgeUtils
 				props.load( in );
 				return Integer.parseInt( props.getProperty( "server-port" ) );
 			}
-			catch( IOException e )
+			catch( IOException readFailure )
 			{
 				JOptionPane.showMessageDialog( null, "File not found or inaccessible (server.properties)", "Error",
 						JOptionPane.ERROR_MESSAGE );
@@ -843,8 +944,10 @@ public class ForgeUtils
 				properties.load( input );
 				return Math.max( 1, Integer.parseInt( properties.getProperty( "max-players", "20" ) ) );
 			}
-			catch( IOException | NumberFormatException ignored )
+			catch( IOException | NumberFormatException unreadableSetting )
 			{
+				// 20 es el default de Minecraft: mejor un aforo plausible que romper
+				// el panel por un server.properties corrupto
 			}
 		}
 		return 20;
@@ -864,7 +967,7 @@ public class ForgeUtils
 				props.store( out, "server properties updated" );
 				out.close();
 			}
-			catch( IOException e )
+			catch( IOException writeFailure )
 			{
 				JOptionPane.showMessageDialog( null, "File not found or inaccessible (server.properties)", "Error",
 						JOptionPane.ERROR_MESSAGE );
@@ -914,11 +1017,11 @@ public class ForgeUtils
 			try (FileInputStream in = new FileInputStream( file ))
 			{
 				props.load( in );
-				if( !(props.containsKey( "server-port" )) )
+				if( !props.containsKey( "server-port" ) )
 					props.setProperty( "server-port", "25565" );
 				return Integer.parseInt( props.getProperty( "server-port" ) );
 			}
-			catch( Exception e )
+			catch( Exception unreadableConfiguration )
 			{
 				JOptionPane.showMessageDialog( null, "File not found or inaccessible (networkName.properties)", "Error",
 						JOptionPane.ERROR_MESSAGE );
@@ -936,11 +1039,13 @@ public class ForgeUtils
 			try (FileInputStream in = new FileInputStream( file ))
 			{
 				props.load( in );
-				if( !(props.containsKey( "server-port" )) )
+				if( !props.containsKey( "server-port" ) )
 					props.setProperty( "server-port", "25565" );
+				// OJO: el valor solo se actualiza en memoria, aqui no hay store() a
+				// disco. Comportamiento historico, se conserva tal cual
 				props.setProperty( "server-port", "" + port );
 			}
-			catch( Exception e )
+			catch( Exception unreadableConfiguration )
 			{
 				JOptionPane.showMessageDialog( null, "File not found or inaccessible (networkName.properties)", "Error",
 						JOptionPane.ERROR_MESSAGE );

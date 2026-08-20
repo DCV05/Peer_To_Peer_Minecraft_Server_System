@@ -9,7 +9,11 @@ import javax.swing.text.JTextComponent;
 import java.awt.Component;
 import java.awt.Container;
 
-/** Applies dashboard tokens to legacy dialogs and reveals them only when complete. */
+/**
+ * Aplica los tokens visuales del dashboard a los dialogos heredados y solo los
+ * muestra cuando el arbol entero esta reestilado: si se hiciera visible antes,
+ * el usuario veria el look-and-feel antiguo parpadear durante un frame.
+ */
 public final class DashboardDialogSupport
 {
 	private DashboardDialogSupport()
@@ -29,11 +33,14 @@ public final class DashboardDialogSupport
 	{
 		if( component instanceof AbstractButton button )
 		{
+			// Los dialogos viejos no declaran cual es su accion principal: se deduce
+			// del texto, y todo lo que no sea cancelar/cerrar se considera primario
 			String label = button.getText() == null ? "" : button.getText().toUpperCase();
-			DashboardTheme.styleButton( button,
-					label.contains( "CANCEL" ) || label.contains( "CLOSE" )
-							? DashboardTheme.ButtonKind.SECONDARY
-							: DashboardTheme.ButtonKind.PRIMARY );
+			boolean dismissButton = label.contains( "CANCEL" ) || label.contains( "CLOSE" );
+			DashboardTheme.ButtonKind kind = dismissButton
+					? DashboardTheme.ButtonKind.SECONDARY
+					: DashboardTheme.ButtonKind.PRIMARY;
+			DashboardTheme.styleButton( button, kind );
 		}
 		else if( component instanceof JTextComponent text && text.isEditable() )
 		{
@@ -50,6 +57,8 @@ public final class DashboardDialogSupport
 			swing.setForeground( DashboardTheme.TEXT );
 		}
 
+		// El recorrido va despues del estilado y no en un else: un JComponent puede ser
+		// a la vez contenedor (paneles con fondo propio y con hijos que reestilar)
 		if( component instanceof Container container )
 		{
 			for( Component child : container.getComponents() )

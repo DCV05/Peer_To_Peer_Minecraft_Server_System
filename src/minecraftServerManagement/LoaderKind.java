@@ -20,22 +20,34 @@ public enum LoaderKind
 		return displayName;
 	}
 
+	/** Forge es el default: es lo que habia antes de soportar Fabric y no deja huella propia en disco. */
 	public static LoaderKind detect( Path serverDirectory )
 	{
-		if( serverDirectory == null )
-			return FORGE;
-		if( Files.isRegularFile( serverDirectory.resolve( FabricInstaller.SERVER_JAR_NAME ) ) )
-			return FABRIC;
-		return FORGE;
+		LoaderKind result = FORGE;
+		do
+		{
+			if( serverDirectory == null )
+				break;
+			Path fabricServerJar = serverDirectory.resolve( FabricInstaller.SERVER_JAR_NAME );
+			if( Files.isRegularFile( fabricServerJar ) )
+				result = FABRIC;
+		} while( false );
+		return result;
 	}
 
 	public static LoaderKind fromDisplayName( String displayName )
 	{
+		// Con el bucle dentro, un break del patron de salida unica saldria del for:
+		// se usa una unica variable result y se corta el recorrido al encontrarlo
+		LoaderKind result = FORGE;
 		for( LoaderKind kind : values() )
 		{
 			if( kind.displayName.equalsIgnoreCase( displayName ) )
-				return kind;
+			{
+				result = kind;
+				break;
+			}
 		}
-		return FORGE;
+		return result;
 	}
 }

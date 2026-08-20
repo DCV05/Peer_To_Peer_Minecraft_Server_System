@@ -94,6 +94,8 @@ public final class PlayitTunnel
 		return publicAddress;
 	}
 
+	// ---- FASE 1 — Claim del agente contra playit.gg ------------------------
+
 	public static String claimUrl( String claimCode )
 	{
 		return "https://playit.gg/claim/" + claimCode;
@@ -104,8 +106,8 @@ public final class PlayitTunnel
 		byte[] random = new byte[8];
 		new SecureRandom().nextBytes( random );
 		StringBuilder hex = new StringBuilder( 16 );
-		for( byte b : random )
-			hex.append( String.format( "%02x", b ) );
+		for( byte randomByte : random )
+			hex.append( String.format( "%02x", randomByte ) );
 		return hex.toString();
 	}
 
@@ -206,6 +208,8 @@ public final class PlayitTunnel
 		return false;
 	}
 
+	// ---- FASE 2 — Alta y descubrimiento del tunel --------------------------
+
 	/** Finds the existing Minecraft Java tunnel or creates one; returns its fixed address. */
 	public static String ensureTunnel( String secretKey ) throws IOException
 	{
@@ -303,6 +307,8 @@ public final class PlayitTunnel
 		return null;
 	}
 
+	// ---- FASE 3 — Ciclo de vida del worker del canal de control ------------
+
 	/** Starts the control-channel worker; returns immediately. */
 	public synchronized void start()
 	{
@@ -381,13 +387,15 @@ public final class PlayitTunnel
 
 					if( message.get() instanceof ControlFeedReader.NewClient newClient )
 					{
-						String key = newClient.peerAddr + "-" + newClient.connectAddr;
-						boolean fresh;
+						// playit reenvia el mismo NewClient varias veces: la clave par
+						// origen-destino evita abrir dos puentes para un solo jugador
+						String connectionKey = newClient.peerAddr + "-" + newClient.connectAddr;
+						boolean firstNotice;
 						synchronized( connectionsSync )
 						{
-							fresh = activeConnections.add( key );
+							firstNotice = activeConnections.add( connectionKey );
 						}
-						if( fresh )
+						if( firstNotice )
 						{
 							InetSocketAddress claimAddress = new InetSocketAddress(
 									InetAddress.getByAddress( newClient.claimAddress.ipBytes ),
@@ -396,7 +404,7 @@ public final class PlayitTunnel
 							{
 								synchronized( connectionsSync )
 								{
-									activeConnections.remove( key );
+									activeConnections.remove( connectionKey );
 								}
 							} );
 						}

@@ -28,40 +28,49 @@ public final class PlayerPresenceTracker
 	/** Returns true only when the visible player snapshot changed. */
 	public synchronized boolean acceptLine( String line )
 	{
-		if( line == null || line.isBlank() )
-			return false;
-		Snapshot before = snapshot();
-
-		Matcher list = LIST_RESPONSE.matcher( line );
-		if( list.find() )
+		boolean result = false;
+		do
 		{
-			onlineCount = parsePositiveOrZero( list.group( 1 ), players.size() );
-			maxPlayers = Math.max( onlineCount, parsePositiveOrZero( list.group( 2 ), maxPlayers ) );
-			players.clear();
-			for( String candidate : list.group( 3 ).split( "," ) )
+			if( line == null || line.isBlank() )
+				break;
+			Snapshot before = snapshot();
+
+			Matcher list = LIST_RESPONSE.matcher( line );
+			if( list.find() )
 			{
-				String username = candidate.trim();
-				if( VALID_USERNAME.matcher( username ).matches() )
-					players.add( username );
+				// La respuesta al "list" es la autoridad: reemplaza el censo entero,
+				// no lo completa, porque corrige las altas y bajas que se perdieron
+				onlineCount = parsePositiveOrZero( list.group( 1 ), players.size() );
+				maxPlayers = Math.max( onlineCount, parsePositiveOrZero( list.group( 2 ), maxPlayers ) );
+				players.clear();
+				String[] listedUsernames = list.group( 3 ).split( "," );
+				for( String candidate : listedUsernames )
+				{
+					String username = candidate.trim();
+					if( VALID_USERNAME.matcher( username ).matches() )
+						players.add( username );
+				}
+				onlineCount = Math.max( onlineCount, players.size() );
+				result = !before.equals( snapshot() );
+				break;
 			}
-			onlineCount = Math.max( onlineCount, players.size() );
-			return !before.equals( snapshot() );
-		}
 
-		Matcher join = JOIN.matcher( line );
-		if( join.find() )
-		{
-			players.add( join.group( 1 ) );
-			onlineCount = players.size();
-		}
+			Matcher join = JOIN.matcher( line );
+			if( join.find() )
+			{
+				players.add( join.group( 1 ) );
+				onlineCount = players.size();
+			}
 
-		Matcher leave = LEAVE.matcher( line );
-		if( leave.find() )
-		{
-			players.remove( leave.group( 1 ) );
-			onlineCount = players.size();
-		}
-		return !before.equals( snapshot() );
+			Matcher leave = LEAVE.matcher( line );
+			if( leave.find() )
+			{
+				players.remove( leave.group( 1 ) );
+				onlineCount = players.size();
+			}
+			result = !before.equals( snapshot() );
+		} while( false );
+		return result;
 	}
 
 	public synchronized void reset( int configuredMaxPlayers )

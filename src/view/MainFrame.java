@@ -77,8 +77,25 @@ import view.dashboard.MinecraftDashboard;
 import view.dashboard.ForgeVersionWizard;
 import view.dashboard.MinecraftDashboard.Phase;
 
-public class MainFrame
+/**
+ * Ventana principal y controlador de la aplicacion: es quien conoce a la vez el
+ * servidor de Minecraft, el proveedor de nube y el dashboard, y quien traduce
+ * entre ellos.
+ *
+ * Flujo: el dashboard nunca actua por su cuenta, emite intenciones por
+ * {@link MinecraftDashboard.Actions} y esta clase las ejecuta; al reves,
+ * {@link #refreshDashboardState()} recompone un State completo y lo empuja a la
+ * vista. Todo el trabajo lento (red, git, arranque de Forge) va a hilos con
+ * nombre propio, y solo se vuelve al EDT para tocar Swing.
+ *
+ * Decision heredada: el estado del servidor vive en campos estaticos publicos
+ * porque GitUtils, ZipUtils y CustomCommands los leen directamente. Cambiar eso
+ * es una refactorizacion aparte, no de estilo.
+ */
+public final class MainFrame
 {
+
+	// ---- FASE 1 — Estado global y componentes de menu ------------------------
 
 	private static File newMinecraftServerDirectory = null;
 	private static JTextArea consoleArea = null;
@@ -108,7 +125,7 @@ public class MainFrame
 	public static boolean serverIsOn = false;
 	public static CloudStorageProvider cloudProvider = null;
 	public static String cloudProviderInUse = "noCloudProvider";
-	public static String cloudInUseReminderText[];
+	public static String[] cloudInUseReminderText;
 	public static JMenuItem cloudInUseReminderMenuText;
 	public static MainFrame window = null;
 	private static java.util.Timer hostLockHeartbeatTimer = null;
@@ -129,9 +146,9 @@ public class MainFrame
 	private volatile String activeHostLockRepo = null;
 	private javax.swing.Timer playerRefreshTimer;
 
-	/**
-	 * Launch the application.
-	 */
+	// ---- FASE 2 — Arranque y cierre de la aplicacion -------------------------
+
+	/** Punto de entrada: tema del sistema y construccion de la ventana en el EDT. */
 	public static void main( String[] args )
 	{
 
@@ -147,17 +164,16 @@ public class MainFrame
 					window.frame.setVisible( true );
 					window.checkForUpdatesAsync();
 				}
-				catch( Exception e )
+				catch( Exception startupFailure )
 				{
-					e.printStackTrace();
+					// Si la ventana no llega a construirse no hay UI donde avisar: la traza
+					// en consola es la unica pista que le queda a quien reporte el fallo
+					app.Log.event( "UI", "La ventana principal no pudo construirse", startupFailure );
 				}
 			}
 		} );
 	}
 
-	/**
-	 * Create the application.
-	 */
 	public MainFrame()
 	{
 		initialize();
@@ -166,10 +182,12 @@ public class MainFrame
 	}
 
 	/**
-	 * Last-resort cleanup for kill/forced-close/OS shutdown: without it the Forge
-	 * child keeps running orphaned and the GitHub host lock stays taken until the
-	 * lease expires (today's real incident). SIGKILL and power loss still skip
-	 * this; the lease expiry covers those.
+	 * Limpieza de ultimo recurso ante un kill, un cierre forzado o el apagado del
+	 * sistema: sin esto el proceso hijo de Forge sigue vivo huerfano y el host lock
+	 * de GitHub se queda cogido hasta que caduca el lease (incidente real).
+	 *
+	 * SIGKILL y un corte de corriente se saltan igualmente este gancho; para esos
+	 * casos la unica red de seguridad es la caducidad del lease.
 	 */
 	private void installShutdownCleanup()
 	{
@@ -198,18 +216,24 @@ public class MainFrame
 				}
 				catch( RuntimeException releaseFailure )
 				{
+					// Ya estamos apagando: si la red falla aqui no queda a quien avisar y el
+					// lease caduca solo, asi que se deja constancia y se sigue cerrando
+					app.Log.event( "SERVER_LIFECYCLE", "El host lock no pudo liberarse al cerrar; caducara solo", releaseFailure );
 				}
 			}
 		}, "p2pmss-shutdown-cleanup" ) );
 	}
 
+	// ---- FASE 3 — Construccion de la ventana y los menus ---------------------
+
 	/**
-	 * Initialize the contents of the frame.
+	 * Monta la ventana entera: menus, dashboard y el ultimo servidor abierto. La
+	 * barra de menus se construye completa pero se deja oculta al final: el
+	 * dashboard cubre ya todas sus acciones y se sigue disparando por doClick().
 	 */
 	private void initialize()
 	{
 		checkIfExistsDataFolder();
-		//Initialize networkName
 		networkName = ForgeUtils.getNetworkName();
 		if( ZipUtils.existsDirectory( app.AppPaths.dataFile( "google_tokens/StoredCredential" ) ) )
 		{
@@ -238,10 +262,12 @@ public class MainFrame
 
 		frame.setTitle( "Peer To Peer Minecraft Server System" );
 
+		// DO_NOTHING_ON_CLOSE arriba + este listener: la X no puede cerrar la ventana
+		// de golpe, tiene que pasar por el guardado y la liberacion del lock
 		frame.addWindowListener( new WindowAdapter()
 		{
 			@Override
-			public void windowClosing( WindowEvent e )
+			public void windowClosing( WindowEvent closing )
 			{
 				saveAndClose();
 			}
@@ -562,6 +588,13 @@ public class MainFrame
 		menuBar.setVisible( false );
 	}
 
+	// ---- FASE 4 — Aprovisionamiento: wizard de Forge/Fabric ------------------
+
+	/**
+	 * Abre el asistente de creacion. El array de una posicion es el rodeo para la
+	 * dependencia circular: la accion de instalar necesita el wizard, que todavia
+	 * no existe cuando se construye esa misma accion.
+	 */
 	private void showForgeVersionWizard( Path destination )
 	{
 		JDialog dialog = new JDialog( frame, "Create Minecraft Server", true );
@@ -656,9 +689,11 @@ public class MainFrame
 								openKnownServer( destination.toAbsolutePath().toString() );
 							} );
 				}
-				catch( Exception failure )
+				catch( Exception installFailure )
 				{
-					Throwable root = failure;
+					// SwingWorker envuelve la excepcion real en ExecutionException: al usuario
+					// hay que enseñarle la causa de fondo, no el envoltorio
+					Throwable root = installFailure;
 					while( root.getCause() != null )
 						root = root.getCause();
 					wizard.showError( root.getMessage() );
@@ -667,6 +702,9 @@ public class MainFrame
 		}.execute();
 	}
 
+	// ---- FASE 5 — Puente entre el dashboard y el controlador -----------------
+
+	/** Cablea cada intencion del dashboard con la operacion real de esta clase. */
 	private MinecraftDashboard createDashboard()
 	{
 		return new MinecraftDashboard( new MinecraftDashboard.Actions()
@@ -801,6 +839,13 @@ public class MainFrame
 		} );
 	}
 
+	// ---- FASE 6 — Descubrimiento de red y refresco del dashboard -------------
+
+	/**
+	 * Sondea la red P2P y traduce el resultado a fase del dashboard. Solo se
+	 * adopta la lista de jugadores del peer remoto cuando el servidor local esta
+	 * parado: con el nuestro encendido, la verdad la tiene la consola de Forge.
+	 */
 	public void checkServerStatus()
 	{
 		if( serverOpenedDirectory == null )
@@ -909,9 +954,12 @@ public class MainFrame
 			{
 				account = TokenStore.getSavedUserData().getOrDefault( "nickname", "CONNECTED" );
 			}
-			catch( Exception ignored )
+			catch( Exception accountReadFailure )
 			{
+				// Token guardado pero ilegible o corrupto: se degrada a "no autenticado"
+				// para que la UI ofrezca volver a entrar en vez de mentir con un nombre
 				authenticated = false;
+				app.Log.event( "UI", "La sesion de GitHub guardada no pudo leerse", accountReadFailure );
 			}
 		}
 
@@ -925,8 +973,11 @@ public class MainFrame
 			{
 				ram = ForgeUtils.getServerRAMAlloc( serverOpenedDirectory.toPath() ).replace( "-Xmx", "" );
 			}
-			catch( Exception ignored )
+			catch( Exception ramReadFailure )
 			{
+				// Este refresco corre cada pocos segundos: si user_jvm_args.txt falta o no
+				// se deja leer se muestra "—" y se sigue, sin llenar el log de ruido
+				ram = "—";
 			}
 		}
 		String repository = linked ? account + "/" + serverName : "NOT LINKED";
@@ -973,13 +1024,15 @@ public class MainFrame
 		consoleArea = dashboard.consoleArea();
 	}
 
+	// ---- FASE 7 — Actualizador -----------------------------------------------
+
 	private volatile String lastOfferedUpdateVersion = null;
 
 	/**
-	 * Update check against the public GitHub releases: once on startup and then
-	 * every minute while the app stays open (long hosting sessions would miss a
-	 * startup-only check). Each new version is offered exactly once; silent
-	 * otherwise.
+	 * Comprobacion de version contra las releases publicas de GitHub: una al
+	 * arrancar y despues cada minuto mientras la app siga abierta. Una sesion de
+	 * hosting dura horas y con un unico chequeo al inicio no se enteraria nunca.
+	 * Cada version se ofrece exactamente una vez; el resto del tiempo, silencio.
 	 */
 	private void checkForUpdatesAsync()
 	{
@@ -996,11 +1049,11 @@ public class MainFrame
 			if( release.version().equals( lastOfferedUpdateVersion ) )
 				return;
 			lastOfferedUpdateVersion = release.version();
-			String[] options = {"DOWNLOAD UPDATE", "LATER"};
+			String[] options = {"UPDATE NOW", "LATER"};
 			int choice = JOptionPane.showOptionDialog(
 					frame,
 					"P2PMSS " + release.version() + " is available (you are running " + app.UpdateChecker.currentVersion() + ").\n"
-							+ "Download the new installer and replace the one you are using.",
+							+ "The app downloads the installer, closes itself and opens the installer for you.",
 					"Update available",
 					JOptionPane.YES_NO_OPTION,
 					JOptionPane.INFORMATION_MESSAGE,
@@ -1009,42 +1062,77 @@ public class MainFrame
 					options[0] );
 			if( choice != JOptionPane.YES_OPTION )
 				return;
-			String downloadUrl = release.downloadUrl() != null ? release.downloadUrl() : release.pageUrl();
 			if( serverIsOn )
 			{
-				// Actualizar mientras se hostea: se cierra el mundo con el ciclo completo
-				// (backup verificado + liberacion del lock) antes de instalar nada
+				// Actualizar mientras se hostea: aviso explicito de que el mundo se
+				// cierra con el ciclo completo (backup verificado + lock liberado)
 				int confirmed = JOptionPane.showConfirmDialog( frame,
-						"You are hosting right now. To update safely, the world will be stopped,\n"
-								+ "fully backed up to GitHub and the host lock released — then the app\n"
-								+ "closes so you can install the new version. Nothing is lost.",
+						"You are hosting right now. The update downloads in the background and\n"
+								+ "then the world is stopped, fully backed up to GitHub and the host lock\n"
+								+ "released — the app closes itself and the installer opens. Nothing is lost.",
 						"Safe update", JOptionPane.OK_CANCEL_OPTION, JOptionPane.INFORMATION_MESSAGE );
 				if( confirmed != JOptionPane.OK_OPTION )
 				{
 					// Que se lo vuelva a ofrecer en el siguiente chequeo
 					lastOfferedUpdateVersion = null;
+					app.Log.event( "UPDATER", "Actualizacion a " + release.version() + " aplazada por estar hosteando" );
 					return;
 				}
-				ForgeUtils.openURL( downloadUrl );
-				saveAndClose();
 			}
-			else
-			{
-				ForgeUtils.openURL( downloadUrl );
-			}
+			startSelfUpdate( release );
 		} ) ), "p2pmss-update-check" );
 		checker.setDaemon( true );
 		checker.start();
 	}
+
+	/**
+	 * Descarga el instalador en segundo plano y, cuando esta completo en disco,
+	 * cierra la app por el ciclo seguro dejandolo lanzado. Si la descarga falla,
+	 * se degrada al comportamiento antiguo: abrir la descarga en el navegador
+	 * sin cerrar nada.
+	 */
+	private void startSelfUpdate( app.UpdateChecker.ReleaseInfo release )
+	{
+		appendDashboardActivity( "Downloading update " + release.version() + " in the background…" );
+		Thread downloader = new Thread( () ->
+		{
+			java.nio.file.Path installer = null;
+			try
+			{
+				installer = app.SelfUpdater.downloadInstaller( release.downloadUrl(),
+						app.SelfUpdater.installerFileName( release.downloadUrl(), release.version() ) );
+			}
+			catch( Exception downloadFailure )
+			{
+				app.Log.event( "UPDATER", "La descarga del instalador fallo; se degrada al navegador", downloadFailure );
+			}
+			if( installer == null )
+			{
+				ForgeUtils.openURL( release.downloadUrl() != null ? release.downloadUrl() : release.pageUrl() );
+				return;
+			}
+			pendingInstallerToLaunch = installer;
+			SwingUtilities.invokeLater( () ->
+			{
+				appendDashboardActivity( "Update " + release.version() + " downloaded; closing to install" );
+				saveAndClose();
+			} );
+		}, "p2pmss-update-download" );
+		downloader.setDaemon( true );
+		downloader.start();
+	}
+
+	// ---- FASE 8 — Caches y biblioteca de servidores recientes ----------------
 
 	private volatile String linkedRepoCacheKey = null;
 	private volatile boolean linkedRepoCacheValue = false;
 	private volatile long linkedRepoCacheAtMillis = 0;
 
 	/**
-	 * The dashboard refresh runs every few seconds and each JGit open walks the
-	 * whole world repo (thousands of files, worse with Windows antivirus). The
-	 * repo-linked status barely ever changes, so it is cached for 30 seconds.
+	 * El refresco del dashboard corre cada pocos segundos y cada apertura de JGit
+	 * recorre el repo del mundo entero (miles de ficheros, y peor con el antivirus
+	 * de Windows). Que el repo este enlazado no cambia casi nunca, asi que se
+	 * cachea 30 segundos.
 	 */
 	private boolean linkedRepoStatusCached( Path serverDirectory )
 	{
@@ -1059,19 +1147,28 @@ public class MainFrame
 		return linked;
 	}
 
-	/** True when a BlueMap jar is present in the server's mods folder. */
+	/**
+	 * Cierto cuando hay un jar de BlueMap en la carpeta mods del servidor. Salida
+	 * unica con variable result en vez de do-while: el break pertenece al for.
+	 */
 	private static boolean blueMapInstalled( Path serverDirectory )
 	{
+		boolean result = false;
 		File[] mods = serverDirectory.resolve( "mods" ).toFile().listFiles();
-		if( mods == null )
-			return false;
-		for( File mod : mods )
+		// listFiles() devuelve null si mods no existe o no se puede leer
+		if( mods != null )
 		{
-			String name = mod.getName().toLowerCase();
-			if( name.startsWith( "bluemap" ) && name.endsWith( ".jar" ) )
-				return true;
+			for( File mod : mods )
+			{
+				String name = mod.getName().toLowerCase();
+				if( name.startsWith( "bluemap" ) && name.endsWith( ".jar" ) )
+				{
+					result = true;
+					break;
+				}
+			}
 		}
-		return false;
+		return result;
 	}
 
 	private volatile List<MinecraftDashboard.ServerEntry> recentServersCache = null;
@@ -1088,10 +1185,13 @@ public class MainFrame
 			if( Files.exists( recentServersPath ) )
 				fileStamp = Files.getLastModifiedTime( recentServersPath ).toMillis();
 		}
-		catch( IOException ignored )
+		catch( IOException stampFailure )
 		{
+			// Sin marca de tiempo el cacheKey queda en 0 y se recalcula la lista: mas
+			// trabajo, pero nunca datos rancios
 		}
-		String cacheKey = fileStamp + "|" + (serverOpenedDirectory == null ? "" : serverOpenedDirectory.getAbsolutePath());
+		String selectedPath = serverOpenedDirectory == null ? "" : serverOpenedDirectory.getAbsolutePath();
+		String cacheKey = fileStamp + "|" + selectedPath;
 		List<MinecraftDashboard.ServerEntry> cached = recentServersCache;
 		if( cached != null && cacheKey.equals( recentServersCacheKey ) )
 			return cached;
@@ -1111,12 +1211,16 @@ public class MainFrame
 						paths.add( path );
 				}
 			}
-			catch( IOException ignored )
+			catch( IOException readFailure )
 			{
+				// Fichero ilegible: se degrada a lista vacia y el usuario siempre puede
+				// volver a abrir la carpeta a mano
+				app.Log.event( "UI", "La lista de servidores recientes no pudo leerse", readFailure );
 			}
 		}
 		if( serverOpenedDirectory != null )
 		{
+			// El servidor abierto encabeza siempre la lista, este o no en el fichero
 			String current = serverOpenedDirectory.getAbsolutePath().replace( '\\', '/' );
 			paths.remove( current );
 			paths.add( 0, current );
@@ -1212,11 +1316,14 @@ public class MainFrame
 				properties.store( output, "Updated recent servers" );
 			}
 		}
-		catch( IOException e )
+		catch( IOException writeFailure )
 		{
+			app.Log.event( "UI", "La lista de servidores recientes no pudo guardarse", writeFailure );
 			showError( "Recent servers", "The recent server list could not be updated." );
 		}
 	}
+
+	// ---- FASE 9 — Ciclo de vida del servidor: arranque, sync e importacion ---
 
 	private void toggleServerFromDashboard()
 	{
@@ -1326,9 +1433,9 @@ public class MainFrame
 					setDashboardPhase( Phase.STARTING, "Forge is loading the world; waiting for the Done signal" );
 				} );
 			}
-			catch( Exception e )
+			catch( Exception startFailure )
 			{
-				e.printStackTrace();
+				app.Log.event( "SERVER_LIFECYCLE", "El arranque del servidor de Minecraft fallo", startFailure );
 				setDashboardFailure( "The Minecraft server could not be started. Check Java and the startup script." );
 			}
 		}, "p2pmss-dashboard-start" ).start();
@@ -1346,93 +1453,120 @@ public class MainFrame
 		new Thread( this::checkServerStatus, "p2pmss-network-scan" ).start();
 	}
 
+	/**
+	 * Traida manual del mundo desde GitHub. Las condiciones van en cascada porque
+	 * un pull sobre un mundo vivo lo pisaria: solo se descarga con el servidor
+	 * local parado, sin ningun peer hosteando y con el repo privado ya enlazado.
+	 */
 	private void synchronizeNow()
 	{
-		if( serverOpenedDirectory == null )
+		do
 		{
-			showError( "No server selected", "Open a Forge server before pulling its world." );
-			showDashboardPage( MinecraftDashboard.Page.SERVERS );
-			return;
-		}
-		if( serverIsOn || dashboardPhase == Phase.REMOTE_HOST || dashboardPhase.isBusy() )
-		{
-			showError( "Pull unavailable", "The world can only be pulled while this server is offline and no peer is hosting it." );
-			return;
-		}
-		if( !TokenStore.sessionIsOpened() )
-		{
-			showError( "GitHub account required", "Sign into GitHub before pulling this world." );
-			return;
-		}
-		if( !GitUtils.repoExistInPath( serverOpenedDirectory.toPath() ) || !GitUtils.hasRemoteOrigin( serverOpenedDirectory.toPath() ) )
-		{
-			showError( "Repository not linked", "Create or clone the private GitHub repository first." );
-			return;
-		}
-		Path selectedServer = serverOpenedDirectory.toPath();
-		selectGitHubProvider();
-		setDashboardPhase( Phase.SYNCING, "Pulling the latest confirmed world from GitHub" );
-		syncState = "PULLING";
-		appendDashboardActivity( "Manual world pull requested" );
-		new Thread( () ->
-		{
-			boolean success = GitUtils.pull( selectedServer );
-			if( success )
+			if( serverOpenedDirectory == null )
 			{
-				syncState = "UP TO DATE";
-				lastSync = "JUST NOW";
-				appendDashboardActivity( "Latest GitHub world pulled successfully" );
-				setDashboardPhase( Phase.OFFLINE, "World is current and safe to start" );
+				showError( "No server selected", "Open a Forge server before pulling its world." );
+				showDashboardPage( MinecraftDashboard.Page.SERVERS );
+				break;
 			}
-			else
+			boolean worldInUse = serverIsOn || dashboardPhase == Phase.REMOTE_HOST || dashboardPhase.isBusy();
+			if( worldInUse )
 			{
-				syncState = "FAILED";
-				setDashboardFailure( "GitHub synchronization failed. Local changes were preserved." );
+				showError( "Pull unavailable", "The world can only be pulled while this server is offline and no peer is hosting it." );
+				break;
 			}
-		}, "p2pmss-manual-sync" ).start();
+			if( !TokenStore.sessionIsOpened() )
+			{
+				showError( "GitHub account required", "Sign into GitHub before pulling this world." );
+				break;
+			}
+			Path selectedServer = serverOpenedDirectory.toPath();
+			boolean repositoryLinked = GitUtils.repoExistInPath( selectedServer ) && GitUtils.hasRemoteOrigin( selectedServer );
+			if( !repositoryLinked )
+			{
+				showError( "Repository not linked", "Create or clone the private GitHub repository first." );
+				break;
+			}
+
+			selectGitHubProvider();
+			setDashboardPhase( Phase.SYNCING, "Pulling the latest confirmed world from GitHub" );
+			syncState = "PULLING";
+			appendDashboardActivity( "Manual world pull requested" );
+			new Thread( () ->
+			{
+				boolean success = GitUtils.pull( selectedServer );
+				if( success )
+				{
+					syncState = "UP TO DATE";
+					lastSync = "JUST NOW";
+					appendDashboardActivity( "Latest GitHub world pulled successfully" );
+					setDashboardPhase( Phase.OFFLINE, "World is current and safe to start" );
+				}
+				else
+				{
+					syncState = "FAILED";
+					setDashboardFailure( "GitHub synchronization failed. Local changes were preserved." );
+				}
+			}, "p2pmss-manual-sync" ).start();
+		} while( false );
 	}
 
+	/**
+	 * Importa un mundo externo sobre el servidor abierto. Cascada de guardas: sin
+	 * servidor, con el mundo en uso, con la carpeta mal configurada o sin
+	 * confirmacion explicita del usuario no se toca nada del disco.
+	 */
 	private void importWorldFromDashboard()
 	{
-		if( serverOpenedDirectory == null )
+		do
 		{
-			showError( "No server selected", "Open or create the Forge server that will receive the imported world first." );
-			showDashboardPage( MinecraftDashboard.Page.SERVERS );
-			return;
-		}
-		if( serverIsOn || dashboardPhase == Phase.REMOTE_HOST || dashboardPhase.isBusy() )
-		{
-			showError( "Import unavailable", "Stop the local server and wait until no peer is hosting this world before importing." );
-			return;
-		}
+			if( serverOpenedDirectory == null )
+			{
+				showError( "No server selected", "Open or create the Forge server that will receive the imported world first." );
+				showDashboardPage( MinecraftDashboard.Page.SERVERS );
+				break;
+			}
+			boolean worldInUse = serverIsOn || dashboardPhase == Phase.REMOTE_HOST || dashboardPhase.isBusy();
+			if( worldInUse )
+			{
+				showError( "Import unavailable", "Stop the local server and wait until no peer is hosting this world before importing." );
+				break;
+			}
 
-		JFileChooser chooser = new JFileChooser();
-		chooser.setDialogTitle( "Select a Minecraft world folder or ZIP" );
-		chooser.setFileSelectionMode( JFileChooser.FILES_AND_DIRECTORIES );
-		chooser.setAcceptAllFileFilterUsed( false );
-		chooser.setFileFilter( new FileNameExtensionFilter( "Minecraft world folder or ZIP (*.zip)", "zip" ) );
-		if( chooser.showOpenDialog( frame ) != JFileChooser.APPROVE_OPTION )
-			return;
+			JFileChooser chooser = new JFileChooser();
+			chooser.setDialogTitle( "Select a Minecraft world folder or ZIP" );
+			chooser.setFileSelectionMode( JFileChooser.FILES_AND_DIRECTORIES );
+			chooser.setAcceptAllFileFilterUsed( false );
+			chooser.setFileFilter( new FileNameExtensionFilter( "Minecraft world folder or ZIP (*.zip)", "zip" ) );
+			if( chooser.showOpenDialog( frame ) != JFileChooser.APPROVE_OPTION )
+				break;
 
-		File selectedServer = serverOpenedDirectory;
-		Path target;
-		try
-		{
-			target = WorldImportService.configuredWorldDirectory( selectedServer.toPath() );
-		}
-		catch( IOException invalidServer )
-		{
-			showError( "Invalid server configuration", invalidServer.getMessage() );
-			return;
-		}
-		Path source = chooser.getSelectedFile().toPath();
-		int confirmation = JOptionPane.showConfirmDialog( frame,
-				"Import this world into:\n" + target + "\n\n"
-						+ "If a world already exists, it will be moved intact to world-import-backups. Continue?",
-				"Import Minecraft world", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE );
-		if( confirmation != JOptionPane.YES_OPTION )
-			return;
+			File selectedServer = serverOpenedDirectory;
+			Path target;
+			try
+			{
+				target = WorldImportService.configuredWorldDirectory( selectedServer.toPath() );
+			}
+			catch( IOException invalidServer )
+			{
+				showError( "Invalid server configuration", invalidServer.getMessage() );
+				break;
+			}
+			Path source = chooser.getSelectedFile().toPath();
+			// El mundo anterior no se borra, se aparta: hay que decirlo antes de aceptar
+			int confirmation = JOptionPane.showConfirmDialog( frame,
+					"Import this world into:\n" + target + "\n\n"
+							+ "If a world already exists, it will be moved intact to world-import-backups. Continue?",
+					"Import Minecraft world", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE );
+			if( confirmation != JOptionPane.YES_OPTION )
+				break;
 
+			importWorldInBackground( source, selectedServer );
+		} while( false );
+	}
+
+	/** Importacion propiamente dicha, fuera del EDT: copia ficheros y puede tardar. */
+	private void importWorldInBackground( Path source, File selectedServer )
+	{
 		setDashboardPhase( Phase.IMPORTING, "Validating and importing the selected world" );
 		appendDashboardActivity( "Importing world from " + source.getFileName() );
 		new Thread( () ->
@@ -1477,47 +1611,60 @@ public class MainFrame
 			else
 				showError( "Open folder", "Opening folders is not supported on this desktop." );
 		}
-		catch( IOException e )
+		catch( IOException openFailure )
 		{
+			app.Log.event( "UI", "La carpeta del servidor no pudo abrirse en el escritorio", openFailure );
 			showError( "Open folder", "The selected server folder could not be opened." );
 		}
 	}
 
+	/**
+	 * Guarda los ajustes locales del servidor abierto. Son ficheros del mundo
+	 * (server.properties, user_jvm_args.txt): escribirlos con el mundo vivo los
+	 * dejaria descuadrados respecto al proceso en marcha, de ahi las guardas.
+	 */
 	private void saveServerSettingsFromDashboard( MinecraftDashboard.SettingsDraft settings )
 	{
-		if( serverOpenedDirectory == null )
+		do
 		{
-			dashboard.showSettingsResult( false, "Open a server before editing its settings." );
-			return;
-		}
-		if( serverIsOn || dashboardPhase == Phase.REMOTE_HOST || dashboardPhase.isBusy() )
-		{
-			dashboard.showSettingsResult( false, "Stop every host before changing server settings." );
-			return;
-		}
-		try
-		{
-			Path server = serverOpenedDirectory.toPath();
-			ForgeUtils.setServerRAMAlloc( server, settings.ram() );
-			ForgeUtils.setServerPortChecked( server, settings.port() );
-			ForgeUtils.setMaxPlayers( server, settings.maxPlayers() );
-			ForgeUtils.setNetworkNameChecked( settings.networkName() );
-			networkName = settings.networkName();
-			actualServerPort = settings.port();
-			playerPresence.reset( settings.maxPlayers() );
-			applyPublicUrlToggle( settings.publicUrl() );
-			dashboard.showSettingsResult( true, "Saved locally · applies on the next start" );
-			appendDashboardActivity( "Local server settings updated" );
-			refreshDashboardState();
-			refreshNetworkAsync();
-		}
-		catch( Exception failure )
-		{
-			String message = "Ram exceeded".equalsIgnoreCase( failure.getMessage() )
-					? "The requested RAM exceeds this machine's installed memory."
-					: failure.getMessage();
-			dashboard.showSettingsResult( false, message == null ? "Settings could not be saved." : message );
-		}
+			if( serverOpenedDirectory == null )
+			{
+				dashboard.showSettingsResult( false, "Open a server before editing its settings." );
+				break;
+			}
+			boolean worldInUse = serverIsOn || dashboardPhase == Phase.REMOTE_HOST || dashboardPhase.isBusy();
+			if( worldInUse )
+			{
+				dashboard.showSettingsResult( false, "Stop every host before changing server settings." );
+				break;
+			}
+			try
+			{
+				Path server = serverOpenedDirectory.toPath();
+				ForgeUtils.setServerRAMAlloc( server, settings.ram() );
+				ForgeUtils.setServerPortChecked( server, settings.port() );
+				ForgeUtils.setMaxPlayers( server, settings.maxPlayers() );
+				ForgeUtils.setNetworkNameChecked( settings.networkName() );
+				networkName = settings.networkName();
+				actualServerPort = settings.port();
+				playerPresence.reset( settings.maxPlayers() );
+				applyPublicUrlToggle( settings.publicUrl() );
+				dashboard.showSettingsResult( true, "Saved locally · applies on the next start" );
+				appendDashboardActivity( "Local server settings updated" );
+				refreshDashboardState();
+				refreshNetworkAsync();
+			}
+			catch( Exception saveFailure )
+			{
+				// "Ram exceeded" es el codigo que lanza ForgeUtils; se traduce a un mensaje
+				// que explique al usuario que puede hacer al respecto
+				boolean ramExceeded = "Ram exceeded".equalsIgnoreCase( saveFailure.getMessage() );
+				String message = ramExceeded
+						? "The requested RAM exceeds this machine's installed memory."
+						: saveFailure.getMessage();
+				dashboard.showSettingsResult( false, message == null ? "Settings could not be saved." : message );
+			}
+		} while( false );
 	}
 
 	private void createRepositoryFromDashboard()
@@ -1526,33 +1673,64 @@ public class MainFrame
 		configurePrivateBackupAsync( true );
 	}
 
-	/** Starts the one-time private repository setup without blocking Swing. */
+	/**
+	 * Lanza el alta unica del repositorio privado sin bloquear Swing. Devuelve si
+	 * hay un alta en marcha, para que quien llame sepa que no debe encadenar otra
+	 * operacion de red encima.
+	 *
+	 * Salida unica: la cascada de guardas descarta, por este orden, que no haya
+	 * nada que respaldar, que ya este respaldado, que el mundo este en uso, que
+	 * haya otra operacion ocupando el dashboard, que sea un reintento automatico
+	 * ya fallado y, por ultimo, que otro hilo se haya adelantado.
+	 */
 	private boolean configurePrivateBackupAsync( boolean userRequested )
 	{
-		if( serverOpenedDirectory == null || !TokenStore.sessionIsOpened() || !isGitHubSelected() )
-			return false;
-		Path selectedServer = serverOpenedDirectory.toPath().toAbsolutePath().normalize();
-		if( GitUtils.repoExistInPath( selectedServer ) && GitUtils.hasRemoteOrigin( selectedServer ) )
-			return false;
-		if( serverIsOn || dashboardPhase == Phase.REMOTE_HOST )
+		boolean result = false;
+		do
 		{
-			if( userRequested )
-				showError( "Backup unavailable", "Stop every host before creating the initial private backup." );
-			return false;
-		}
-		if( dashboardPhase.isBusy() && !privateBackupSetupInProgress.get() )
-			return false;
-		if( !userRequested && selectedServer.equals( lastAutomaticBackupAttempt ) )
-			return false;
-		if( !privateBackupSetupInProgress.compareAndSet( false, true ) )
-			return true;
+			if( serverOpenedDirectory == null || !TokenStore.sessionIsOpened() || !isGitHubSelected() )
+				break;
 
-		lastAutomaticBackupAttempt = selectedServer;
-		selectGitHubProvider();
-		syncState = "INITIALIZING";
-		setDashboardPhase( Phase.SYNCING, "Creating the automatic private GitHub backup" );
-		appendDashboardActivity( "Preparing automatic private GitHub backup" );
-		String serverName = selectedServer.getFileName().toString();
+			Path selectedServer = serverOpenedDirectory.toPath().toAbsolutePath().normalize();
+			boolean alreadyLinked = GitUtils.repoExistInPath( selectedServer ) && GitUtils.hasRemoteOrigin( selectedServer );
+			if( alreadyLinked )
+				break;
+
+			if( serverIsOn || dashboardPhase == Phase.REMOTE_HOST )
+			{
+				// Solo se avisa si lo pidio el usuario: el intento automatico es silencioso
+				if( userRequested )
+					showError( "Backup unavailable", "Stop every host before creating the initial private backup." );
+				break;
+			}
+			if( dashboardPhase.isBusy() && !privateBackupSetupInProgress.get() )
+				break;
+			// El intento automatico no se repite sobre la misma carpeta: si fallo una vez,
+			// insistir en cada refresco solo genera llamadas a GitHub en bucle
+			if( !userRequested && selectedServer.equals( lastAutomaticBackupAttempt ) )
+				break;
+			if( !privateBackupSetupInProgress.compareAndSet( false, true ) )
+			{
+				// Otro hilo ya lo esta montando: hay alta en curso, aunque no la nuestra
+				result = true;
+				break;
+			}
+
+			lastAutomaticBackupAttempt = selectedServer;
+			selectGitHubProvider();
+			syncState = "INITIALIZING";
+			setDashboardPhase( Phase.SYNCING, "Creating the automatic private GitHub backup" );
+			appendDashboardActivity( "Preparing automatic private GitHub backup" );
+			String serverName = selectedServer.getFileName().toString();
+			startPrivateBackupThread( selectedServer, serverName );
+			result = true;
+		} while( false );
+		return result;
+	}
+
+	/** Alta del repositorio privado en su propio hilo: crea el repo y hace el push inicial. */
+	private void startPrivateBackupThread( Path selectedServer, String serverName )
+	{
 		new Thread( () ->
 		{
 			GitUtils.PrivateBackupSetupResult result = GitUtils.configurePrivateBackup( selectedServer, serverName );
@@ -1579,7 +1757,6 @@ public class MainFrame
 						"Private GitHub backup needs attention", JOptionPane.ERROR_MESSAGE ) );
 			}
 		}, "p2pmss-private-backup-setup" ).start();
-		return true;
 	}
 
 	private void selectGitHubProvider()
@@ -1609,7 +1786,7 @@ public class MainFrame
 		return java.time.LocalTime.now().withNano( 0 ) + "  " + message;
 	}
 
-	/** Keeps activity-log mutations on Swing's event-dispatch thread. */
+	/** Mantiene las escrituras del registro de actividad en el EDT: las llaman hilos de fondo. */
 	public void appendDashboardActivity( String message )
 	{
 		if( dashboard == null )
@@ -1676,7 +1853,12 @@ public class MainFrame
 		}
 	}
 
-	/** Compact, backwards-compatible payload returned to peers during discovery. */
+	/**
+	 * Carga util compacta que se devuelve a los peers durante el descubrimiento. El
+	 * formato es aditivo (;CLAVE=valor) para que una version vieja del cliente
+	 * ignore lo que no conoce en vez de romperse, y la lista se capa a 80 nombres
+	 * porque va en un unico datagrama UDP.
+	 */
 	public String playerDiscoveryPayload()
 	{
 		PlayerPresenceTracker.Snapshot presence = playerPresence.snapshot();
@@ -1726,8 +1908,12 @@ public class MainFrame
 				return;
 			}
 
+			// Sin server arrancado y con el repo limpio no hay nada que salvar:
+			// cerrar la app debe ser instantaneo, no un ciclo de backup vacio
+			boolean somethingToSave = processToStop != null
+					|| (serverOpenedDirectory != null && worldHasUnsavedChanges());
 			GitUtils.PrivateBackupSetupResult backup = null;
-			if( serverOpenedDirectory != null && isGitHubSelected() )
+			if( somethingToSave && serverOpenedDirectory != null && isGitHubSelected() )
 			{
 				setDashboardPhase( Phase.SAVING, "Creating verified GitHub backup batches before exit" );
 				if( TokenStore.sessionIsOpened() )
@@ -1768,10 +1954,34 @@ public class MainFrame
 
 			SwingUtilities.invokeLater( () ->
 			{
+				// Si el cierre viene de una actualizacion, el instalador se lanza como
+				// proceso independiente justo antes de morir: sobrevive al exit y para
+				// cuando copia ficheros la app ya no bloquea nada
+				java.nio.file.Path installerToLaunch = pendingInstallerToLaunch;
+				if( installerToLaunch != null )
+					app.SelfUpdater.launchInstaller( installerToLaunch );
 				frame.dispose();
 				System.exit( 0 );
 			} );
 		}, "p2pmss-save-and-close" ).start();
+	}
+
+	private volatile java.nio.file.Path pendingInstallerToLaunch = null;
+
+	/** El cierre solo hace backup si hay algo que salvar; ante la duda, se salva. */
+	private boolean worldHasUnsavedChanges()
+	{
+		boolean changed = true;
+		try (org.eclipse.jgit.api.Git git = org.eclipse.jgit.api.Git.open( serverOpenedDirectory ))
+		{
+			changed = !git.status().call().isClean();
+		}
+		catch( Exception statusFailure )
+		{
+			// Si no se puede saber, mejor un backup de mas que datos perdidos
+			changed = true;
+		}
+		return changed;
 	}
 
 	private boolean confirmExitWithoutBackup( String failureMessage )
@@ -1830,7 +2040,9 @@ public class MainFrame
 		configDialog.setLocationRelativeTo( fatherFrame );
 		configDialog.setDefaultCloseOperation( JFrame.DISPOSE_ON_CLOSE );
 
-		//Array for the autoSaveSelect
+		// Los dos arrays van emparejados por indice: texto visible e intervalo en
+		// segundos. El de enteros ademas esta ordenado, que es lo que permite el
+		// binarySearch de abajo para recuperar la seleccion guardada
 		String[] autoSaveIntervalsTexts = {"Off", "5 mins", "10 mins", "30 mins", "1 h", "2 h"};
 		int[] autoSaveIntervalsInts = {0, 5 * 60, 10 * 60, 30 * 60, 1 * 60 * 60, 2 * 60 * 60};
 
@@ -1898,13 +2110,15 @@ public class MainFrame
 						ForgeUtils.setServerRAMAlloc( serverOpenedDirectory.toPath(),
 								Integer.parseInt( serverRamAllocInput.getText().replaceAll( "[-Xmx|G|M]", "" ) ) );
 					}
-					catch( Exception ramExpection )
+					catch( Exception ramFailure )
 					{
-						if( ramExpection.getMessage().equalsIgnoreCase( "Ram exceeded" ) )
+						// "Ram exceeded" es esperable y se avisa en la propia etiqueta; lo demas
+						// es un fallo real de escritura y se registra con traza
+						if( "Ram exceeded".equalsIgnoreCase( ramFailure.getMessage() ) )
 							serverRamAllocLabel
 									.setText( "<html>RAM (GB or MB) <span style='color:#fa4545'>Memoria libre insuficiente</span></html>" );
 						else
-							ramExpection.printStackTrace();
+							app.Log.event( "UI", "La RAM asignada no pudo guardarse", ramFailure );
 						return;
 					}
 				}
@@ -1965,24 +2179,33 @@ public class MainFrame
 				return;
 			}
 		}
-		catch( IOException e )
+		catch( IOException readFailure )
 		{
-			e.printStackTrace();
+			app.Log.event( "UI", "El fichero de servidores recientes no pudo leerse", readFailure );
 			JOptionPane.showMessageDialog( null, "File not found or inaccessible", "Error", JOptionPane.ERROR_MESSAGE );
 		}
 		recentServersMenu.revalidate();
 		recentServersMenu.repaint();
 	}
 
+	/**
+	 * Ultimo tramo de la ruta del servidor abierto. Se separa a mano y no con
+	 * File.getName() porque el separador depende de la maquina donde se guardo la
+	 * ruta, no de la que la esta leyendo.
+	 */
 	public static String getServerName()
 	{
-		if( serverOpenedDirectory == null )
-			return "No server";
-		if( !(serverOpenedDirectory.toString().contains( "\\" )) )
-			return serverOpenedDirectory.toString().substring( serverOpenedDirectory.toString().lastIndexOf( "/" ) + 1,
-					serverOpenedDirectory.toString().length() );
-		return serverOpenedDirectory.toString().substring( serverOpenedDirectory.toString().lastIndexOf( "\\" ) + 1,
-				serverOpenedDirectory.toString().length() );
+		String result = "No server";
+		do
+		{
+			if( serverOpenedDirectory == null )
+				break;
+			String directoryPath = serverOpenedDirectory.toString();
+			String separator = directoryPath.contains( "\\" ) ? "\\" : "/";
+			int lastSeparator = directoryPath.lastIndexOf( separator );
+			result = directoryPath.substring( lastSeparator + 1, directoryPath.length() );
+		} while( false );
+		return result;
 	}
 
 	public static boolean isGitHubSelected()
@@ -1995,7 +2218,7 @@ public class MainFrame
 		SwingUtilities.invokeLater( () ->
 		{
 			cloudProviderInUse = radioButton.getText().replaceAll( " ", "" );
-			System.out.println( cloudProviderInUse );
+			app.Log.event( "UI", "Proveedor de nube seleccionado: " + cloudProviderInUse );
 			if( !cloudProviderInUse.equals( "GitHub" ) )
 			{
 				if( cloudProvider == null || !cloudProvider.isSessionOpened() )
@@ -2038,9 +2261,12 @@ public class MainFrame
 			{
 				serverProcess.waitFor();
 			}
-			catch( InterruptedException e )
+			catch( InterruptedException interrupted )
 			{
+				// Se restaura la marca de interrupcion: este hilo no es el dueño de la
+				// politica de cancelacion y quien lo lance debe poder verla
 				Thread.currentThread().interrupt();
+				app.Log.event( "SERVER_LIFECYCLE", "La espera al cierre de Forge fue interrumpida", interrupted );
 				setDashboardFailure( "The server stop operation was interrupted." );
 				return;
 			}
@@ -2122,32 +2348,52 @@ public class MainFrame
 		}, "p2pmss-dashboard-stop" ).start();
 	}
 
+	/**
+	 * Arbitra el lock de hosting en GitHub antes de arrancar. Un mundo sin repo
+	 * remoto no tiene nada que arbitrar y pasa directo: el descubrimiento UDP ya
+	 * cubre ese caso dentro de la LAN virtual.
+	 */
 	private boolean acquireHostLockForStart( String repoFullName )
 	{
-		if( repoFullName == null )
-			return true;
-		setDashboardPhase( Phase.DISCOVERING, "Arbitrating the GitHub host lock" );
-		HostLock.AcquireResult lock = HostLock.acquire( repoFullName );
-		if( lock.acquired() )
+		boolean result = true;
+		do
 		{
-			activeHostLockRepo = repoFullName;
-			appendDashboardActivity( lock.message() );
-			return true;
-		}
-		if( lock.blockedByPeer() )
-		{
-			setDashboardPhase( Phase.REMOTE_HOST, lock.message() );
-			SwingUtilities.invokeLater( () -> JOptionPane.showMessageDialog( frame, lock.message(),
-					"Another peer is hosting", JOptionPane.INFORMATION_MESSAGE ) );
-		}
-		else
-		{
-			setDashboardFailure( lock.message() );
-		}
-		return false;
+			if( repoFullName == null )
+				break;
+
+			setDashboardPhase( Phase.DISCOVERING, "Arbitrating the GitHub host lock" );
+			HostLock.AcquireResult lock = HostLock.acquire( repoFullName );
+			if( lock.acquired() )
+			{
+				activeHostLockRepo = repoFullName;
+				appendDashboardActivity( lock.message() );
+				break;
+			}
+
+			result = false;
+			// Peer legitimo hosteando no es un error: se informa sin teñir de rojo el
+			// dashboard. Cualquier otro motivo si es un fallo que hay que resolver
+			if( lock.blockedByPeer() )
+			{
+				setDashboardPhase( Phase.REMOTE_HOST, lock.message() );
+				SwingUtilities.invokeLater( () -> JOptionPane.showMessageDialog( frame, lock.message(),
+						"Another peer is hosting", JOptionPane.INFORMATION_MESSAGE ) );
+			}
+			else
+			{
+				setDashboardFailure( lock.message() );
+			}
+		} while( false );
+		return result;
 	}
 
-	/** Started from the console "Done" hook: host lock heartbeat plus the live world autosave. */
+	// ---- FASE 10 — Servicios de hosting: lock, autoguardado y tunel ----------
+
+	/**
+	 * Se dispara desde el gancho "Done" de la consola: heartbeat del host lock mas
+	 * el autoguardado del mundo en vivo. Hasta ese momento Forge todavia esta
+	 * cargando y no tiene sentido anunciar que este peer es el host.
+	 */
 	public void startHostServices()
 	{
 		String repoFullName = activeHostLockRepo;
@@ -2204,7 +2450,7 @@ public class MainFrame
 		}
 	}
 
-	/** Brings the optional public playit.gg tunnel up when this world has it enabled. */
+	/** Levanta el tunel publico opcional de playit.gg si este mundo lo tiene activado. */
 	private void startPlayitTunnelIfConfigured()
 	{
 		if( serverOpenedDirectory == null )
@@ -2227,7 +2473,7 @@ public class MainFrame
 		}
 	}
 
-	/** Applies the Settings-page toggle against the stored per-world playit state. */
+	/** Aplica el interruptor de la pagina de Settings sobre el estado de playit guardado por mundo. */
 	private void applyPublicUrlToggle( boolean wanted )
 	{
 		PlayitAgentFile storedAgent = PlayitAgentFile.load( serverOpenedDirectory.toPath() );
@@ -2258,9 +2504,12 @@ public class MainFrame
 	}
 
 	/**
-	 * Enables the public URL for this world on a background thread: verifies any
-	 * stored secret, claims a new agent in the browser when needed, resolves the
-	 * fixed address and persists everything in the shared repo file.
+	 * Activa la URL publica de este mundo en un hilo de fondo: verifica el secreto
+	 * guardado, reclama un agente nuevo en el navegador cuando hace falta, resuelve
+	 * la direccion fija y lo persiste todo en el fichero compartido del repo.
+	 *
+	 * Va en segundo plano porque reclamar el agente espera a que una persona
+	 * autorice en el navegador, con un margen de hasta diez minutos.
 	 */
 	private void enablePublicUrl( PlayitAgentFile existingAgent )
 	{

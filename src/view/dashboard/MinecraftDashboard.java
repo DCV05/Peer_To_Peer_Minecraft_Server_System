@@ -52,12 +52,22 @@ import static view.dashboard.DashboardTheme.TEXT_DIM;
 import static view.dashboard.DashboardTheme.TEXT_MUTED;
 
 /**
- * Operational dashboard for P2PMSS. It intentionally contains no Forge, Git or
- * network code: MainFrame supplies real state and actions, while this class owns
- * the visual hierarchy and honest loading/error/empty states.
+ * Dashboard operativo de P2PMSS.
+ *
+ * A proposito no contiene ni una linea de Forge, Git o red: MainFrame le pasa
+ * el estado real y las acciones, y esta clase solo posee la jerarquia visual y
+ * los estados honestos de carga, error y vacio. Esa separacion es la que
+ * permite testear la vista sin levantar un servidor.
+ *
+ * El flujo es unidireccional: MainFrame construye un {@link State} completo y
+ * llama a {@link #setState}, que repinta todas las paginas. No hay estado
+ * mutable propio salvo lo que el usuario esta editando sin guardar.
  */
 public final class MinecraftDashboard extends JPanel
 {
+
+	// ---- FASE 1 — Contratos: paginas, fases, estado y acciones --------------
+
 	public enum Page
 	{
 		OVERVIEW("Overview"), SERVERS("Servers"), BACKUPS("Backups"), NETWORK("Network"), CONSOLE("Console"), SETTINGS("Settings");
@@ -116,7 +126,7 @@ public final class MinecraftDashboard extends JPanel
 		}
 	}
 
-	/** Validated, machine-local values submitted by the Settings page. */
+	/** Valores ya validados y locales a esta maquina que envia la pagina de Settings. */
 	public record SettingsDraft( String networkName, int port, String ram, int maxPlayers, boolean publicUrl )
 	{
 	}
@@ -145,6 +155,12 @@ public final class MinecraftDashboard extends JPanel
 			String errorMessage,
 			List<ServerEntry> recentServers )
 	{
+		/**
+		 * Normaliza el estado entrante: cualquier hueco se rellena con un texto
+		 * explicito ("—", "NOT LINKED") en vez de con null o con un cero inventado.
+		 * El dashboard promete no mostrar metricas falsas, y esa promesa se sostiene
+		 * aqui, no en cada punto de pintado.
+		 */
 		public State {
 			phase = phase == null ? Phase.NO_SERVER : phase;
 			phaseDetail = valueOr( phaseDetail, "Waiting for a server folder" );
@@ -156,6 +172,8 @@ public final class MinecraftDashboard extends JPanel
 			networkName = valueOr( networkName, "—" );
 			loader = valueOr( loader, "FORGE" );
 			connectedPlayers = connectedPlayers == null ? List.of() : List.copyOf( connectedPlayers );
+			// El contador nunca puede quedar por debajo de la lista real ni el maximo
+			// por debajo de los conectados: un "3 / 2" en pantalla delata el bug
 			onlinePlayers = Math.max( onlinePlayers, connectedPlayers.size() );
 			maxPlayers = Math.max( Math.max( 1, maxPlayers ), onlinePlayers );
 			githubAccount = valueOr( githubAccount, "NOT CONNECTED" );
@@ -166,7 +184,7 @@ public final class MinecraftDashboard extends JPanel
 			recentServers = recentServers == null ? List.of() : List.copyOf( recentServers );
 		}
 
-		/** Compatibility constructor for callers that do not publish a live roster. */
+		/** Constructor de compatibilidad para llamantes que no publican lista de jugadores en vivo. */
 		public State( boolean serverLoaded, Phase phase, String phaseDetail, String serverName,
 				String serverPath, String hostAddress, String port, String ram, String networkName,
 				String loader, boolean githubSelected, boolean githubAuthenticated,
@@ -187,6 +205,11 @@ public final class MinecraftDashboard extends JPanel
 		}
 	}
 
+	/**
+	 * Todo lo que el dashboard puede pedirle al controlador. Los metodos son
+	 * default y vacios a proposito: los tests instancian solo los que necesitan y
+	 * añadir una accion nueva no rompe a ningun implementador existente.
+	 */
 	public interface Actions
 	{
 		default void createServer()
@@ -253,6 +276,8 @@ public final class MinecraftDashboard extends JPanel
 		{
 		}
 	}
+
+	// ---- FASE 2 — Estado interno y componentes ------------------------------
 
 	private final Actions actions;
 	private final CardLayout pageLayout = new CardLayout();
@@ -322,8 +347,12 @@ public final class MinecraftDashboard extends JPanel
 	private Page activePage = Page.OVERVIEW;
 	private State state = State.empty( List.of() );
 	private Instant serverStartedAt;
+	/** Hay ediciones sin guardar: mientras este activo, ningun refresco pisa lo que el usuario escribio. */
 	private boolean settingsDirty;
+	/** Los setText programaticos disparan el DocumentListener; esta bandera evita marcarlos como edicion del usuario. */
 	private boolean updatingSettingsFields;
+
+	// ---- FASE 3 — Construccion y API publica --------------------------------
 
 	public MinecraftDashboard( Actions actions )
 	{
@@ -439,6 +468,11 @@ public final class MinecraftDashboard extends JPanel
 		uptimeValue.setText( "00:00:00" );
 	}
 
+	/**
+	 * Añade una linea al registro de actividad. El panel es pequeño y vive toda la
+	 * sesion de hosting (horas): se capa a las 12 ultimas lineas para que el
+	 * JTextArea no crezca sin limite ni obligue a hacer scroll dentro de la tarjeta.
+	 */
 	public void appendActivity( String message )
 	{
 		if( message == null || message.isBlank() )
@@ -448,13 +482,18 @@ public final class MinecraftDashboard extends JPanel
 		String[] lines = next.split( "\\R" );
 		if( lines.length > 12 )
 		{
-			next = String.join( "\n", java.util.Arrays.copyOfRange( lines, lines.length - 12, lines.length ) );
+			String[] lastLines = java.util.Arrays.copyOfRange( lines, lines.length - 12, lines.length );
+			next = String.join( "\n", lastLines );
 		}
 		activityArea.setText( next );
 		activityArea.setCaretPosition( activityArea.getDocument().getLength() );
 	}
 
-	/** Reflects the shared playit state; the checkbox is only refreshed while there are no unsaved edits. */
+	/**
+	 * Refleja el estado compartido de playit. La casilla solo se refresca cuando no
+	 * hay ediciones sin guardar: si no, un refresco de fondo desmarcaria lo que el
+	 * usuario acaba de marcar y aun no ha guardado.
+	 */
 	public void showPublicUrl( boolean enabled, String address )
 	{
 		if( !settingsDirty )
@@ -471,16 +510,26 @@ public final class MinecraftDashboard extends JPanel
 		}
 		boolean hasAddress = address != null && !address.isBlank();
 		publicUrlAddress = hasAddress ? address : null;
-		publicUrlValue.setText( !enabled
-				? "Off — players join through the P2P network"
-				: hasAddress
-						? "Address: " + address
-						: "Enabled — authorize playit in the browser or start the server to get the address" );
-		publicUrlValue.setForeground( enabled && hasAddress ? GREEN : TEXT_MUTED );
-		copyPublicUrlButton.setVisible( enabled && hasAddress );
+		// Tres situaciones distintas y ninguna se puede confundir con otra: apagado,
+		// encendido pero todavia sin direccion, y encendido con direccion utilizable
+		boolean addressReady = enabled && hasAddress;
+		String addressSummary;
+		if( !enabled )
+			addressSummary = "Off — players join through the P2P network";
+		else if( hasAddress )
+			addressSummary = "Address: " + address;
+		else
+			addressSummary = "Enabled — authorize playit in the browser or start the server to get the address";
+		publicUrlValue.setText( addressSummary );
+		publicUrlValue.setForeground( addressReady ? GREEN : TEXT_MUTED );
+		copyPublicUrlButton.setVisible( addressReady );
 	}
 
-	/** Live BlueMap section on the overview: the button only activates while the server is online. */
+	/**
+	 * Seccion de BlueMap en el overview. El boton solo se activa con el servidor
+	 * online: el visor 3D lo sirve el propio mod, y con el mundo parado la pestaña
+	 * que se abriria daria un error de conexion.
+	 */
 	public void showWorldMap( boolean installed, boolean serverOnline )
 	{
 		if( !installed )
@@ -508,6 +557,7 @@ public final class MinecraftDashboard extends JPanel
 			return;
 		java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
 				.setContents( new java.awt.datatransfer.StringSelection( address ), null );
+		// Confirmacion efimera en el propio boton: sin dialogo que cerrar
 		copyPublicUrlButton.setText( "COPIED" );
 		Timer revert = new Timer( 1500, event -> copyPublicUrlButton.setText( "COPY URL" ) );
 		revert.setRepeats( false );
@@ -525,6 +575,8 @@ public final class MinecraftDashboard extends JPanel
 		}
 	}
 
+	// ---- FASE 4 — Construccion de la UI: barra lateral y paginas ------------
+
 	private JPanel buildSidebar()
 	{
 		JPanel sidebar = new JPanel( new BorderLayout() );
@@ -537,8 +589,10 @@ public final class MinecraftDashboard extends JPanel
 		brand.setLayout( new BoxLayout( brand, BoxLayout.Y_AXIS ) );
 		brand.setBorder( BorderFactory.createEmptyBorder( 19, 20, 18, 16 ) );
 		JLabel name = DashboardTheme.label( "P2P MINECRAFT", TEXT, 14, Font.PLAIN );
-		JLabel descriptor = DashboardTheme.label(
-				"/ SERVER CONTROL · v" + app.UpdateChecker.currentVersion(), TEXT_DIM, 10, Font.PLAIN );
+		// La version va siempre a la vista: los reportes de fallos llegan con captura
+		// y sin ella no se sabe contra que build se esta depurando
+		String descriptorText = "/ SERVER CONTROL · v" + app.UpdateChecker.currentVersion();
+		JLabel descriptor = DashboardTheme.label( descriptorText, TEXT_DIM, 10, Font.PLAIN );
 		name.setAlignmentX( Component.LEFT_ALIGNMENT );
 		descriptor.setAlignmentX( Component.LEFT_ALIGNMENT );
 		brand.add( name );
@@ -1189,6 +1243,8 @@ public final class MinecraftDashboard extends JPanel
 		return terminal;
 	}
 
+	// ---- FASE 5 — Listeners, edicion de ajustes y reloj de uptime -----------
+
 	private void configureActions()
 	{
 		primaryAction.addActionListener( event -> actions.toggleServer() );
@@ -1249,6 +1305,11 @@ public final class MinecraftDashboard extends JPanel
 		saveSettingsButton.setEnabled( editable );
 	}
 
+	/**
+	 * Valida el formulario entero antes de tocar nada. Las validaciones lanzan
+	 * IllegalArgumentException con el mensaje ya redactado para el usuario: asi
+	 * ningun valor a medias llega al controlador si el siguiente campo falla.
+	 */
 	private void submitSettings()
 	{
 		try
@@ -1286,6 +1347,7 @@ public final class MinecraftDashboard extends JPanel
 		}
 	}
 
+	/** Reloj de uptime: un Timer de Swing, que ya dispara en el EDT y puede tocar la etiqueta directamente. */
 	private void configureUptimeClock()
 	{
 		Timer timer = new Timer( 1000, event ->
@@ -1302,20 +1364,34 @@ public final class MinecraftDashboard extends JPanel
 		timer.start();
 	}
 
+	// ---- FASE 6 — Refresco de la vista a partir del State -------------------
+
 	private void updateTopBar()
 	{
 		phaseSquare.setForeground( state.phase().color() );
 		phaseLabel.setText( state.phase().label() );
 		phaseLabel.setForeground( state.phase().color() );
-		contextLabel.setText( state.serverLoaded() ? state.loader().toUpperCase( Locale.ROOT ) + " SERVER CONTROL" : "P2P SERVER CONTROL" );
+		String context = state.serverLoaded()
+				? state.loader().toUpperCase( Locale.ROOT ) + " SERVER CONTROL"
+				: "P2P SERVER CONTROL";
+		contextLabel.setText( context );
 		serverPathLabel.setText( state.serverPath() );
 		errorBanner.setText( state.errorMessage() );
 		errorBanner.setVisible( !state.errorMessage().isBlank() );
 
-		primaryAction
-				.setText( state.phase() == Phase.ONLINE ? "STOP SERVER" : state.phase().isBusy() ? state.phase().label() : "START SERVER" );
-		DashboardTheme.styleButton( primaryAction,
-				state.phase() == Phase.ONLINE ? DashboardTheme.ButtonKind.DANGER : DashboardTheme.ButtonKind.PRIMARY );
+		// Con el mundo ocupado el boton muestra la fase en curso en vez de una accion:
+		// el usuario ve que esta pasando y no puede pulsar a mitad de un arranque
+		boolean online = state.phase() == Phase.ONLINE;
+		String primaryLabel;
+		if( online )
+			primaryLabel = "STOP SERVER";
+		else if( state.phase().isBusy() )
+			primaryLabel = state.phase().label();
+		else
+			primaryLabel = "START SERVER";
+		primaryAction.setText( primaryLabel );
+		DashboardTheme.ButtonKind primaryKind = online ? DashboardTheme.ButtonKind.DANGER : DashboardTheme.ButtonKind.PRIMARY;
+		DashboardTheme.styleButton( primaryAction, primaryKind );
 	}
 
 	private void updateSidebar()
@@ -1335,11 +1411,12 @@ public final class MinecraftDashboard extends JPanel
 		updateMetric( "port", state.port(), "local setting", TEXT );
 		updateMetric( "ram", state.ram(), "local allocation", TEXT );
 		updateMetric( "network", state.networkName(), "P2P identity", TEXT );
-		String backupValue = state.repositoryLinked()
-				&& ("UP TO DATE".equalsIgnoreCase( state.syncState() ) || "READY".equalsIgnoreCase( state.syncState() ))
-						? "SYNCED"
-						: state.syncState();
-		updateMetric( "backup", backupValue, state.lastSync(), state.repositoryLinked() ? syncColor() : TEXT_MUTED );
+		// "UP TO DATE" y "READY" son detalle interno del flujo de git; en la tarjeta
+		// resumen ambos significan lo mismo para el usuario: el mundo esta a salvo
+		boolean syncSettled = "UP TO DATE".equalsIgnoreCase( state.syncState() ) || "READY".equalsIgnoreCase( state.syncState() );
+		String backupValue = state.repositoryLinked() && syncSettled ? "SYNCED" : state.syncState();
+		Color backupColor = state.repositoryLinked() ? syncColor() : TEXT_MUTED;
+		updateMetric( "backup", backupValue, state.lastSync(), backupColor );
 
 		updateMetric( "github", state.githubAuthenticated() ? "ONLINE" : "OFFLINE", state.githubAccount(),
 				state.githubAuthenticated() ? GREEN : TEXT_MUTED );
@@ -1361,6 +1438,8 @@ public final class MinecraftDashboard extends JPanel
 	{
 		connectedPlayersCount.setText( state.onlinePlayers() + " / " + state.maxPlayers() );
 		connectedPlayersCount.setForeground( state.onlinePlayers() > 0 ? GREEN : TEXT );
+		// Un peer remoto antiguo responde el conteo pero no la lista de nombres: hay
+		// que distinguir "no hay nadie" de "no sabemos quien hay"
 		if( state.phase() == Phase.REMOTE_HOST && state.connectedPlayers().isEmpty() )
 		{
 			connectedPlayersArea.setText( state.onlinePlayers() > 0
@@ -1375,9 +1454,10 @@ public final class MinecraftDashboard extends JPanel
 		}
 		else
 		{
-			connectedPlayersArea.setText( state.connectedPlayers().stream()
+			String roster = state.connectedPlayers().stream()
 					.map( player -> "■  " + player )
-					.collect( java.util.stream.Collectors.joining( "\n" ) ) );
+					.collect( java.util.stream.Collectors.joining( "\n" ) );
+			connectedPlayersArea.setText( roster );
 		}
 	}
 
@@ -1551,17 +1631,37 @@ public final class MinecraftDashboard extends JPanel
 				.setText( state.recentServers().size() + (state.recentServers().size() == 1 ? " KNOWN SERVER" : " KNOWN SERVERS") );
 	}
 
+	/**
+	 * Color del estado de sincronizacion. Se decide por subcadenas y no por
+	 * igualdad porque el mensaje viene del flujo de git y varia ("PUSHING",
+	 * "PULL CONFIRMED", "PUSH FAILED"). El orden importa: un fallo manda sobre
+	 * cualquier otra lectura, y solo se pinta verde con el repo realmente enlazado.
+	 */
 	private Color syncColor()
 	{
-		String sync = state.syncState().toUpperCase( Locale.ROOT );
-		if( sync.contains( "ERROR" ) || sync.contains( "FAILED" ) || sync.contains( "CONFLICT" ) )
-			return RED;
-		if( sync.contains( "SYNC" ) || sync.contains( "PULL" ) || sync.contains( "PUSH" ) )
-			return AMBER;
-		if( state.repositoryLinked() )
-			return GREEN;
-		return TEXT_MUTED;
+		Color result = TEXT_MUTED;
+		do
+		{
+			String sync = state.syncState().toUpperCase( Locale.ROOT );
+			boolean failed = sync.contains( "ERROR" ) || sync.contains( "FAILED" ) || sync.contains( "CONFLICT" );
+			if( failed )
+			{
+				result = RED;
+				break;
+			}
+			boolean inFlight = sync.contains( "SYNC" ) || sync.contains( "PULL" ) || sync.contains( "PUSH" );
+			if( inFlight )
+			{
+				result = AMBER;
+				break;
+			}
+			if( state.repositoryLinked() )
+				result = GREEN;
+		} while( false );
+		return result;
 	}
+
+	// ---- FASE 7 — Fabricas de componentes reutilizables ---------------------
 
 	private JPanel pagePanel()
 	{
@@ -1789,6 +1889,13 @@ public final class MinecraftDashboard extends JPanel
 		return value == null || value.isBlank() ? fallback : value;
 	}
 
+	// ---- FASE 8 — Componentes internos: tarjeta de metrica y pagina ---------
+
+	/**
+	 * Tarjeta de una sola metrica. La cifra se reajusta de tamaño sola porque los
+	 * valores van de "0 / 20" a una direccion de tunel larguisima, y truncar un
+	 * dato operativo es peor que mostrarlo mas pequeño.
+	 */
 	private static final class MetricCard extends JPanel
 	{
 		private JLabel valueLabel;
@@ -1834,22 +1941,29 @@ public final class MinecraftDashboard extends JPanel
 			fitValueFont();
 		}
 
+		/** Baja el cuerpo de 24 a 13 hasta que la cifra entera quepa; 13 es el suelo legible. */
 		private void fitValueFont()
 		{
 			if( valueLabel == null || fullValue == null || getWidth() <= 0 )
 				return;
 			int availableWidth = Math.max( 40, getWidth() - 28 );
 			int size = 24;
-			while( size > 13
-					&& valueLabel.getFontMetrics( DashboardTheme.font( Font.PLAIN, size ) ).stringWidth( fullValue ) > availableWidth )
+			boolean overflows = true;
+			while( size > 13 && overflows )
 			{
-				size--;
+				Font candidate = DashboardTheme.font( Font.PLAIN, size );
+				overflows = valueLabel.getFontMetrics( candidate ).stringWidth( fullValue ) > availableWidth;
+				if( overflows )
+					size--;
 			}
 			valueLabel.setFont( DashboardTheme.font( Font.PLAIN, size ) );
 		}
 	}
 
-	/** A vertical Swing page whose content always follows the viewport width. */
+	/**
+	 * Pagina vertical cuyo contenido sigue siempre el ancho del viewport: sin esto
+	 * el BoxLayout conservaria su ancho preferido y apareceria scroll horizontal.
+	 */
 	private static final class DashboardPage extends JPanel implements Scrollable
 	{
 		@Override

@@ -14,12 +14,19 @@ import java.awt.GraphicsEnvironment;
 import java.util.Arrays;
 
 /**
- * Visual tokens shared by the Minecraft dashboard. The palette and density are
- * deliberately aligned with dllama-dashboard: quiet surfaces, one-pixel
- * separators, tabular monospace text and colour reserved for operational state.
+ * Tokens visuales compartidos por el dashboard de Minecraft. La paleta y la
+ * densidad estan alineadas a proposito con dllama-dashboard: superficies
+ * apagadas, separadores de un pixel, texto monoespaciado tabular y el color
+ * reservado para el estado operativo (verde vivo, ambar ocupado, rojo error).
+ *
+ * Todo son constantes y factorias estaticas: ninguna instancia guarda estado,
+ * asi que se puede llamar desde cualquier punto de construccion de la UI.
  */
 public final class DashboardTheme
 {
+
+	// ---- FASE 1 — Paleta y tipografia ---------------------------------------
+
 	public static final Color APP_BACKGROUND = new Color( 0x0A0A0B );
 	public static final Color SIDEBAR_BACKGROUND = new Color( 0x0C0C0D );
 	public static final Color PANEL_BACKGROUND = new Color( 0x0D0D0E );
@@ -41,6 +48,13 @@ public final class DashboardTheme
 	{
 	}
 
+	// ---- FASE 2 — Instalacion del look and feel -----------------------------
+
+	/**
+	 * Vuelca los tokens en el UIManager. Hay que llamarlo antes de construir
+	 * ningun componente: FlatLaf congela los defaults al instanciar, y lo que se
+	 * cree antes se queda con la paleta clara del LAF original.
+	 */
 	public static void install()
 	{
 		FlatDarkLaf.setup();
@@ -88,6 +102,8 @@ public final class DashboardTheme
 		UIManager.put( "TitlePane.foreground", TEXT );
 	}
 
+	// ---- FASE 3 — Factorias de componentes ----------------------------------
+
 	public static Font font( int style, int size )
 	{
 		return new Font( FONT_FAMILY, style, size );
@@ -101,12 +117,16 @@ public final class DashboardTheme
 		return label;
 	}
 
+	/** Etiqueta de seccion: mayusculas, apagada y semibold, el "eyebrow" del diseño. */
 	public static JLabel eyebrow( String text )
 	{
-		JLabel label = label( text == null ? "" : text.toUpperCase(), TEXT_MUTED, 11, Font.PLAIN );
+		String caption = text == null ? "" : text.toUpperCase();
+		JLabel label = label( caption, TEXT_MUTED, 11, Font.PLAIN );
 		label.putClientProperty( "FlatLaf.style", "font: 11 $semibold.font" );
 		return label;
 	}
+
+	// ---- FASE 4 — Estilado de botones, inputs y bordes ----------------------
 
 	public static void styleButton( AbstractButton button, ButtonKind kind )
 	{
@@ -168,12 +188,20 @@ public final class DashboardTheme
 				BorderFactory.createEmptyBorder( top, left, bottom, right ) );
 	}
 
+	// ---- FASE 5 — Deteccion de entorno --------------------------------------
+
+	/**
+	 * JetBrains Mono si esta instalada; si no, el monoespaciado del sistema. Las
+	 * cifras del dashboard se alinean en columnas, y una fuente proporcional las
+	 * descuadraria al cambiar de valor.
+	 */
 	private static String detectFontFamily()
 	{
+		String result = Font.MONOSPACED;
 		String[] available = GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames();
 		if( Arrays.asList( available ).contains( "JetBrains Mono" ) )
-			return "JetBrains Mono";
-		return Font.MONOSPACED;
+			result = "JetBrains Mono";
+		return result;
 	}
 
 	public enum ButtonKind

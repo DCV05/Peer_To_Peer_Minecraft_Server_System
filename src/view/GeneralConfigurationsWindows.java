@@ -5,8 +5,6 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
 import java.nio.file.Path;
-import java.util.List;
-import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -20,19 +18,25 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 
 import cloud.ZipUtils;
-import jgit.GitUtils;
 import minecraftServerManagement.ForgeUtils;
 import view.dashboard.DashboardDialogSupport;
 
-public class GeneralConfigurationsWindows
+/**
+ * Dialogo de configuraciones generales del servidor. Guarda la lista de
+ * operadores en un properties propio (no en el ops.json de Minecraft) porque
+ * tiene que sobrevivir a los borrados y clonados de la carpeta del servidor, y
+ * la sincroniza con el servidor vivo mandandole /op y /deop de lo que cambio.
+ */
+public final class GeneralConfigurationsWindows
 {
 
 	public static final Path USER_OPS_PATH = app.AppPaths.dataFile( "userOps.properties" );
 	private static boolean hasErrors = false;
 
+	// ---- FASE 1 — Construccion del dialogo ----------------------------------
+
 	public static void generalConfigurations()
 	{
-		//Dialog creation and configurations.
 		JDialog generalConfigurationsDialog = new JDialog();
 		generalConfigurationsDialog.setTitle( "General configurations" );
 		generalConfigurationsDialog.getContentPane().setLayout( new BorderLayout() );
@@ -44,7 +48,6 @@ public class GeneralConfigurationsWindows
 		generalConfigurationsDialog.setDefaultCloseOperation( JFrame.DISPOSE_ON_CLOSE );
 
 
-		//General layout for the components.
 		JPanel contentPane;
 		JScrollPane scrollPane;
 
@@ -68,15 +71,12 @@ public class GeneralConfigurationsWindows
 		JButton saveBtn = new JButton( "Save" );
 		JButton closeBtn = new JButton( "Close" );
 
-		//Default values
-
 		if( ZipUtils.existsDirectory( USER_OPS_PATH ) )
 		{
 			userOpsInput.setText( ZipUtils.getDataFromPropertiesFile( "userOps", USER_OPS_PATH ) );
 			usersOpsForCustomCommandsInput.setText( ZipUtils.getDataFromPropertiesFile( "usersOpsForCustomCommands", USER_OPS_PATH ) );
 		}
 
-		//Configurations
 		scrollPane.setBorder( null );
 
 		contentPane.add( usersOpsLabel );
@@ -90,8 +90,9 @@ public class GeneralConfigurationsWindows
 		generalConfigurationsDialog.add( scrollPane, BorderLayout.NORTH );
 		generalConfigurationsDialog.add( buttonsPane, BorderLayout.SOUTH );
 
-		//EventListeners
-		saveBtn.addActionListener( svBtn ->
+		// ---- FASE 2 — Guardado y sincronizacion con el servidor vivo --------
+
+		saveBtn.addActionListener( saveEvent ->
 		{
 			String errorTemplate = "<html>%s <span style='color: #fa4545;'>%s</span></html>";
 			String errorMessage = "Invalid format";
@@ -99,10 +100,13 @@ public class GeneralConfigurationsWindows
 			usersOpsLabel.setText( usersOpsLabelText );
 			usersOpsForCustomCommandsLabel.setText( usersOpsForCustomCommandsLabelText );
 
-			if( ZipUtils.existsDirectory( USER_OPS_PATH )
+			// Sin cambios no se reescribe nada: evita mandar /op y /deop de lo mismo
+			boolean savedFileExists = ZipUtils.existsDirectory( USER_OPS_PATH );
+			boolean nothingChanged = savedFileExists
 					&& userOpsInput.getText().equals( ZipUtils.getDataFromPropertiesFile( "userOps", USER_OPS_PATH ) )
 					&& usersOpsForCustomCommandsInput.getText()
-							.equals( ZipUtils.getDataFromPropertiesFile( "usersOpsForCustomCommands", USER_OPS_PATH ) ) )
+							.equals( ZipUtils.getDataFromPropertiesFile( "usersOpsForCustomCommands", USER_OPS_PATH ) );
+			if( nothingChanged )
 			{
 				generalConfigurationsDialog.dispose();
 				return;
@@ -116,7 +120,7 @@ public class GeneralConfigurationsWindows
 
 			if( !hasErrors )
 			{
-				String currentValue = ZipUtils.getDataFromPropertiesFile( "userOps", USER_OPS_PATH );
+				String previousUserOps = ZipUtils.getDataFromPropertiesFile( "userOps", USER_OPS_PATH );
 
 
 				ZipUtils.createOrModiFyPropertiesFile( "userOps", userOpsInput.getText(), USER_OPS_PATH );
@@ -125,21 +129,25 @@ public class GeneralConfigurationsWindows
 
 				if( MainFrame.serverIsOn )
 				{
+					// Con el servidor arrancado el ops.json ya esta cargado en memoria:
+					// el cambio solo cuaja mandando los comandos por la consola
 					if( ZipUtils.getDataFromPropertiesFile( "userOps", USER_OPS_PATH ) instanceof String ops && !ops.isBlank() )
 					{
-						for( String currentsNickname : currentValue.split( ", " ) )
+						for( String removedNickname : previousUserOps.split( ", " ) )
 						{
-							if( !userOpsInput.getText().contains( currentsNickname ) )
-								ForgeUtils.sendCommand( "/deop " + currentsNickname, MainFrame.serverProcess, MainFrame.serverWriter );
+							if( !userOpsInput.getText().contains( removedNickname ) )
+								ForgeUtils.sendCommand( "/deop " + removedNickname, MainFrame.serverProcess, MainFrame.serverWriter );
 						}
-						for( String nickname : userOpsInput.getText().split( ", " ) )
+						for( String addedNickname : userOpsInput.getText().split( ", " ) )
 						{
-							if( !currentValue.contains( nickname ) )
-								ForgeUtils.sendCommand( "/op " + nickname, MainFrame.serverProcess, MainFrame.serverWriter );
+							if( !previousUserOps.contains( addedNickname ) )
+								ForgeUtils.sendCommand( "/op " + addedNickname, MainFrame.serverProcess, MainFrame.serverWriter );
 						}
 					}
 				}
 				else
+					// Servidor parado: se borra el ops.json para que lo regenere con la
+					// lista nueva en el proximo arranque
 					ZipUtils.deleteDirectory( Path.of( MainFrame.serverOpenedDirectory.toString() + "/ops.json" ) );
 
 				generalConfigurationsDialog.dispose();
@@ -148,27 +156,37 @@ public class GeneralConfigurationsWindows
 
 		} );
 
-		closeBtn.addActionListener( clsBtn ->
+		closeBtn.addActionListener( closeEvent ->
 		{
 			generalConfigurationsDialog.dispose();
 		} );
 		DashboardDialogSupport.show( generalConfigurationsDialog );
 	}
 
+	/** Una lista vacia es valida; lo que no vale es dejarla acabada en coma o espacio. */
 	private static boolean checkFormatValidity( String text )
 	{
-		if( text.isBlank() )
-			return true;
-		Pattern regExp = Pattern.compile( "^.*[^, ]$" );
-		Matcher matcher = regExp.matcher( text );
-
-		if( matcher.matches() )
+		boolean result = false;
+		do
 		{
-			hasErrors = false;
-			return true;
-		}
+			// El blanco no toca hasErrors: no hay nada que validar
+			if( text.isBlank() )
+			{
+				result = true;
+				break;
+			}
 
-		hasErrors = true;
-		return false;
+			Pattern noTrailingSeparatorPattern = Pattern.compile( "^.*[^, ]$" );
+			Matcher matcher = noTrailingSeparatorPattern.matcher( text );
+			if( matcher.matches() )
+			{
+				hasErrors = false;
+				result = true;
+				break;
+			}
+
+			hasErrors = true;
+		} while( false );
+		return result;
 	}
 }

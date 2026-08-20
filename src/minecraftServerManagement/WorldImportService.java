@@ -34,87 +34,115 @@ public final class WorldImportService
 	{
 	}
 
+	// ---- FASE 1 — Importacion con red de seguridad -------------------------
+
 	public static ImportResult importWorld( Path source, Path serverDirectory )
 	{
+		ImportResult result;
 		Path staging = null;
 		Path backup = null;
 		Path target = null;
 		boolean targetMoved = false;
 		try
 		{
-			Path server = requireDirectory( serverDirectory, "The selected Forge server folder does not exist." );
-			Path candidate = requireExisting( source, "The selected world source does not exist." );
-			target = configuredWorldDirectory( server );
-			if( candidate.equals( target ) || candidate.startsWith( target ) )
+			do
 			{
-				return ImportResult.failure( target, "The active server world cannot be imported into itself." );
-			}
-			if( Files.isDirectory( candidate ) && server.startsWith( candidate ) )
-			{
-				return ImportResult.failure( target, "Select the world folder, not the Forge server folder or one of its parents." );
-			}
-
-			staging = server.resolve( ".p2pmss-import-" + UUID.randomUUID() ).normalize();
-			Files.createDirectory( staging );
-			Path extracted = staging.resolve( "source" );
-			if( Files.isDirectory( candidate ) )
-				copyDirectory( candidate, extracted );
-			else if( candidate.getFileName().toString().toLowerCase().endsWith( ".zip" ) )
-				extractZip( candidate, extracted );
-			else
-				return ImportResult.failure( target, "Select a Minecraft world folder or a .zip archive." );
-
-			Path worldRoot = findWorldRoot( extracted );
-			if( worldRoot == null )
-			{
-				return ImportResult.failure( target, "No unique level.dat was found in the selected source." );
-			}
-
-			Path prepared = staging.resolve( "prepared-world" );
-			move( worldRoot, prepared );
-			if( Files.exists( target ) )
-			{
-				Path backupRoot = server.resolve( "world-import-backups" );
-				if( target.equals( backupRoot ) )
-					backupRoot = server.resolve( ".p2pmss-world-import-backups" );
-				Files.createDirectories( backupRoot );
-				backup = uniqueBackupPath( backupRoot, target.getFileName().toString() );
-				move( target, backup );
-				targetMoved = true;
-			}
-
-			try
-			{
-				move( prepared, target );
-			}
-			catch( IOException importFailure )
-			{
-				if( targetMoved && backup != null && !Files.exists( target ) )
+				Path server = requireDirectory( serverDirectory, "The selected Forge server folder does not exist." );
+				Path candidate = requireExisting( source, "The selected world source does not exist." );
+				target = configuredWorldDirectory( server );
+				if( candidate.equals( target ) || candidate.startsWith( target ) )
 				{
-					try
-					{
-						move( backup, target );
-						backup = null;
-					}
-					catch( IOException rollbackFailure )
-					{
-						throw new IOException( "Import failed; the previous world remains safely at " + backup + ".", rollbackFailure );
-					}
+					result = ImportResult.failure( target, "The active server world cannot be imported into itself." );
+					break;
 				}
-				throw importFailure;
-			}
-			return ImportResult.success( target, backup );
+				if( Files.isDirectory( candidate ) && server.startsWith( candidate ) )
+				{
+					result = ImportResult.failure( target,
+							"Select the world folder, not the Forge server folder or one of its parents." );
+					break;
+				}
+
+				// Todo se prepara en una carpeta de staging dentro del propio servidor:
+				// asi el movimiento final es en el mismo volumen y puede ser atomico
+				staging = server.resolve( ".p2pmss-import-" + UUID.randomUUID() ).normalize();
+				Files.createDirectory( staging );
+				Path extracted = staging.resolve( "source" );
+				if( Files.isDirectory( candidate ) )
+				{
+					copyDirectory( candidate, extracted );
+				}
+				else
+				{
+					String candidateName = candidate.getFileName().toString().toLowerCase();
+					if( !candidateName.endsWith( ".zip" ) )
+					{
+						result = ImportResult.failure( target, "Select a Minecraft world folder or a .zip archive." );
+						break;
+					}
+					extractZip( candidate, extracted );
+				}
+
+				Path worldRoot = findWorldRoot( extracted );
+				if( worldRoot == null )
+				{
+					result = ImportResult.failure( target, "No unique level.dat was found in the selected source." );
+					break;
+				}
+
+				Path prepared = staging.resolve( "prepared-world" );
+				move( worldRoot, prepared );
+				if( Files.exists( target ) )
+				{
+					Path backupRoot = server.resolve( "world-import-backups" );
+					if( target.equals( backupRoot ) )
+						backupRoot = server.resolve( ".p2pmss-world-import-backups" );
+					Files.createDirectories( backupRoot );
+					backup = uniqueBackupPath( backupRoot, target.getFileName().toString() );
+					move( target, backup );
+					targetMoved = true;
+				}
+
+				try
+				{
+					move( prepared, target );
+				}
+				catch( IOException finalMoveFailure )
+				{
+					// El mundo anterior ya no esta en su sitio: se devuelve antes de
+					// propagar el fallo, para no dejar al servidor sin mundo ninguno
+					if( targetMoved && backup != null && !Files.exists( target ) )
+					{
+						try
+						{
+							move( backup, target );
+							backup = null;
+						}
+						catch( IOException rollbackFailure )
+						{
+							throw new IOException( "Import failed; the previous world remains safely at " + backup + ".",
+									rollbackFailure );
+						}
+					}
+					throw finalMoveFailure;
+				}
+				result = ImportResult.success( target, backup );
+			} while( false );
 		}
-		catch( Exception failure )
+		catch( Exception anyImportFailure )
 		{
-			String message = failure.getMessage() == null ? "The world could not be imported." : failure.getMessage();
-			return new ImportResult( false, target, backup, message );
+			String message = anyImportFailure.getMessage() == null
+					? "The world could not be imported."
+					: anyImportFailure.getMessage();
+			result = new ImportResult( false, target, backup, message );
 		}
 		finally
 		{
 			cleanupStaging( staging );
 		}
+		return result;
 	}
+
+	// ---- FASE 2 — Rutas y validaciones del mundo destino -------------------
 
 	public static Path configuredWorldDirectory( Path serverDirectory ) throws IOException
 	{
@@ -153,6 +181,8 @@ public final class WorldImportService
 			throw new IOException( message );
 		return path.toRealPath().normalize();
 	}
+
+	// ---- FASE 3 — Copia y extraccion acotadas ------------------------------
 
 	private static void copyDirectory( Path source, Path destination ) throws IOException
 	{
@@ -242,6 +272,8 @@ public final class WorldImportService
 		return candidates.size() == 1 ? candidates.get( 0 ) : null;
 	}
 
+	// ---- FASE 4 — Movimiento, copias de seguridad y limpieza ---------------
+
 	private static Path uniqueBackupPath( Path backupRoot, String worldName )
 	{
 		String base = worldName + "-" + BACKUP_TIMESTAMP.format( LocalDateTime.now() );
@@ -258,8 +290,10 @@ public final class WorldImportService
 		{
 			Files.move( source, destination, StandardCopyOption.ATOMIC_MOVE );
 		}
-		catch( AtomicMoveNotSupportedException ignored )
+		catch( AtomicMoveNotSupportedException crossVolumeMove )
 		{
+			// Origen y destino en volumenes distintos: se acepta el movimiento no
+			// atomico porque la alternativa seria no poder importar nada
 			Files.move( source, destination );
 		}
 	}
@@ -290,9 +324,11 @@ public final class WorldImportService
 				}
 			} );
 		}
-		catch( IOException ignored )
+		catch( IOException cleanupFailure )
 		{
-			// A failed cleanup only leaves a clearly named staging folder; the active world is unaffected.
+			// Una limpieza fallida solo deja una carpeta de staging con nombre
+			// reconocible; el mundo activo no se ve afectado, asi que no se propaga
+			app.Log.event( "WORLD_IMPORT", "Import staging folder could not be removed: " + staging, cleanupFailure );
 		}
 	}
 

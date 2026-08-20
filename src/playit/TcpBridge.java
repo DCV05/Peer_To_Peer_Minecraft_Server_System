@@ -50,11 +50,13 @@ public final class TcpBridge
 			minecraft.connect( new InetSocketAddress( "127.0.0.1", minecraftPort ), CONNECT_TIMEOUT_MILLIS );
 			minecraft.setTcpNoDelay( true );
 
+			// El sentido servidor->tunel va en su propio hilo y el contrario se copia
+			// aqui: asi este metodo no vuelve hasta que la conexion del jugador muere
 			Thread upstream = copyAsync( minecraft.getInputStream(), tunnel.getOutputStream(), tunnel );
 			copy( tunnel.getInputStream(), minecraft.getOutputStream(), minecraft );
 			upstream.join( CONNECT_TIMEOUT_MILLIS );
 		}
-		catch( IOException | InterruptedException ignored )
+		catch( IOException | InterruptedException connectionEnded )
 		{
 			if( Thread.currentThread().isInterrupted() )
 				Thread.currentThread().interrupt();
@@ -65,28 +67,30 @@ public final class TcpBridge
 		}
 	}
 
-	private static Thread copyAsync( InputStream in, OutputStream out, Socket toCloseOnEnd )
+	private static Thread copyAsync( InputStream source, OutputStream destination, Socket toCloseOnEnd )
 	{
-		Thread pump = new Thread( () -> copy( in, out, toCloseOnEnd ), "p2pmss-playit-bridge-up" );
+		Thread pump = new Thread( () -> copy( source, destination, toCloseOnEnd ), "p2pmss-playit-bridge-up" );
 		pump.setDaemon( true );
 		pump.start();
 		return pump;
 	}
 
-	private static void copy( InputStream in, OutputStream out, Socket toCloseOnEnd )
+	private static void copy( InputStream source, OutputStream destination, Socket toCloseOnEnd )
 	{
 		byte[] buffer = new byte[16 * 1024];
 		try
 		{
 			int read;
-			while( (read = in.read( buffer )) != -1 )
+			while( (read = source.read( buffer )) != -1 )
 			{
-				out.write( buffer, 0, read );
-				out.flush();
+				destination.write( buffer, 0, read );
+				destination.flush();
 			}
 		}
-		catch( IOException ignored )
+		catch( IOException connectionClosed )
 		{
+			// Un corte de cualquiera de los dos extremos es el final normal de una
+			// partida: no se registra para no llenar la consola con cada desconexion
 		}
 		finally
 		{
@@ -95,7 +99,7 @@ public final class TcpBridge
 			{
 				toCloseOnEnd.close();
 			}
-			catch( IOException ignored )
+			catch( IOException alreadyClosed )
 			{
 			}
 		}

@@ -28,12 +28,19 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
- * Compact two-step Forge provisioning wizard. Catalogue and installer work are
- * delegated to background workers by the controller so Swing never freezes.
+ * Asistente compacto de dos pasos para aprovisionar un servidor: primero
+ * loader + version, despues la aceptacion explicita de la EULA de Minecraft.
+ *
+ * El panel no descarga nada por su cuenta: la carga del catalogo y la del
+ * instalador las delega el controlador en workers de fondo, para que Swing
+ * nunca se congele mientras la red responde. Aqui solo vive el estado visual.
  */
 public final class ForgeVersionWizard extends JPanel
 {
-	/** Builds keyed by Minecraft version, or shared across all of them (Fabric loaders). */
+
+	// ---- FASE 1 — Contratos de datos y estado -------------------------------
+
+	/** Builds indexados por version de Minecraft, o comunes a todas (loaders de Fabric). */
 	public record VersionCatalog( List<String> minecraftVersions, List<String> forgeVersions, boolean sharedBuilds )
 	{
 		public VersionCatalog {
@@ -74,6 +81,8 @@ public final class ForgeVersionWizard extends JPanel
 	private Runnable primaryAction;
 	private CatalogLoader catalogLoader;
 
+	// ---- FASE 2 — Construccion de la UI -------------------------------------
+
 	public ForgeVersionWizard( Path destination, Consumer<Selection> installAction, Runnable cancelAction )
 	{
 		this.installAction = Objects.requireNonNull( installAction, "installAction" );
@@ -113,7 +122,10 @@ public final class ForgeVersionWizard extends JPanel
 		destinationPanel.setBackground( DashboardTheme.PANEL_BACKGROUND );
 		destinationPanel.setBorder( DashboardTheme.paddedSectionBorder( 12, 14, 12, 14 ) );
 		destinationPanel.add( DashboardTheme.eyebrow( "DESTINATION" ), BorderLayout.WEST );
-		JLabel path = DashboardTheme.label( destination.toAbsolutePath().normalize().toString(), DashboardTheme.TEXT, 11, Font.PLAIN );
+		// Absoluta y normalizada: el usuario tiene que poder verificar donde va a
+		// escribir el instalador antes de aceptar, sin ".." ni rutas relativas
+		String destinationPath = destination.toAbsolutePath().normalize().toString();
+		JLabel path = DashboardTheme.label( destinationPath, DashboardTheme.TEXT, 11, Font.PLAIN );
 		destinationPanel.add( path, BorderLayout.CENTER );
 		destinationPanel.setAlignmentX( Component.LEFT_ALIGNMENT );
 		destinationPanel.setMaximumSize( new Dimension( Integer.MAX_VALUE, 52 ) );
@@ -196,6 +208,8 @@ public final class ForgeVersionWizard extends JPanel
 		return footer;
 	}
 
+	// ---- FASE 3 — Carga del catalogo ----------------------------------------
+
 	private void configureSelectors()
 	{
 		loaderSelect.addActionListener( event -> reloadCatalogForSelectedLoader() );
@@ -258,17 +272,22 @@ public final class ForgeVersionWizard extends JPanel
 		{
 			if( forge == null )
 				continue;
+			// Fabric publica un unico juego de loaders valido para cualquier version
+			// del juego, asi que se replica entero en vez de intentar emparejarlo
 			if( catalog.sharedBuilds() )
 			{
 				for( List<String> builds : forgeByMinecraft.values() )
 					builds.add( forge );
 				continue;
 			}
+			// Forge nombra sus builds "1.20.1-47.3.0": el prefijo antes del guion es la
+			// version de Minecraft con la que casa. Sin guion no se puede emparejar
 			if( !forge.contains( "-" ) )
 				continue;
 			String minecraft = forge.substring( 0, forge.indexOf( '-' ) );
 			forgeByMinecraft.computeIfAbsent( minecraft, ignored -> new ArrayList<>() ).add( forge );
 		}
+		// Invertido para que lo mas nuevo quede arriba del desplegable
 		List<String> minecraftVersions = new ArrayList<>( new LinkedHashSet<>( forgeByMinecraft.keySet() ) );
 		Collections.reverse( minecraftVersions );
 		minecraftSelect.removeAllItems();
@@ -280,12 +299,15 @@ public final class ForgeVersionWizard extends JPanel
 		updateInstallAvailability();
 	}
 
+	// ---- FASE 4 — Seleccion y disponibilidad del boton ----------------------
+
 	private void populateForgeVersions()
 	{
 		forgeSelect.removeAllItems();
 		forgeSelect.addItem( FORGE_PLACEHOLDER );
 		Object selected = minecraftSelect.getSelectedItem();
-		if( selected != null && forgeByMinecraft.containsKey( selected.toString() ) )
+		boolean knownMinecraftVersion = selected != null && forgeByMinecraft.containsKey( selected.toString() );
+		if( knownMinecraftVersion )
 		{
 			List<String> versions = new ArrayList<>( forgeByMinecraft.get( selected.toString() ) );
 			Collections.reverse( versions );
@@ -295,6 +317,7 @@ public final class ForgeVersionWizard extends JPanel
 		}
 		else
 		{
+			// Sin version de Minecraft elegida no hay lista de builds que ofrecer
 			forgeSelect.setEnabled( false );
 		}
 		updateInstallAvailability();
@@ -302,16 +325,22 @@ public final class ForgeVersionWizard extends JPanel
 
 	private void updateInstallAvailability()
 	{
-		primaryButton.setEnabled( !progress.isIndeterminate() && selection() != null );
+		// La barra indeterminada marca que hay una descarga viva: instalar encima
+		// dejaria la carpeta a medias
+		boolean catalogReady = !progress.isIndeterminate();
+		primaryButton.setEnabled( catalogReady && selection() != null );
 	}
 
+	/** Par loader/version elegido, o null mientras siga habiendo un placeholder seleccionado. */
 	public Selection selection()
 	{
+		Selection result = null;
 		Object minecraft = minecraftSelect.getSelectedItem();
 		Object forge = forgeSelect.getSelectedItem();
-		if( minecraft == null || forge == null || MINECRAFT_PLACEHOLDER.equals( minecraft ) || FORGE_PLACEHOLDER.equals( forge ) )
-			return null;
-		return new Selection( selectedLoader(), minecraft.toString(), forge.toString() );
+		boolean placeholderPending = MINECRAFT_PLACEHOLDER.equals( minecraft ) || FORGE_PLACEHOLDER.equals( forge );
+		if( minecraft != null && forge != null && !placeholderPending )
+			result = new Selection( selectedLoader(), minecraft.toString(), forge.toString() );
+		return result;
 	}
 
 	public String selectedLoader()
@@ -319,6 +348,8 @@ public final class ForgeVersionWizard extends JPanel
 		Object loader = loaderSelect.getSelectedItem();
 		return loader == null ? "Forge" : loader.toString();
 	}
+
+	// ---- FASE 5 — Estados visibles: ocupado, error y paso de EULA -----------
 
 	public void setBusy( boolean busy, String message )
 	{
@@ -339,6 +370,12 @@ public final class ForgeVersionWizard extends JPanel
 		statusLabel.setForeground( DashboardTheme.RED );
 	}
 
+	/**
+	 * Segundo paso: los selectores quedan bloqueados porque el servidor ya esta
+	 * instalado en disco, y el boton principal pasa a ser la aceptacion explicita
+	 * de la EULA. Se reemplazan los listeners del boton secundario en vez de
+	 * añadirlos para que no se acumulen si se vuelve a entrar en este paso.
+	 */
 	public void showEulaStep( Runnable viewEula, Runnable acceptEula )
 	{
 		stepLabel.setText( "STEP 2 OF 2 · MINECRAFT EULA" );
@@ -361,6 +398,8 @@ public final class ForgeVersionWizard extends JPanel
 		repaint();
 	}
 
+	// ---- FASE 6 — Accesos para los tests y utilidades -----------------------
+
 	JComboBox<String> loaderSelect()
 	{
 		return loaderSelect;
@@ -382,11 +421,17 @@ public final class ForgeVersionWizard extends JPanel
 		return statusLabel;
 	}
 
+	/**
+	 * Mensaje de la causa mas profunda: SwingWorker envuelve todo en
+	 * ExecutionException, y su getMessage() es el nombre de la clase interna, que
+	 * al usuario no le dice nada.
+	 */
 	private static String rootMessage( Throwable failure )
 	{
 		Throwable root = failure;
 		while( root.getCause() != null )
 			root = root.getCause();
-		return root.getMessage() == null ? "Forge operation failed." : root.getMessage();
+		String rootMessage = root.getMessage();
+		return rootMessage == null ? "Forge operation failed." : rootMessage;
 	}
 }

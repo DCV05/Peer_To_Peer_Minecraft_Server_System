@@ -52,7 +52,16 @@ import cloud.ZipUtils;
 import minecraftServerManagement.ForgeUtils;
 import view.MainFrame;
 
-public class GoogleDriveCloudProvider implements CloudStorageProvider
+/**
+ * Copias de seguridad del servidor sobre Google Drive. La jerarquia es siempre
+ * P2PMSS-Backups/{nombre del servidor}/{zips}, y las carpetas se marcan con
+ * appProperties (app + type) para poder encontrarlas por consulta aunque el
+ * usuario las mueva o las renombre en su Drive. Un host invitado no es dueno de
+ * la carpeta raiz, de ahi que casi toda busqueda se repita con y sin el filtro
+ * 'me' in owners. Cualquier fallo de red avisa por dialogo y deja la traza en el
+ * log: la app tiene que seguir funcionando en local aunque la nube no responda.
+ */
+public final class GoogleDriveCloudProvider implements CloudStorageProvider
 {
 
 	private static final String APPLICATION_NAME = "PeerToPeerMinecraftServerSystem";
@@ -76,14 +85,17 @@ public class GoogleDriveCloudProvider implements CloudStorageProvider
 	private Drive drive = null;
 	private Credential credential = null;
 
+	// ---- FASE 1 — Sesion ----------------------------------------------------
+
 	@Override
 	public void authenticate()
 	{
 
-		try (InputStream in = GoogleDriveCloudProvider.class.getResourceAsStream( "/credentials/GoolgeDriveCredentials.json" ))
+		try (InputStream credentialsInput = GoogleDriveCloudProvider.class
+				.getResourceAsStream( "/credentials/GoolgeDriveCredentials.json" ))
 		{
 
-			GoogleClientSecrets clientSecrets = GoogleClientSecrets.load( JSON_FACTORY, new InputStreamReader( in ) );
+			GoogleClientSecrets clientSecrets = GoogleClientSecrets.load( JSON_FACTORY, new InputStreamReader( credentialsInput ) );
 
 			GoogleAuthorizationCodeFlow flow = new GoogleAuthorizationCodeFlow.Builder(
 					GoogleNetHttpTransport.newTrustedTransport(),
@@ -94,29 +106,35 @@ public class GoogleDriveCloudProvider implements CloudStorageProvider
 					.setApprovalPrompt( "force" )
 					.build();
 
+			// El navegador vuelve a una pagina propia en vez de al "recibido" por
+			// defecto de la libreria: el usuario tiene que ver que ya puede cerrar
 			LocalServerReceiver receiver = new LocalServerReceiver.Builder().setPort( 8888 )
 					.setLandingPages( "https://p2pmss.vercel.app/OAuth/success", "https://p2pmss.vercel.app/OAuth/failed" ).build();
 
-			Credential credential = new AuthorizationCodeInstalledApp( flow, receiver ).authorize( "user" );
-			this.credential = credential;
+			Credential authorizedCredential = new AuthorizationCodeInstalledApp( flow, receiver ).authorize( "user" );
+			this.credential = authorizedCredential;
 
 			this.drive = new Drive.Builder(
 					GoogleNetHttpTransport.newTrustedTransport(),
 					JSON_FACTORY,
-					credential ).setApplicationName( APPLICATION_NAME )
+					authorizedCredential ).setApplicationName( APPLICATION_NAME )
 					.build();
 
 		}
-		catch( IOException e )
+		catch( IOException credentialsFailure )
 		{
+			app.Log.event( "CLOUD_BACKUP", "No se pudo leer el fichero de credenciales de Google Drive", credentialsFailure );
 			JOptionPane.showMessageDialog( null, "Credentials file not found or inaccessible or another thing went wrong, try again.",
 					"Error", JOptionPane.ERROR_MESSAGE );
 		}
-		catch( GeneralSecurityException e )
+		catch( GeneralSecurityException transportFailure )
 		{
+			app.Log.event( "CLOUD_BACKUP", "No se pudo crear el transporte seguro contra Google Drive", transportFailure );
 			JOptionPane.showMessageDialog( null, "Something went wrong, try again.", "Google Drive error", JOptionPane.ERROR_MESSAGE );
 		}
 	}
+
+	// ---- FASE 2 — Subida y descarga de copias -------------------------------
 
 	@Override
 	public void uploadServerBackup( Path serverZip )
@@ -147,148 +165,182 @@ public class GoogleDriveCloudProvider implements CloudStorageProvider
 			drive.files().create( fileMetadata, mediaContent )
 					.setFields( "id, name" )
 					.execute();
+			// La marca local de fecha se escribe solo si la subida fue bien: si no,
+			// la proxima comparacion creeria que la copia remota ya esta al dia
 			ZipUtils.createOrModiFyPropertiesFile( MainFrame.getServerName() + "-" + getProviderName(), todayDate.toString(),
 					lastServerBackUpDate );
 		}
-		catch( GoogleJsonResponseException e )
+		catch( GoogleJsonResponseException apiFailure )
 		{
-			JOptionPane.showMessageDialog( null, "Unable to upload file: " + e.getDetails(), "Error", JOptionPane.ERROR_MESSAGE );
+			app.Log.event( "CLOUD_BACKUP", "Google Drive rechazo la subida de " + serverZip, apiFailure );
+			JOptionPane.showMessageDialog( null, "Unable to upload file: " + apiFailure.getDetails(), "Error", JOptionPane.ERROR_MESSAGE );
 		}
-		catch( IOException e )
+		catch( IOException uploadFailure )
 		{
+			app.Log.event( "CLOUD_BACKUP", "No se pudo subir " + serverZip, uploadFailure );
 			JOptionPane.showMessageDialog( null, "File not found or inaccessible or another thing went wrong, try again.", "Error",
 					JOptionPane.ERROR_MESSAGE );
 		}
 
 	}
 
+	/** Solo el dueno tiene la carpeta del servidor colgando de SU raiz P2PMSS-Backups. */
 	public boolean iAmOwner()
 	{
+		boolean result = false;
 		String rootFolderId = getServerFolderIdWithMetadata( "P2PMSS-Backups", metadata, true );
-		if( rootFolderId == null )
-			return false;
-		return getServerFolderId( MainFrame.getServerName(), rootFolderId ) != null;
+		if( rootFolderId != null )
+			result = getServerFolderId( MainFrame.getServerName(), rootFolderId ) != null;
+		return result;
 	}
 
 	@Override
 	public boolean downloadServerBackup( Path serverDestinataryFolder )
 	{
-		if( !hasBackUp() )
-			return false;
-
-		if( !ZipUtils.existsDirectory( serverDestinataryFolder ) )
-			ZipUtils.createDirectory( serverDestinataryFolder );
-
-		String parentFolderId = getServerFolderIdWithMetadata( "P2PMSS-Backups", metadata, iAmOwner() );
-		String serverFolderId = getOrCreateServerFolderId( MainFrame.getServerName(), parentFolderId, metadataChildren, iAmOwner(), false );
-		if( serverFolderId == null )
-			serverFolderId = getOrCreateServerFolderId( MainFrame.getServerName(), null, metadataChildren, iAmOwner(), false );
-		if( !Files.exists( ZipUtils.DOWNLOADS_BACKUPS_ZIPS_FOLDER ) )
-			ZipUtils.createDirectory( ZipUtils.DOWNLOADS_BACKUPS_ZIPS_FOLDER );
-		try
+		boolean result = false;
+		do
 		{
+			if( !hasBackUp() )
+				break;
 
-			FileList result = drive.files().list()
-					.setQ( "'" + serverFolderId + "' in parents and trashed = false" )
-					.setOrderBy( "createdTime desc" )
-					.setPageSize( 1 )
-					.setFields( "files(id, name, createdTime)" )
-					.execute();
+			if( !ZipUtils.existsDirectory( serverDestinataryFolder ) )
+				ZipUtils.createDirectory( serverDestinataryFolder );
 
-			if( result.getFiles().isEmpty() )
-				return false; //As a security fallBack.
-
-
-			com.google.api.services.drive.model.File serverRemoteZip;
-
-			try (OutputStream out = Files
-					.newOutputStream( ZipUtils.DOWNLOADS_BACKUPS_ZIPS_FOLDER.resolve( result.getFiles().get( 0 ).getName() + ".zip" ) ))
-			{
-				serverRemoteZip = result.getFiles().get( 0 );
-				drive.files().get( serverRemoteZip.getId() ).executeMediaAndDownloadTo( out );
-			}
-
-			String ramAlloc = ForgeUtils.getServerRAMAlloc( serverDestinataryFolder );
-
-			ZipUtils.deleteDirectory( serverDestinataryFolder );
-			ZipUtils.createDirectory( serverDestinataryFolder );
-
-			ZipUtils.unzip( Path.of( ZipUtils.DOWNLOADS_BACKUPS_ZIPS_FOLDER.toString() + "/" + serverRemoteZip.getName() + ".zip" ),
-					serverDestinataryFolder );
+			String parentFolderId = getServerFolderIdWithMetadata( "P2PMSS-Backups", metadata, iAmOwner() );
+			String serverFolderId = getOrCreateServerFolderId( MainFrame.getServerName(), parentFolderId, metadataChildren, iAmOwner(),
+					false );
+			// Si no cuelga de nuestra raiz, la carpeta es de otro dueno y llega
+			// compartida: se busca otra vez sin filtrar por padre
+			if( serverFolderId == null )
+				serverFolderId = getOrCreateServerFolderId( MainFrame.getServerName(), null, metadataChildren, iAmOwner(), false );
+			if( !Files.exists( ZipUtils.DOWNLOADS_BACKUPS_ZIPS_FOLDER ) )
+				ZipUtils.createDirectory( ZipUtils.DOWNLOADS_BACKUPS_ZIPS_FOLDER );
 
 			try
 			{
-				ForgeUtils.setServerRAMAlloc( serverDestinataryFolder, Integer.parseInt( ramAlloc.replaceAll( "[-Xmx|G]", "" ) ) );
+
+				FileList latestBackupList = drive.files().list()
+						.setQ( "'" + serverFolderId + "' in parents and trashed = false" )
+						.setOrderBy( "createdTime desc" )
+						.setPageSize( 1 )
+						.setFields( "files(id, name, createdTime)" )
+						.execute();
+
+				// Salvaguarda: sin copia remota no se toca la carpeta local
+				if( latestBackupList.getFiles().isEmpty() )
+					break;
+
+
+				com.google.api.services.drive.model.File serverRemoteZip;
+
+				try (OutputStream downloadOutput = Files
+						.newOutputStream(
+								ZipUtils.DOWNLOADS_BACKUPS_ZIPS_FOLDER.resolve( latestBackupList.getFiles().get( 0 ).getName() + ".zip" ) ))
+				{
+					serverRemoteZip = latestBackupList.getFiles().get( 0 );
+					drive.files().get( serverRemoteZip.getId() ).executeMediaAndDownloadTo( downloadOutput );
+				}
+
+				// La RAM asignada es configuracion de ESTA maquina, no del backup: se
+				// guarda antes de borrar la carpeta para reponerla despues
+				String ramAlloc = ForgeUtils.getServerRAMAlloc( serverDestinataryFolder );
+
+				ZipUtils.deleteDirectory( serverDestinataryFolder );
+				ZipUtils.createDirectory( serverDestinataryFolder );
+
+				ZipUtils.unzip( Path.of( ZipUtils.DOWNLOADS_BACKUPS_ZIPS_FOLDER.toString() + "/" + serverRemoteZip.getName() + ".zip" ),
+						serverDestinataryFolder );
+
+				try
+				{
+					ForgeUtils.setServerRAMAlloc( serverDestinataryFolder, Integer.parseInt( ramAlloc.replaceAll( "[-Xmx|G]", "" ) ) );
+				}
+				catch( Exception ramRestoreFailure )
+				{
+					// Sin RAM previa (servidor recien clonado) se queda la del backup:
+					// no es motivo para dar la descarga por fallida
+					app.Log.event( "CLOUD_BACKUP", "No se pudo reponer la RAM asignada del servidor", ramRestoreFailure );
+				}
+
+				ZipUtils.createOrModiFyPropertiesFile( MainFrame.getServerName() + "-" + getProviderName(),
+						serverRemoteZip.getCreatedTime().toString().replace( "Z", "" ), lastServerBackUpDate );
+
+				result = true;
+
 			}
-			catch( Exception ignored )
+			catch( IOException downloadFailure )
 			{
-				ignored.printStackTrace();
+				JOptionPane.showMessageDialog( null, "Something went wrong, try again.", "Error", JOptionPane.ERROR_MESSAGE );
+				app.Log.event( "CLOUD_BACKUP", "No se pudo descargar la copia en " + serverDestinataryFolder, downloadFailure );
 			}
-
-			ZipUtils.createOrModiFyPropertiesFile( MainFrame.getServerName() + "-" + getProviderName(),
-					serverRemoteZip.getCreatedTime().toString().replace( "Z", "" ), lastServerBackUpDate );
-
-			return true;
-
-		}
-		catch( IOException e )
-		{
-			JOptionPane.showMessageDialog( null, "Something went wrong, try again.", "Error", JOptionPane.ERROR_MESSAGE );
-			e.printStackTrace();
-		}
-		return false;
+		} while( false );
+		return result;
 	}
 
+	/** Hay copia utilizable si existe alguna mas nueva que la ultima que ya tenemos en local. */
 	@Override
 	public boolean hasBackUp()
 	{
-		if( drive == null )
-			return false;
-
-		String appFolderId = getServerFolderIdWithMetadata( "P2PMSS-Backups", metadata );
-
-		String serverFolderId = getOrCreateServerFolderId( MainFrame.getServerName(), appFolderId, metadataChildren, iAmOwner(), false );
-		if( serverFolderId == null )
+		boolean result = false;
+		do
 		{
-			serverFolderId = getOrCreateServerFolderId( MainFrame.getServerName(), null, metadataChildren, iAmOwner(), false );
+			if( drive == null )
+				break;
+
+			String appFolderId = getServerFolderIdWithMetadata( "P2PMSS-Backups", metadata );
+
+			String serverFolderId = getOrCreateServerFolderId( MainFrame.getServerName(), appFolderId, metadataChildren, iAmOwner(),
+					false );
 			if( serverFolderId == null )
-				return false;
-		}
+			{
+				// Segunda pasada sin padre: la carpeta puede llegar compartida por su dueno
+				serverFolderId = getOrCreateServerFolderId( MainFrame.getServerName(), null, metadataChildren, iAmOwner(), false );
+				if( serverFolderId == null )
+					break;
+			}
 
-		try
-		{
-			FileList backupsFileList = drive.files().list()
-					.setQ( "'" + serverFolderId + "' in parents and trashed = false" )
-					.setSupportsAllDrives( true )
-					.setIncludeItemsFromAllDrives( true )
-					.setFields( "files(id, name, createdTime)" )
-					.execute();
+			try
+			{
+				FileList backupsFileList = drive.files().list()
+						.setQ( "'" + serverFolderId + "' in parents and trashed = false" )
+						.setSupportsAllDrives( true )
+						.setIncludeItemsFromAllDrives( true )
+						.setFields( "files(id, name, createdTime)" )
+						.execute();
 
-			List<com.google.api.services.drive.model.File> backups = backupsFileList.getFiles();
-			if( backups.isEmpty() )
-				return false;
-			else if( isSearchingBackUpForClonning )
-				return true;
+				List<com.google.api.services.drive.model.File> backups = backupsFileList.getFiles();
+				if( backups.isEmpty() )
+					break;
+				// Clonando no hay copia local con la que comparar: vale cualquiera
+				else if( isSearchingBackUpForClonning )
+				{
+					result = true;
+					break;
+				}
 
-			String savedLocalDateString = ZipUtils.getDataFromPropertiesFile( MainFrame.getServerName() + "-" + getProviderName(),
-					lastServerBackUpDate );
-			if( savedLocalDateString == null )
-				savedLocalDateString = LocalDateTime.of( LocalDate.of( 2005, 3, 8 ), LocalTime.of( 12, 35, 32, 456 ) ).toString(); //Default date if not specified.
+				String savedLocalDateString = ZipUtils.getDataFromPropertiesFile( MainFrame.getServerName() + "-" + getProviderName(),
+						lastServerBackUpDate );
+				// Sin marca local, una fecha antigua cualquiera hace que toda copia
+				// remota cuente como mas nueva
+				if( savedLocalDateString == null )
+					savedLocalDateString = LocalDateTime.of( LocalDate.of( 2005, 3, 8 ), LocalTime.of( 12, 35, 32, 456 ) ).toString();
 
-			LocalDateTime savedLocalDate = LocalDateTime.parse( savedLocalDateString );
-			if( backups.stream()
-					.filter( file -> LocalDateTime.parse( file.getCreatedTime().toString().replace( "Z", "" ) ).isAfter( savedLocalDate ) )
-					.toList().size() < 1 )
-				return false;
+				LocalDateTime savedLocalDate = LocalDateTime.parse( savedLocalDateString );
+				List<com.google.api.services.drive.model.File> newerBackups = backups.stream()
+						.filter( file -> LocalDateTime.parse( file.getCreatedTime().toString().replace( "Z", "" ) )
+								.isAfter( savedLocalDate ) )
+						.toList();
+				if( newerBackups.size() < 1 )
+					break;
 
-		}
-		catch( IOException e )
-		{
-			e.printStackTrace();
-			return false;
-		}
-
-		return true;
+				result = true;
+			}
+			catch( IOException listFailure )
+			{
+				app.Log.event( "CLOUD_BACKUP", "No se pudo listar las copias de " + MainFrame.getServerName(), listFailure );
+			}
+		} while( false );
+		return result;
 	}
 
 	@Override
@@ -296,6 +348,8 @@ public class GoogleDriveCloudProvider implements CloudStorageProvider
 	{
 		return "GoogleDrive";
 	}
+
+	// ---- FASE 3 — Resolucion de carpetas ------------------------------------
 
 	private String getServerFolderId( String folderName, String parentFolder )
 	{
@@ -323,101 +377,119 @@ public class GoogleDriveCloudProvider implements CloudStorageProvider
 	}
 
 
+	/**
+	 * Punto unico de busqueda (y creacion opcional) de carpetas. El apostrofe del
+	 * nombre se escapa porque la query de Drive va entre comillas simples.
+	 */
 	private String getOrCreateServerFolderId( String folderName, String parentFolder, Map<String, String> metadata, boolean owneds,
 			boolean createIfNotExists )
 	{
-		String queryString = "name='%s' and mimeType='application/vnd.google-apps.folder' and trashed=false";
-
-		if( parentFolder != null )
-			queryString = "name='%s' and mimeType='application/vnd.google-apps.folder' and '%s' in parents and trashed=false";
-
-		String query = String.format(
-				queryString,
-				folderName.replace( "'", "\\'" ),
-				"%s" );
-
-		if( owneds )
-			query += " and 'me' in owners";
-
-		if( parentFolder != null )
-			query = String.format(
-					query,
-					parentFolder );
-
-		if( metadata != null )
-			query += " and appProperties has { key='app' and value='" + APPLICATION_NAME
-					+ "' } and appProperties has { key='type' and value='" + metadata.get( "type" ) + "' }";
-
-		try
+		String result = null;
+		do
 		{
-			FileList result = drive.files().list()
-					.setQ( query )
-					.setSpaces( "drive" )
-					.setFields( "files(id, name)" )
-					.execute();
+			String queryString = "name='%s' and mimeType='application/vnd.google-apps.folder' and trashed=false";
 
-			if( !result.getFiles().isEmpty() )
+			if( parentFolder != null )
+				queryString = "name='%s' and mimeType='application/vnd.google-apps.folder' and '%s' in parents and trashed=false";
+
+			String query = String.format(
+					queryString,
+					folderName.replace( "'", "\\'" ),
+					"%s" );
+
+			if( owneds )
+				query += " and 'me' in owners";
+
+			if( parentFolder != null )
+				query = String.format(
+						query,
+						parentFolder );
+
+			// Las appProperties son la marca de la app: distinguen NUESTRA carpeta de
+			// otra que el usuario tenga con el mismo nombre
+			if( metadata != null )
+				query += " and appProperties has { key='app' and value='" + APPLICATION_NAME
+						+ "' } and appProperties has { key='type' and value='" + metadata.get( "type" ) + "' }";
+
+			try
 			{
-				return result.getFiles().get( 0 ).getId();
+				FileList foundFolders = drive.files().list()
+						.setQ( query )
+						.setSpaces( "drive" )
+						.setFields( "files(id, name)" )
+						.execute();
+
+				if( !foundFolders.getFiles().isEmpty() )
+					result = foundFolders.getFiles().get( 0 ).getId();
 			}
-		}
-		catch( IOException ioe )
-		{
-			if( ioe instanceof TokenResponseException toke )
+			catch( IOException lookupFailure )
 			{
-				String errorMessage = toke.getContent();
-				if( errorMessage.contains( "Token" ) && errorMessage.contains( "expired" ) )
+				// El refresh token caducado solo se ve en el cuerpo del error: se
+				// limpia la sesion local y se vuelve a pedir consentimiento
+				if( lookupFailure instanceof TokenResponseException tokenFailure )
 				{
-					closeLocalSession();
-					authenticate();
+					String errorMessage = tokenFailure.getContent();
+					boolean tokenExpired = errorMessage.contains( "Token" ) && errorMessage.contains( "expired" );
+					if( tokenExpired )
+					{
+						closeLocalSession();
+						authenticate();
+					}
 				}
 			}
-		}
 
-		if( !createIfNotExists )
-			return null;
+			if( result != null )
+				break;
 
-		try
-		{
+			if( !createIfNotExists )
+				break;
 
-			com.google.api.services.drive.model.File folderMetadata = new com.google.api.services.drive.model.File();
+			try
+			{
 
-			folderMetadata.setName( folderName );
-			folderMetadata.setMimeType( "application/vnd.google-apps.folder" );
-			if( parentFolder != null )
-				folderMetadata.setParents( List.of( parentFolder ) );
-			if( metadata != null )
-				folderMetadata.setAppProperties( metadata );
+				com.google.api.services.drive.model.File folderMetadata = new com.google.api.services.drive.model.File();
 
-			com.google.api.services.drive.model.File folder = drive.files()
-					.create( folderMetadata )
-					.setFields( "id" )
-					.execute();
+				folderMetadata.setName( folderName );
+				folderMetadata.setMimeType( "application/vnd.google-apps.folder" );
+				if( parentFolder != null )
+					folderMetadata.setParents( List.of( parentFolder ) );
+				if( metadata != null )
+					folderMetadata.setAppProperties( metadata );
 
-			return folder.getId();
-		}
-		catch( IOException ioe )
-		{
-			JOptionPane.showMessageDialog( null,
-					"File " + folderName + " not found or inaccessible or another thing went wrong, try again.", "Error",
-					JOptionPane.ERROR_MESSAGE );
-			ioe.printStackTrace();
-		}
-		return null;
+				com.google.api.services.drive.model.File createdFolder = drive.files()
+						.create( folderMetadata )
+						.setFields( "id" )
+						.execute();
+
+				result = createdFolder.getId();
+			}
+			catch( IOException creationFailure )
+			{
+				JOptionPane.showMessageDialog( null,
+						"File " + folderName + " not found or inaccessible or another thing went wrong, try again.", "Error",
+						JOptionPane.ERROR_MESSAGE );
+				app.Log.event( "CLOUD_BACKUP", "No se pudo crear la carpeta " + folderName + " en Google Drive", creationFailure );
+			}
+		} while( false );
+		return result;
 	}
+
+	// ---- FASE 4 — Cierre de sesion y permisos -------------------------------
 
 	@Override
 	public void closeSession()
 	{
 		try
 		{
+			// Revocar en el servidor ademas de borrar el token local: si no, el
+			// consentimiento sigue vivo en la cuenta de Google del usuario
 			String revokeUrl = "https://oauth2.googleapis.com/revoke?token="
 					+ this.credential.getAccessToken();
 
-			Map<String, String> params = new HashMap<>();
-			params.put( "token", credential.getRefreshToken() );
+			Map<String, String> revokeParameters = new HashMap<>();
+			revokeParameters.put( "token", credential.getRefreshToken() );
 
-			UrlEncodedContent content = new UrlEncodedContent( params );
+			UrlEncodedContent content = new UrlEncodedContent( revokeParameters );
 
 			HttpRequestFactory requestFactory = GoogleNetHttpTransport.newTrustedTransport()
 					.createRequestFactory();
@@ -434,12 +506,13 @@ public class GoogleDriveCloudProvider implements CloudStorageProvider
 			this.drive = null;
 
 		}
-		catch( Exception e )
+		catch( Exception revokeFailure )
 		{
-			e.printStackTrace();
+			app.Log.event( "CLOUD_BACKUP", "No se pudo revocar la sesion de Google Drive", revokeFailure );
 		}
 	}
 
+	/** Olvida la sesion en esta maquina sin revocarla en Google: se usa al refrescar un token caducado. */
 	public void closeLocalSession()
 	{
 		ZipUtils.deleteDirectory( Path.of( CREDENTIALS_FOLDER ) );
@@ -457,55 +530,65 @@ public class GoogleDriveCloudProvider implements CloudStorageProvider
 	@Override
 	public boolean inviteUser( String email )
 	{
-		if( drive == null )
-			return false;
-
-		String parentFolderId = getServerFolderIdWithMetadata( "P2PMSS-Backups", metadata );
-		String folderId;
-
-		folderId = getServerFolderId( MainFrame.getServerName(), parentFolderId );
-
-		if( folderId == null )
+		boolean result = false;
+		do
 		{
-			JOptionPane.showMessageDialog( null, "Only the owner of this server can invite new hosts.", "Error",
-					JOptionPane.ERROR_MESSAGE );
-			return false;
-		}
+			if( drive == null )
+				break;
 
-		Permission permission = new Permission()
-				.setType( "user" )
-				.setRole( "writer" )
-				.setEmailAddress( email );
+			String parentFolderId = getServerFolderIdWithMetadata( "P2PMSS-Backups", metadata );
+			String folderId = getServerFolderId( MainFrame.getServerName(), parentFolderId );
 
-		try
-		{
-			drive.permissions().create( folderId, permission )
-					.setSendNotificationEmail( true )
-					.setFields( "id" )
-					.execute();
+			// Sin carpeta propia no somos el dueno: un invitado no puede reinvitar
+			if( folderId == null )
+			{
+				JOptionPane.showMessageDialog( null, "Only the owner of this server can invite new hosts.", "Error",
+						JOptionPane.ERROR_MESSAGE );
+				break;
+			}
 
-			return true;
-		}
-		catch( IOException e )
-		{
-			JOptionPane.showMessageDialog( null, "File not found or inaccessible or another thing went wrong, try again.", "Error",
-					JOptionPane.ERROR_MESSAGE );
-			e.printStackTrace();
-		}
-		return false;
+			// writer, no owner: el invitado sube copias pero no puede borrar la carpeta
+			Permission permission = new Permission()
+					.setType( "user" )
+					.setRole( "writer" )
+					.setEmailAddress( email );
+
+			try
+			{
+				drive.permissions().create( folderId, permission )
+						.setSendNotificationEmail( true )
+						.setFields( "id" )
+						.execute();
+
+				result = true;
+			}
+			catch( IOException invitationFailure )
+			{
+				JOptionPane.showMessageDialog( null, "File not found or inaccessible or another thing went wrong, try again.", "Error",
+						JOptionPane.ERROR_MESSAGE );
+				app.Log.event( "CLOUD_BACKUP", "No se pudo invitar a " + email + " a la carpeta del servidor", invitationFailure );
+			}
+		} while( false );
+		return result;
 	}
 
 	@Override
 	public boolean hasRemoteServerFolder()
 	{
-		if( drive == null )
-			return false;
-		String parentFolderId = getServerFolderIdWithMetadata( "P2PMSS-Backups", metadata );
-		String serverFolder = getOrCreateServerFolderId( MainFrame.getServerName(), parentFolderId, metadataChildren, iAmOwner(), false );
-		if( serverFolder == null )
-			getOrCreateServerFolderId( MainFrame.getServerName(), null, metadataChildren, iAmOwner(), false );
-		return serverFolder != null;
+		boolean result = false;
+		if( drive != null )
+		{
+			String parentFolderId = getServerFolderIdWithMetadata( "P2PMSS-Backups", metadata );
+			String serverFolder = getOrCreateServerFolderId( MainFrame.getServerName(), parentFolderId, metadataChildren, iAmOwner(),
+					false );
+			if( serverFolder == null )
+				getOrCreateServerFolderId( MainFrame.getServerName(), null, metadataChildren, iAmOwner(), false );
+			result = serverFolder != null;
+		}
+		return result;
 	}
+
+	// ---- FASE 5 — Alta de carpeta y datos del usuario -----------------------
 
 	@Override
 	public void createSavingFolder()
@@ -516,6 +599,8 @@ public class GoogleDriveCloudProvider implements CloudStorageProvider
 		String parentId = getOrCreateServerFolderIdWithMetadata( "P2PMSS-Backups", metadata );
 		String backupFolderId = getOrCreateServerFolderId( MainFrame.getServerName(), parentId, metadataChildren, true, true );
 
+		// La carpeta se estrena con una copia: una carpeta vacia haria creer al
+		// resto de hosts que este servidor no tiene nada que descargar
 		ZipUtils.createZip( MainFrame.serverOpenedDirectory.toPath(), ZipUtils.BACKUPS_ZIPS_FOLDER );
 		uploadServerBackup( ZipUtils.BACKUPS_ZIPS_FOLDER );
 
@@ -533,32 +618,37 @@ public class GoogleDriveCloudProvider implements CloudStorageProvider
 	@Override
 	public Map<String, Object> getUserInfo()
 	{
-		if( drive == null )
-			return null;
-
-		try
+		Map<String, Object> result = null;
+		do
 		{
-			About about = drive.about()
-					.get()
-					.setFields( "user(displayName,emailAddress,permissionId)" )
-					.execute();
+			if( drive == null )
+				break;
 
-			Map<String, Object> user = new HashMap<>();
-			user.put( "profilePhoto", about.getUser().getPhotoLink() );
-			user.put( "displayName", about.getUser().getDisplayName() );
-			user.put( "email", about.getUser().getEmailAddress() );
-			user.put( "permissionId", about.getUser().getPermissionId() );
+			try
+			{
+				About about = drive.about()
+						.get()
+						.setFields( "user(displayName,emailAddress,permissionId)" )
+						.execute();
 
-			return user;
+				Map<String, Object> user = new HashMap<>();
+				user.put( "profilePhoto", about.getUser().getPhotoLink() );
+				user.put( "displayName", about.getUser().getDisplayName() );
+				user.put( "email", about.getUser().getEmailAddress() );
+				user.put( "permissionId", about.getUser().getPermissionId() );
 
-		}
-		catch( IOException e )
-		{
-			e.printStackTrace();
-			return null;
-		}
+				result = user;
+
+			}
+			catch( IOException userInfoFailure )
+			{
+				app.Log.event( "CLOUD_BACKUP", "No se pudo leer el perfil de Google Drive", userInfoFailure );
+			}
+		} while( false );
+		return result;
 	}
 
+	/** Carpetas de servidor que otros hosts han compartido con esta cuenta. */
 	@Override
 	public List<String> getInvitedFolderList()
 	{
@@ -571,6 +661,8 @@ public class GoogleDriveCloudProvider implements CloudStorageProvider
 		List<String> result = new ArrayList<>();
 		String pageToken = null;
 
+		// Este do/while es paginacion real de la API, no el patron de salida unica:
+		// Drive devuelve las carpetas por paginas y hay que pedirlas todas
 		do
 		{
 			FileList files;
@@ -586,23 +678,23 @@ public class GoogleDriveCloudProvider implements CloudStorageProvider
 				files.getFiles().forEach( file -> result.add( file.getId() ) );
 				pageToken = files.getNextPageToken();
 			}
-			catch( IOException e )
+			catch( IOException pageFailure )
 			{
-				e.printStackTrace();
+				app.Log.event( "CLOUD_BACKUP", "No se pudo listar las carpetas compartidas", pageFailure );
 			}
 
 		} while( pageToken != null );
-		System.out.println( result );
+		app.Log.event( "CLOUD_BACKUP", "Carpetas compartidas encontradas: " + result );
 		return result;
 	}
 
+	/** Dueno y nombre de una carpeta compartida, para poder pintarla en la lista de clonado. */
 	public List<String> getRelevantFolderInfo( String folderId )
 	{
-
-		PermissionList permissionList;
+		List<String> result = null;
 		try
 		{
-			permissionList = drive.permissions()
+			PermissionList permissionList = drive.permissions()
 					.list( folderId )
 					.setFields(
 							"permissions(id, emailAddress, displayName, role, type)" )
@@ -613,23 +705,25 @@ public class GoogleDriveCloudProvider implements CloudStorageProvider
 					.setFields( "name" )
 					.execute();
 
-			for( Permission p : permissionList.getPermissions() )
+			// Vale el primer permiso de persona con correo: es el dueno que nos invito
+			for( Permission permission : permissionList.getPermissions() )
 			{
-				if( "user".equals( p.getType() )
-						&& p.getEmailAddress() != null
-						&& !p.getEmailAddress().equals( "me" ) )
+				boolean isRealUser = "user".equals( permission.getType() )
+						&& permission.getEmailAddress() != null
+						&& !permission.getEmailAddress().equals( "me" );
+				if( isRealUser )
 				{
-
-					return List.of( p.getEmailAddress(), folder.getName() );
+					result = List.of( permission.getEmailAddress(), folder.getName() );
+					break;
 				}
 			}
 
 		}
-		catch( IOException e )
+		catch( IOException permissionsFailure )
 		{
-			e.printStackTrace();
+			app.Log.event( "CLOUD_BACKUP", "No se pudo leer los permisos de la carpeta " + folderId, permissionsFailure );
 		}
 
-		return null;
+		return result;
 	}
 }

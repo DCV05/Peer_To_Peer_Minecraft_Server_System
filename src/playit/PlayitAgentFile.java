@@ -35,17 +35,25 @@ public final class PlayitAgentFile
 	/** Returns the stored state, or null when the world has no playit setup. */
 	public static PlayitAgentFile load( Path serverDirectory )
 	{
-		Path file = pathIn( serverDirectory );
-		if( !Files.isRegularFile( file ) )
-			return null;
-		try
+		PlayitAgentFile result = null;
+		do
 		{
-			return JSON.readValue( Files.readString( file, StandardCharsets.UTF_8 ), PlayitAgentFile.class );
-		}
-		catch( IOException broken )
-		{
-			return null;
-		}
+			Path file = pathIn( serverDirectory );
+			if( !Files.isRegularFile( file ) )
+				break;
+			try
+			{
+				String storedJson = Files.readString( file, StandardCharsets.UTF_8 );
+				result = JSON.readValue( storedJson, PlayitAgentFile.class );
+			}
+			catch( IOException broken )
+			{
+				// Un fichero corrupto o ilegible degrada a "sin configuracion de playit":
+				// el mundo tiene que poder abrirse igual, solo que sin URL publica
+				app.Log.event( "PLAYIT", "Stored playit agent state could not be read", broken );
+			}
+		} while( false );
+		return result;
 	}
 
 	public void save( Path serverDirectory ) throws IOException

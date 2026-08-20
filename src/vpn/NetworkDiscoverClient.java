@@ -9,8 +9,15 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Discovers the active P2P host and, when supported, its live player roster. */
-public class NetworkDiscoverClient
+/**
+ * Descubre por UDP el host P2P activo de la red y, cuando el host lo soporta,
+ * su lista de jugadores. El protocolo es una sola linea de texto para que un
+ * host viejo (que solo responde "HERE") siga siendo compatible con un cliente
+ * nuevo: los campos ONLINE/MAX/PLAYERS son opcionales y se ignoran si faltan.
+ * Cualquier fallo de red se traduce a "no encontrado" para que la UI no se
+ * quede colgada esperando.
+ */
+public final class NetworkDiscoverClient
 {
 	public static String discover( String networkName, int targetPort, int timeoutMs ) throws IOException
 	{
@@ -19,6 +26,7 @@ public class NetworkDiscoverClient
 
 	public static DiscoveryResult discoverStatus( String networkName, int targetPort, int timeoutMs ) throws IOException
 	{
+		DiscoveryResult result;
 		try (DatagramSocket socket = new DatagramSocket())
 		{
 			socket.setBroadcast( true );
@@ -35,57 +43,74 @@ public class NetworkDiscoverClient
 				DatagramPacket responsePacket = new DatagramPacket( buffer, buffer.length );
 				socket.receive( responsePacket );
 				String response = new String( responsePacket.getData(), 0, responsePacket.getLength(), StandardCharsets.UTF_8 );
-				String ip = responsePacket.getAddress().getHostAddress();
-				DiscoveryResult result = parseResponse( ip, response );
-				System.out.println( "Respuesta recibida de " + ip + ": " + response );
-				return result;
+				String hostAddress = responsePacket.getAddress().getHostAddress();
+				result = parseResponse( hostAddress, response );
+				app.Log.event( "NETWORK_DISCOVERY", "Respuesta recibida de " + hostAddress + ": " + response );
 			}
-			catch( SocketTimeoutException ignored )
+			catch( SocketTimeoutException noHostAnswered )
 			{
-				return DiscoveryResult.notFound();
+				// Nadie respondio dentro del timeout: no hay host, no es un error
+				result = DiscoveryResult.notFound();
 			}
 		}
+		return result;
 	}
 
+	/**
+	 * Traduce la respuesta cruda del host a un resultado. Los campos llegan
+	 * separados por ';' y en cualquier orden; lo que no se entienda se descarta
+	 * en vez de invalidar la respuesta entera.
+	 */
 	static DiscoveryResult parseResponse( String host, String response )
 	{
-		if( response == null || !response.startsWith( "HERE" ) )
-			return DiscoveryResult.notFound();
-		int online = 0;
-		int max = 0;
-		List<String> players = new ArrayList<>();
-		for( String field : response.split( ";" ) )
+		DiscoveryResult result = DiscoveryResult.notFound();
+		boolean isDiscoveryResponse = response != null && response.startsWith( "HERE" );
+		if( isDiscoveryResponse )
 		{
-			if( field.startsWith( "ONLINE=" ) )
-				online = parseNonNegative( field.substring( "ONLINE=".length() ) );
-			else if( field.startsWith( "MAX=" ) )
-				max = parseNonNegative( field.substring( "MAX=".length() ) );
-			else if( field.startsWith( "PLAYERS=" ) )
+			int onlinePlayers = 0;
+			int maxPlayers = 0;
+			List<String> players = new ArrayList<>();
+			for( String field : response.split( ";" ) )
 			{
-				for( String candidate : field.substring( "PLAYERS=".length() ).split( "," ) )
+				if( field.startsWith( "ONLINE=" ) )
+					onlinePlayers = parseNonNegative( field.substring( "ONLINE=".length() ) );
+				else if( field.startsWith( "MAX=" ) )
+					maxPlayers = parseNonNegative( field.substring( "MAX=".length() ) );
+				else if( field.startsWith( "PLAYERS=" ) )
 				{
-					String player = candidate.trim();
-					if( player.matches( "[A-Za-z0-9_]{1,16}" ) )
-						players.add( player );
+					for( String candidate : field.substring( "PLAYERS=".length() ).split( "," ) )
+					{
+						String player = candidate.trim();
+						// Solo nombres validos de Minecraft: filtra basura y respuestas manipuladas
+						if( player.matches( "[A-Za-z0-9_]{1,16}" ) )
+							players.add( player );
+					}
 				}
 			}
+			// La lista manda sobre el contador: si el host declara menos jugadores de
+			// los que lista, el contador es el que esta mal
+			onlinePlayers = Math.max( onlinePlayers, players.size() );
+			if( maxPlayers > 0 )
+				maxPlayers = Math.max( maxPlayers, onlinePlayers );
+			result = new DiscoveryResult( host, players, onlinePlayers, maxPlayers );
 		}
-		online = Math.max( online, players.size() );
-		if( max > 0 )
-			max = Math.max( max, online );
-		return new DiscoveryResult( host, players, online, max );
+		return result;
 	}
 
+	/** Igual que {@link #discoverStatus} pero sin obligar a la UI a tratar la IOException. */
 	public static DiscoveryResult surroundDiscoverStatus( String networkName, int targetPort, int timeoutMs )
 	{
+		DiscoveryResult result;
 		try
 		{
-			return discoverStatus( networkName, targetPort, timeoutMs );
+			result = discoverStatus( networkName, targetPort, timeoutMs );
 		}
-		catch( IOException ignored )
+		catch( IOException discoveryFailure )
 		{
-			return DiscoveryResult.notFound();
+			// Red caida o interfaz sin broadcast: para la UI equivale a "no hay host"
+			result = DiscoveryResult.notFound();
 		}
+		return result;
 	}
 
 	public static String surroundDiscoverIOException( String networkName, int targetPort, int timeoutMs )
@@ -95,14 +120,17 @@ public class NetworkDiscoverClient
 
 	private static int parseNonNegative( String value )
 	{
+		int result;
 		try
 		{
-			return Math.max( 0, Integer.parseInt( value ) );
+			result = Math.max( 0, Integer.parseInt( value ) );
 		}
-		catch( NumberFormatException ignored )
+		catch( NumberFormatException malformedNumber )
 		{
-			return 0;
+			// Campo corrupto: cuenta como cero antes que tirar todo el descubrimiento
+			result = 0;
 		}
+		return result;
 	}
 
 	public record DiscoveryResult( String host, List<String> players, int onlinePlayers, int maxPlayers )
@@ -119,6 +147,7 @@ public class NetworkDiscoverClient
 			return !"NotFound".equals( host );
 		}
 
+		/** Un host viejo responde "HERE" a secas: sin MAX no hay lista de jugadores fiable. */
 		public boolean rosterAvailable()
 		{
 			return maxPlayers > 0;
