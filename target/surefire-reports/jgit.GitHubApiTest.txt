@@ -1,4 +1,4 @@
 -------------------------------------------------------------------------------
 Test set: jgit.GitHubApiTest
 -------------------------------------------------------------------------------
-Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.538 s -- in jgit.GitHubApiTest
+Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.452 s -- in jgit.GitHubApiTest

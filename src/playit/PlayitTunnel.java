@@ -42,10 +42,14 @@ import gg.playit.messages.ControlFeedReader;
  */
 public final class PlayitTunnel {
 
-	/** Same registered agent version as the official Minecraft plugin protocol. */
+	/**
+	 * Minecraft-plugin platform id with a bumped version: playit rejects tunnel
+	 * creation from agents that report the plugin's original 0.2.0
+	 * (AgentVersionTooOld), verified against their live API on 2026-08-20.
+	 */
 	private static final AgentVersion AGENT_VERSION =
-			new AgentVersion("f4e73f52-f35c-4f18-9ab2-3aaa5c4488c1", 0, 2, 0);
-	private static final String AGENT_VERSION_STRING = "0.2.0";
+			new AgentVersion("f4e73f52-f35c-4f18-9ab2-3aaa5c4488c1", 0, 16, 0);
+	private static final String AGENT_VERSION_STRING = "0.16.0";
 
 	public enum Phase { OFF, CONNECTING, ONLINE, ERROR, INVALID_AUTH }
 
@@ -265,6 +269,17 @@ public final class PlayitTunnel {
 		while(running) {
 			try(PlayitControlChannel channel = PlayitControlChannel.setup(secretKey, AGENT_VERSION)) {
 				phase = Phase.ONLINE;
+
+				// Registrar el canal actualiza la version del agente en playit;
+				// reintentar aqui cura el AgentVersionTooOld de un fallo previo
+				if(publicAddress == null) {
+					try {
+						publicAddress = ensureTunnel(secretKey);
+						activity.accept("Public URL online: " + publicAddress);
+					} catch(IOException stillFailing) {
+						activity.accept("Public URL still unavailable: " + stillFailing.getMessage());
+					}
+				}
 
 				while(running) {
 					var message = channel.update();
