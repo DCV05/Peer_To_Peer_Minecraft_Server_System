@@ -858,6 +858,7 @@ public final class MainFrame
 		NetworkDiscoverClient.DiscoveryResult discovery = NetworkDiscoverClient.surroundDiscoverStatus( networkName, actualServerPort,
 				3000 );
 		boolean remoteHostFound = discovery.found();
+		String remoteHostLabel = discovery.host();
 		if( !serverIsOn )
 		{
 			if( remoteHostFound && discovery.rosterAvailable() )
@@ -869,13 +870,59 @@ public final class MainFrame
 				playerPresence.reset( ForgeUtils.getMaxPlayers( serverOpenedDirectory.toPath() ) );
 			}
 		}
-		discoveredHost = remoteHostFound ? discovery.host() : (serverIsOn ? "LOCAL PROCESS" : "—");
+		// El discovery UDP solo ve la LAN: sin host ahi, el escaneo consulta ademas
+		// el candado de GitHub, que es el mismo arbitro que usa START. Asi SCAN y
+		// START cuentan la misma historia cuando el peer hostea por internet
+		if( !serverIsOn && !remoteHostFound )
+		{
+			HostLock.Status lock = cachedHostLockStatus();
+			if( lock != null && lock.locked() && !lock.mine() && !lock.stale() )
+			{
+				remoteHostFound = true;
+				remoteHostLabel = lock.hostNickname() + " (INTERNET)";
+			}
+		}
+		discoveredHost = remoteHostFound ? remoteHostLabel : (serverIsOn ? "LOCAL PROCESS" : "—");
 		if( serverIsOn )
 			setDashboardPhase( Phase.ONLINE, "Forge is accepting players" );
 		else if( remoteHostFound )
 			setDashboardPhase( Phase.REMOTE_HOST, "Another peer is hosting this world" );
 		else
 			setDashboardPhase( Phase.OFFLINE, "No active host discovered" );
+	}
+
+	private volatile HostLock.Status lastHostLockStatus;
+	private volatile long lastHostLockCheckMillis;
+
+	/**
+	 * Estado del candado de GitHub con cache de 60 segundos: el polling de fase
+	 * remota repite el escaneo cada 10 y no debe convertirse en una rafaga de
+	 * llamadas a la API. Devuelve null cuando no hay repo enlazado o sesion.
+	 */
+	private HostLock.Status cachedHostLockStatus()
+	{
+		HostLock.Status result = null;
+		do
+		{
+			if( serverOpenedDirectory == null || !TokenStore.sessionIsOpened() )
+				break;
+			Path selectedServer = serverOpenedDirectory.toPath();
+			if( !GitUtils.repoExistInPath( selectedServer ) || !GitUtils.hasRemoteOrigin( selectedServer ) )
+				break;
+			long now = System.currentTimeMillis();
+			if( lastHostLockStatus != null && now - lastHostLockCheckMillis < 60_000 )
+			{
+				result = lastHostLockStatus;
+				break;
+			}
+			String repoFullName = GitUtils.remoteRepoFullName( selectedServer );
+			if( repoFullName == null || repoFullName.isBlank() )
+				break;
+			result = HostLock.readStatus( repoFullName );
+			lastHostLockStatus = result;
+			lastHostLockCheckMillis = now;
+		} while( false );
+		return result;
 	}
 
 	public void openServerOptions( JPanel fatherFrame )
