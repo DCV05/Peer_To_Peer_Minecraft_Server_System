@@ -400,7 +400,7 @@ class MinecraftDashboardTest
 	}
 
 	@Test
-	void serverDetailPageShowsAddressAndBackReturnsToTheBoard() throws Exception
+	void serverWorkspacePagesAppearOnlyAfterEnteringAServer() throws Exception
 	{
 		AtomicReference<MinecraftDashboard> reference = new AtomicReference<>();
 		SwingUtilities.invokeAndWait( () -> reference.set( new MinecraftDashboard( new MinecraftDashboard.Actions()
@@ -408,30 +408,25 @@ class MinecraftDashboardTest
 		} ) ) );
 		MinecraftDashboard dashboard = reference.get();
 
-		List<MinecraftDashboard.ServerEntry> servers = List.of(
-				new MinecraftDashboard.ServerEntry( "farmland", "/tmp/farm", "FABRIC READY", false,
-						"LIVE · Vikkavv hosting · 2/4 · MC 1.19", "farm.ply.gg:123", false ),
-				new MinecraftDashboard.ServerEntry( "otro_mundo", "DCV05/otro_mundo", "REMOTE WORLD", false,
-						"FREE TO HOST", null, true ) );
-		SwingUtilities.invokeAndWait( () -> dashboard.setState( stateWithServers( MinecraftDashboard.Phase.OFFLINE, servers ) ) );
+		// Sin server: el sidebar solo ofrece el tablero SERVERS
+		SwingUtilities.invokeAndWait( () -> dashboard.setState( stateWithoutServer() ) );
+		assertTrue( dashboard.navigationButtonVisible( MinecraftDashboard.Page.SERVERS ) );
+		assertFalse( dashboard.navigationButtonVisible( MinecraftDashboard.Page.OVERVIEW ) );
+		assertFalse( dashboard.navigationButtonVisible( MinecraftDashboard.Page.CONSOLE ) );
+		assertFalse( dashboard.navigationButtonVisible( MinecraftDashboard.Page.SETTINGS ) );
 
-		SwingUtilities.invokeAndWait( () -> dashboard.showServerDetail( "/tmp/farm" ) );
-		String detail = renderedText( serversListChildren( dashboard ) );
-		assertTrue( detail.contains( "CONNECT ADDRESS" ) );
-		assertTrue( detail.contains( "farm.ply.gg:123" ) );
-		// Con otro peer hosteando el boton es JOIN, y el otro mundo no se ve
-		assertTrue( detail.contains( "JOIN" ) );
-		assertFalse( detail.contains( "otro_mundo" ) );
+		// Al entrar a un server aparecen sus paginas dedicadas bajo su nombre
+		SwingUtilities.invokeAndWait( () -> dashboard.setState( stateWithServers( MinecraftDashboard.Phase.OFFLINE, List.of() ) ) );
+		assertTrue( dashboard.navigationButtonVisible( MinecraftDashboard.Page.OVERVIEW ) );
+		assertTrue( dashboard.navigationButtonVisible( MinecraftDashboard.Page.CONSOLE ) );
+		assertEquals( "MINECRAFT-FRIENDS", dashboard.serverNavHeaderText() );
+	}
 
-		SwingUtilities.invokeAndWait( dashboard::showServerBoard );
-		String board = renderedText( serversListChildren( dashboard ) );
-		assertTrue( board.contains( "farmland" ) );
-		assertTrue( board.contains( "otro_mundo" ) );
-
-		// Un mundo sin nadie hosteando lo dice en claro en su detalle
-		SwingUtilities.invokeAndWait( () -> dashboard.showServerDetail( "DCV05/otro_mundo" ) );
-		String freeDetail = renderedText( serversListChildren( dashboard ) );
-		assertTrue( freeDetail.contains( "Nobody is hosting this world right now." ) );
+	private static MinecraftDashboard.State stateWithoutServer()
+	{
+		return new MinecraftDashboard.State( false, MinecraftDashboard.Phase.NO_SERVER, "Open or create a server", null,
+				null, "—", "25565", "4G", "friends-vpn", "FORGE / JAVA 21", true, true, false,
+				"player-one", "", "NOT CONFIGURED", "—", "", List.of() );
 	}
 
 	@Test

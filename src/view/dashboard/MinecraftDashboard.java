@@ -300,6 +300,10 @@ public final class MinecraftDashboard extends JPanel
 	private final CardLayout overviewLayout = new CardLayout();
 	private final JPanel overviewContainer = new JPanel( overviewLayout );
 	private final Map<Page, JButton> navigationButtons = new EnumMap<>( Page.class );
+
+	/** Paginas dedicadas al server en el que se ha entrado, en orden de sidebar. */
+	private static final List<Page> SERVER_PAGES = List.of( Page.OVERVIEW, Page.BACKUPS, Page.NETWORK, Page.CONSOLE, Page.SETTINGS );
+	private final JLabel serverNavHeader = DashboardTheme.eyebrow( "NO SERVER" );
 	private final Map<String, MetricCard> metrics = new java.util.HashMap<>();
 	private final Map<Phase, JLabel> lifecycleSteps = new EnumMap<>( Phase.class );
 
@@ -620,19 +624,21 @@ public final class MinecraftDashboard extends JPanel
 		navigation.setLayout( new BoxLayout( navigation, BoxLayout.Y_AXIS ) );
 		navigation.setBorder( BorderFactory.createEmptyBorder( 10, 10, 10, 10 ) );
 
-		JLabel section = DashboardTheme.eyebrow( "Workspace" );
+		JLabel section = DashboardTheme.eyebrow( "WORLDS" );
 		section.setBorder( BorderFactory.createEmptyBorder( 0, 9, 8, 0 ) );
 		section.setAlignmentX( Component.LEFT_ALIGNMENT );
 		navigation.add( section );
-		for( Page page : Page.values() )
+		navigation.add( navigationButtonFor( Page.SERVERS ) );
+		navigation.add( Box.createVerticalStrut( 18 ) );
+
+		// Las paginas de trabajo son POR SERVER: solo existen en el sidebar cuando
+		// se ha entrado a uno desde el tablero, bajo el nombre de ese server
+		serverNavHeader.setBorder( BorderFactory.createEmptyBorder( 0, 9, 8, 0 ) );
+		serverNavHeader.setAlignmentX( Component.LEFT_ALIGNMENT );
+		navigation.add( serverNavHeader );
+		for( Page page : SERVER_PAGES )
 		{
-			JButton button = new JButton( page.title().toUpperCase( Locale.ROOT ) );
-			button.setHorizontalAlignment( SwingConstants.LEFT );
-			button.setMaximumSize( new Dimension( Integer.MAX_VALUE, 32 ) );
-			button.setAlignmentX( Component.LEFT_ALIGNMENT );
-			button.addActionListener( event -> showPage( page ) );
-			navigationButtons.put( page, button );
-			navigation.add( button );
+			navigation.add( navigationButtonFor( page ) );
 			navigation.add( Box.createVerticalStrut( 2 ) );
 		}
 		sidebar.add( navigation, BorderLayout.CENTER );
@@ -1418,6 +1424,41 @@ public final class MinecraftDashboard extends JPanel
 		accountStatus.setText( state.githubAuthenticated() ? "■  GITHUB ONLINE" : "■  GITHUB OFFLINE" );
 		accountStatus.setForeground( state.githubAuthenticated() ? GREEN : TEXT_MUTED );
 		accountName.setText( state.githubAccount().toUpperCase( Locale.ROOT ) );
+
+		// Sidebar contextual: las paginas de trabajo aparecen al entrar a un
+		// server y llevan su nombre; sin server solo existe el tablero
+		boolean loaded = state.serverLoaded();
+		serverNavHeader.setText( loaded ? state.serverName().toUpperCase( Locale.ROOT ) : "NO SERVER" );
+		serverNavHeader.setVisible( loaded );
+		for( Page page : SERVER_PAGES )
+		{
+			navigationButtons.get( page ).setVisible( loaded );
+		}
+		if( !loaded && SERVER_PAGES.contains( activePage ) )
+			showPage( Page.SERVERS );
+	}
+
+	/** Solo para tests: visibilidad del boton de una pagina en el sidebar. */
+	boolean navigationButtonVisible( Page page )
+	{
+		return navigationButtons.get( page ).isVisible();
+	}
+
+	/** Solo para tests: encabezado del grupo de paginas dedicadas al server. */
+	String serverNavHeaderText()
+	{
+		return serverNavHeader.getText();
+	}
+
+	private JButton navigationButtonFor( Page page )
+	{
+		JButton button = new JButton( page.title().toUpperCase( Locale.ROOT ) );
+		button.setHorizontalAlignment( SwingConstants.LEFT );
+		button.setMaximumSize( new Dimension( Integer.MAX_VALUE, 32 ) );
+		button.setAlignmentX( Component.LEFT_ALIGNMENT );
+		button.addActionListener( event -> showPage( page ) );
+		navigationButtons.put( page, button );
+		return button;
 	}
 
 	private void updateMetrics()
@@ -1491,25 +1532,6 @@ public final class MinecraftDashboard extends JPanel
 
 	private List<ServerEntry> renderedServerEntries = null;
 
-	/** Ruta (o repo) del server cuyo DETALLE se esta viendo; null = tablero completo. */
-	private String detailServerPath = null;
-
-	/** Abre la pagina de detalle de un server del tablero. Solo desde el EDT. */
-	void showServerDetail( String serverPath )
-	{
-		detailServerPath = serverPath;
-		renderedServerEntries = null;
-		updateServers();
-	}
-
-	/** Vuelve del detalle al tablero multi-server. Solo desde el EDT. */
-	void showServerBoard()
-	{
-		detailServerPath = null;
-		renderedServerEntries = null;
-		updateServers();
-	}
-
 	private void updateServers()
 	{
 		List<ServerEntry> incoming = state.recentServers();
@@ -1520,23 +1542,7 @@ public final class MinecraftDashboard extends JPanel
 		renderedServerEntries = new ArrayList<>( incoming );
 		serversList.removeAll();
 		List<ServerEntry> entries = new ArrayList<>( state.recentServers() );
-		ServerEntry detailEntry = null;
-		if( detailServerPath != null )
-		{
-			for( ServerEntry candidate : entries )
-			{
-				if( detailServerPath.equals( candidate.path() ) )
-					detailEntry = candidate;
-			}
-			// El server pudo desaparecer de la lista: se vuelve al tablero
-			if( detailEntry == null )
-				detailServerPath = null;
-		}
-		if( detailEntry != null )
-		{
-			serversList.add( serverDetailPanel( detailEntry ) );
-		}
-		else if( entries.isEmpty() )
+		if( entries.isEmpty() )
 		{
 			JPanel empty = sectionPanel();
 			empty.setLayout( new BoxLayout( empty, BoxLayout.Y_AXIS ) );
@@ -1915,19 +1921,26 @@ public final class MinecraftDashboard extends JPanel
 		}
 		row.add( copy, BorderLayout.CENTER );
 
-		// La fila entera abre la pagina de detalle del server
-		row.setCursor( Cursor.getPredefinedCursor( Cursor.HAND_CURSOR ) );
-		row.setToolTipText( "View server details" );
-		MouseAdapter openDetail = new MouseAdapter()
+		// La fila entera ENTRA al workspace del server: sus paginas dedicadas
+		// (Overview, Backups, Network, Console, Settings) aparecen en el sidebar
+		if( !entry.remoteOnly() )
 		{
-			@Override
-			public void mouseClicked( MouseEvent event )
+			row.setCursor( Cursor.getPredefinedCursor( Cursor.HAND_CURSOR ) );
+			row.setToolTipText( "Enter this server's workspace" );
+			MouseAdapter enterWorkspace = new MouseAdapter()
 			{
-				showServerDetail( entry.path() );
-			}
-		};
-		row.addMouseListener( openDetail );
-		copy.addMouseListener( openDetail );
+				@Override
+				public void mouseClicked( MouseEvent event )
+				{
+					if( entry.selected() )
+						showPage( Page.OVERVIEW );
+					else
+						actions.selectServer( entry.path() );
+				}
+			};
+			row.addMouseListener( enterWorkspace );
+			copy.addMouseListener( enterWorkspace );
+		}
 
 		JPanel rowActions = new JPanel();
 		rowActions.setOpaque( false );
@@ -1958,70 +1971,6 @@ public final class MinecraftDashboard extends JPanel
 		}
 		row.add( rowActions, BorderLayout.EAST );
 		return row;
-	}
-
-	/**
-	 * Pagina de detalle de UN server del tablero: estado del mundo, direccion de
-	 * conexion a la vista y las acciones (JOIN/PLAY, COPY IP, OPEN). Se llega
-	 * clicando su fila y se vuelve con BACK.
-	 */
-	private JPanel serverDetailPanel( ServerEntry entry )
-	{
-		JPanel panel = sectionPanel();
-		panel.setLayout( new BoxLayout( panel, BoxLayout.Y_AXIS ) );
-		panel.setAlignmentX( Component.LEFT_ALIGNMENT );
-
-		JButton back = actionButton( "< ALL SERVERS", DashboardTheme.ButtonKind.QUIET, this::showServerBoard );
-		back.setAlignmentX( Component.LEFT_ALIGNMENT );
-		panel.add( back );
-		panel.add( Box.createVerticalStrut( 14 ) );
-
-		panel.add( DashboardTheme.label( entry.name(), TEXT, 18, Font.BOLD ) );
-		panel.add( Box.createVerticalStrut( 4 ) );
-		panel.add( DashboardTheme.label( entry.detail() + "  ·  " + entry.path(), TEXT_MUTED, 10, Font.PLAIN ) );
-
-		panel.add( Box.createVerticalStrut( 16 ) );
-		panel.add( DashboardTheme.eyebrow( "WORLD STATUS" ) );
-		panel.add( Box.createVerticalStrut( 5 ) );
-		String status = entry.worldStatus() != null ? entry.worldStatus() : "CHECKING…";
-		boolean live = status.startsWith( "LIVE" );
-		panel.add( DashboardTheme.label( status, live ? GREEN : TEXT_MUTED, 12, Font.PLAIN ) );
-
-		panel.add( Box.createVerticalStrut( 16 ) );
-		panel.add( DashboardTheme.eyebrow( "CONNECT ADDRESS" ) );
-		panel.add( Box.createVerticalStrut( 5 ) );
-		boolean hasAddress = entry.connectAddress() != null && !entry.connectAddress().isBlank();
-		panel.add( hasAddress
-				? DashboardTheme.label( entry.connectAddress(), CYAN, 14, Font.BOLD )
-				: DashboardTheme.label( "Nobody is hosting this world right now.", TEXT_MUTED, 11, Font.PLAIN ) );
-
-		panel.add( Box.createVerticalStrut( 16 ) );
-		JPanel actionsRow = new JPanel();
-		actionsRow.setOpaque( false );
-		actionsRow.setLayout( new BoxLayout( actionsRow, BoxLayout.X_AXIS ) );
-		actionsRow.setAlignmentX( Component.LEFT_ALIGNMENT );
-		if( hasAddress )
-		{
-			boolean joinable = live && !status.contains( "you are hosting" );
-			actionsRow.add( actionButton( joinable ? "JOIN" : "PLAY", DashboardTheme.ButtonKind.PRIMARY,
-					() -> actions.playWorld( entry ) ) );
-			actionsRow.add( Box.createHorizontalStrut( 8 ) );
-			actionsRow.add( actionButton( "COPY IP", DashboardTheme.ButtonKind.SECONDARY,
-					() -> copyToClipboard( entry.connectAddress() ) ) );
-			actionsRow.add( Box.createHorizontalStrut( 8 ) );
-		}
-		if( !entry.remoteOnly() )
-		{
-			JButton open = actionButton( entry.selected() ? "CURRENT" : "OPEN",
-					entry.selected() ? DashboardTheme.ButtonKind.QUIET : DashboardTheme.ButtonKind.SECONDARY,
-					() -> actions.selectServer( entry.path() ) );
-			open.setEnabled( !entry.selected() );
-			actionsRow.add( open );
-		}
-		panel.add( actionsRow );
-
-		panel.setMaximumSize( new Dimension( Integer.MAX_VALUE, panel.getPreferredSize().height + 24 ) );
-		return panel;
 	}
 
 	/**
