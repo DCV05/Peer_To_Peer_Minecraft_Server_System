@@ -179,6 +179,42 @@ public final class MainFrame
 		initialize();
 		configurePlayerPolling();
 		installShutdownCleanup();
+		startWorldStatusScanner();
+	}
+
+	// ---- Escaner de mundos suscritos ---------------------------------------
+
+	private app.WorldStatusScanner worldStatusScanner;
+
+	/**
+	 * Arranca el escaner que vigila el candado de todos los mundos suscritos.
+	 * El listener guarda la foto; la interfaz la consume cuando repinta (las
+	 * tarjetas de mundos llegan en la fase de UI del plan).
+	 */
+	private void startWorldStatusScanner()
+	{
+		worldStatusScanner = new app.WorldStatusScanner(
+				() -> app.WorldSubscriptions.all( quietNickname() ),
+				jgit.HostLock::readStatus,
+				status ->
+				{
+				} );
+		worldStatusScanner.start();
+	}
+
+	/** Nickname de la sesion abierta o null, sin dialogos: apto para hilos de fondo. */
+	private static String quietNickname()
+	{
+		String result = null;
+		try
+		{
+			result = TokenStore.getSavedUserData().get( "nickname" );
+		}
+		catch( Exception noSession )
+		{
+			// Sin sesion no hay mundos que vigilar: el escaner queda en vacio
+		}
+		return result;
 	}
 
 	/**
@@ -1434,6 +1470,10 @@ public final class MainFrame
 					syncState = "UP TO DATE";
 					lastSync = setup.alreadyLinked() ? "PUSH CONFIRMED" : "INITIAL PUSH";
 					appendDashboardActivity( setup.message() );
+					// Todo mundo que este usuario hostea queda suscrito: el escaner lo
+					// vigilara aunque manana lo hostee otro peer
+					app.WorldSubscriptions.subscribe( quietNickname(),
+							GitUtils.remoteRepoFullName( serverOpenedDirectory.toPath() ) );
 					// Server recién vinculado: el repo no existía al comprobar el lock arriba
 					if( activeHostLockRepo == null
 							&& !acquireHostLockForStart( GitUtils.remoteRepoFullName( serverOpenedDirectory.toPath() ) ) )
@@ -1499,6 +1539,11 @@ public final class MainFrame
 		}
 		if( !serverIsOn )
 			setDashboardPhase( Phase.DISCOVERING, "Scanning the P2P network for an active host" );
+		// SCAN manual = quiero datos frescos YA: se invalida tambien la foto del
+		// escaner de mundos suscritos y la cache del candado del mundo actual
+		lastHostLockCheckMillis = 0;
+		if( worldStatusScanner != null )
+			worldStatusScanner.refreshNow();
 		new Thread( this::checkServerStatus, "p2pmss-network-scan" ).start();
 	}
 

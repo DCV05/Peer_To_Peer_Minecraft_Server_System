@@ -562,6 +562,9 @@ public final class GitWindows
 				if( invitationAcceptedSuccessfully )
 				{
 					GitUtils.saveRepoJoined( fullNameRepo );
+					// La suscripcion absorbe los repos unidos, pero registrarla aqui
+					// evita esperar a la proxima migracion implicita
+					subscribeQuietly( fullNameRepo );
 					invitationContainer.add( new JLabel( "<html><span style='color: green;'>Accepted ✓</span></html>" ) );
 				}
 				else
@@ -677,5 +680,19 @@ public final class GitWindows
 		String base = System.getProperty( "p2pmss.githubApiBase", "https://api.github.com" );
 		boolean endsWithSlash = base.endsWith( "/" );
 		return endsWithSlash ? base.substring( 0, base.length() - 1 ) : base;
+	}
+
+	/** Suscribe el mundo sin dialogos: un fallo aqui no debe romper la aceptacion. */
+	private static void subscribeQuietly( String repoFullName )
+	{
+		try
+		{
+			app.WorldSubscriptions.subscribe( TokenStore.getSavedUserData().get( "nickname" ), repoFullName );
+		}
+		catch( Exception noSession )
+		{
+			// Sin sesion legible no hay a quien apuntar la suscripcion: la migracion
+			// implicita desde joined_repos la recuperara en el proximo arranque
+		}
 	}
 }
