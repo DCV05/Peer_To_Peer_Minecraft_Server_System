@@ -392,9 +392,46 @@ class MinecraftDashboardTest
 		assertTrue( rendered.contains( "LIVE · Vikkavv hosting · 2/4 · MC 1.19" ) );
 		assertTrue( rendered.contains( "COPY IP" ) );
 		assertTrue( rendered.contains( "FREE TO HOST" ) );
+		// La direccion se ve como texto en la propia fila del tablero
+		assertTrue( rendered.contains( "farm.ply.gg:123" ) );
 		// Solo el server local ofrece OPEN: el mundo remoto sin clonar no tiene
 		// carpeta que abrir, asi que de dos filas sale UN solo boton OPEN
 		assertEquals( 1, rendered.split( "\nOPEN\n", -1 ).length - 1 );
+	}
+
+	@Test
+	void serverDetailPageShowsAddressAndBackReturnsToTheBoard() throws Exception
+	{
+		AtomicReference<MinecraftDashboard> reference = new AtomicReference<>();
+		SwingUtilities.invokeAndWait( () -> reference.set( new MinecraftDashboard( new MinecraftDashboard.Actions()
+		{
+		} ) ) );
+		MinecraftDashboard dashboard = reference.get();
+
+		List<MinecraftDashboard.ServerEntry> servers = List.of(
+				new MinecraftDashboard.ServerEntry( "farmland", "/tmp/farm", "FABRIC READY", false,
+						"LIVE · Vikkavv hosting · 2/4 · MC 1.19", "farm.ply.gg:123", false ),
+				new MinecraftDashboard.ServerEntry( "otro_mundo", "DCV05/otro_mundo", "REMOTE WORLD", false,
+						"FREE TO HOST", null, true ) );
+		SwingUtilities.invokeAndWait( () -> dashboard.setState( stateWithServers( MinecraftDashboard.Phase.OFFLINE, servers ) ) );
+
+		SwingUtilities.invokeAndWait( () -> dashboard.showServerDetail( "/tmp/farm" ) );
+		String detail = renderedText( serversListChildren( dashboard ) );
+		assertTrue( detail.contains( "CONNECT ADDRESS" ) );
+		assertTrue( detail.contains( "farm.ply.gg:123" ) );
+		// Con otro peer hosteando el boton es JOIN, y el otro mundo no se ve
+		assertTrue( detail.contains( "JOIN" ) );
+		assertFalse( detail.contains( "otro_mundo" ) );
+
+		SwingUtilities.invokeAndWait( dashboard::showServerBoard );
+		String board = renderedText( serversListChildren( dashboard ) );
+		assertTrue( board.contains( "farmland" ) );
+		assertTrue( board.contains( "otro_mundo" ) );
+
+		// Un mundo sin nadie hosteando lo dice en claro en su detalle
+		SwingUtilities.invokeAndWait( () -> dashboard.showServerDetail( "DCV05/otro_mundo" ) );
+		String freeDetail = renderedText( serversListChildren( dashboard ) );
+		assertTrue( freeDetail.contains( "Nobody is hosting this world right now." ) );
 	}
 
 	@Test
