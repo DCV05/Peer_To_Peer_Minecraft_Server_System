@@ -763,6 +763,11 @@ public final class MainFrame
 				openKnownServer( path );
 			}
 			@Override
+			public void playWorld( MinecraftDashboard.ServerEntry entry )
+			{
+				launchGameForWorld( entry );
+			}
+			@Override
 			public void cloneInvitedServer()
 			{
 				if( !TokenStore.sessionIsOpened() )
@@ -1436,6 +1441,62 @@ public final class MainFrame
 	{
 		jgit.HostLock.HostDetails details = status.details();
 		return status.hosted() && details != null ? details.tunnelAddress() : null;
+	}
+
+	/**
+	 * PLAY de una tarjeta: prepara el perfil del launcher oficial con la version
+	 * del mundo, deja la direccion copiada en el portapapeles y abre el launcher.
+	 * De la cuenta se encarga el launcher: aqui no se toca ninguna credencial.
+	 */
+	private void launchGameForWorld( MinecraftDashboard.ServerEntry entry )
+	{
+		new Thread( () ->
+		{
+			String repo = entry.remoteOnly() ? entry.path() : repoFullNameForPath( entry.path() );
+			var status = repo == null || worldStatusScanner == null
+					? null
+					: worldStatusScanner.statusOf( repo ).orElse( null );
+			jgit.HostLock.HostDetails details = status == null ? null : status.details();
+			String address = details == null ? null : details.tunnelAddress();
+			String version = details == null ? null : details.minecraftVersion();
+			// Con copia local, la carpeta del server es mejor fuente de version que
+			// un lease que quiza la omitio
+			if( version == null && !entry.remoteOnly() )
+				version = ForgeUtils.getMinecraftVersion( Path.of( entry.path() ) );
+
+			boolean profileReady = app.MinecraftLauncher.upsertProfile(
+					app.MinecraftLauncher.defaultProfilesFile(), entry.name(), version );
+			if( address != null )
+				copyAddressToClipboard( address );
+			boolean launcherOpened = app.MinecraftLauncher.openLauncher();
+
+			String summary;
+			if( launcherOpened )
+			{
+				summary = "Launcher opened" + (profileReady ? " with profile MC " + version : "")
+						+ (address != null ? " — server address copied, paste it in Direct Connect" : "");
+			}
+			else
+			{
+				summary = address != null
+						? "Minecraft launcher not found — server address copied to the clipboard"
+						: "Minecraft launcher not found on this machine";
+			}
+			appendDashboardActivity( summary );
+		}, "p2pmss-play-world" ).start();
+	}
+
+	private static void copyAddressToClipboard( String address )
+	{
+		try
+		{
+			java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
+					.setContents( new java.awt.datatransfer.StringSelection( address ), null );
+		}
+		catch( Exception clipboardFailure )
+		{
+			// Sin portapapeles no se corta el flujo: la IP tambien esta en COPY IP
+		}
 	}
 
 	private void loadMostRecentServer()

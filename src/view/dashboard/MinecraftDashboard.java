@@ -228,6 +228,9 @@ public final class MinecraftDashboard extends JPanel
 		default void selectServer( String path )
 		{
 		}
+		default void playWorld( ServerEntry entry )
+		{
+		}
 		default void cloneInvitedServer()
 		{
 		}
@@ -1877,6 +1880,10 @@ public final class MinecraftDashboard extends JPanel
 		{
 			if( rowActions.getComponentCount() > 0 )
 				rowActions.add( Box.createVerticalStrut( 4 ) );
+			// PLAY prepara el launcher con la version del mundo y deja la IP copiada
+			rowActions.add( actionButton( "PLAY", DashboardTheme.ButtonKind.PRIMARY,
+					() -> actions.playWorld( entry ) ) );
+			rowActions.add( Box.createVerticalStrut( 4 ) );
 			// La direccion se copia, no se muestra entera: en la fila no cabe y
 			// el destino real es el boton de conectar del cliente de Minecraft
 			rowActions.add( actionButton( "COPY IP", DashboardTheme.ButtonKind.SECONDARY,
