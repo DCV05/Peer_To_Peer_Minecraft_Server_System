@@ -297,9 +297,14 @@ public final class MinecraftDashboard extends JPanel
 	private final Actions actions;
 	private final CardLayout pageLayout = new CardLayout();
 	private final JPanel pages = new JPanel( pageLayout );
-	private final CardLayout overviewLayout = new CardLayout();
-	private final JPanel overviewContainer = new JPanel( overviewLayout );
 	private final Map<Page, JButton> navigationButtons = new EnumMap<>( Page.class );
+
+	/**
+	 * Guia de bienvenida (crear server, abrir uno o unirse al de un amigo). Vive
+	 * en el tablero SERVERS: es lo que ve una persona nueva sin ningun server.
+	 * Instancia unica que serversList quita y pone segun haya servers o no.
+	 */
+	private JPanel onboardingPage;
 
 	/** Paginas dedicadas al server en el que se ha entrado, en orden de sidebar. */
 	private static final List<Page> SERVER_PAGES = List.of( Page.OVERVIEW, Page.BACKUPS, Page.NETWORK, Page.CONSOLE, Page.SETTINGS );
@@ -720,10 +725,9 @@ public final class MinecraftDashboard extends JPanel
 
 	private JPanel buildOverviewPage()
 	{
-		overviewContainer.setBackground( APP_BACKGROUND );
-		overviewContainer.add( buildOnboardingPage(), "onboarding" );
-		overviewContainer.add( buildOperationalOverviewPage(), "operational" );
-		return overviewContainer;
+		// El onboarding ya no vive aqui: sin server no hay pagina Overview en el
+		// sidebar, asi que la guia de bienvenida se muestra en el tablero SERVERS
+		return buildOperationalOverviewPage();
 	}
 
 	private JPanel buildOperationalOverviewPage()
@@ -1556,17 +1560,12 @@ public final class MinecraftDashboard extends JPanel
 		List<ServerEntry> entries = new ArrayList<>( state.recentServers() );
 		if( entries.isEmpty() )
 		{
-			JPanel empty = sectionPanel();
-			empty.setLayout( new BoxLayout( empty, BoxLayout.Y_AXIS ) );
-			empty.add( DashboardTheme.eyebrow( "NO SERVERS YET" ) );
-			empty.add( Box.createVerticalStrut( 10 ) );
-			empty.add( DashboardTheme.label( "Create a Forge server or open an existing server folder.", TEXT, 13, Font.PLAIN ) );
-			empty.add( Box.createVerticalStrut( 5 ) );
-			empty.add(
-					DashboardTheme.label( "Known servers will appear here with their local and sync state.", TEXT_MUTED, 11, Font.PLAIN ) );
-			empty.setMaximumSize( new Dimension( Integer.MAX_VALUE, 115 ) );
-			empty.setAlignmentX( Component.LEFT_ALIGNMENT );
-			serversList.add( empty );
+			// Persona nueva sin servers: la guia completa de bienvenida ocupa el
+			// tablero — conectar GitHub, crear/abrir un server o unirse a uno
+			if( onboardingPage == null )
+				onboardingPage = buildOnboardingPage();
+			onboardingPage.setAlignmentX( Component.LEFT_ALIGNMENT );
+			serversList.add( onboardingPage );
 		}
 		else
 		{
@@ -1690,7 +1689,6 @@ public final class MinecraftDashboard extends JPanel
 			settingsStatus.setForeground( TEXT_MUTED );
 		}
 
-		overviewLayout.show( overviewContainer, loaded ? "operational" : "onboarding" );
 		onboardingJavaValue.setText( "JAVA " + Runtime.version().feature() );
 		onboardingJavaValue.setForeground( Runtime.version().feature() >= 21 ? GREEN : RED );
 		onboardingGitHubValue.setText( state.githubAuthenticated() ? state.githubAccount().toUpperCase( Locale.ROOT ) : "NOT CONNECTED" );

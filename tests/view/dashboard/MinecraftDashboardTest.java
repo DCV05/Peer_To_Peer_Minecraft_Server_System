@@ -422,6 +422,30 @@ class MinecraftDashboardTest
 		assertEquals( "MINECRAFT-FRIENDS", dashboard.serverNavHeaderText() );
 	}
 
+	@Test
+	void onboardingGuideFillsTheBoardWhenThereAreNoServers() throws Exception
+	{
+		AtomicReference<MinecraftDashboard> reference = new AtomicReference<>();
+		SwingUtilities.invokeAndWait( () -> reference.set( new MinecraftDashboard( new MinecraftDashboard.Actions()
+		{
+		} ) ) );
+		MinecraftDashboard dashboard = reference.get();
+
+		SwingUtilities.invokeAndWait( () -> dashboard.setState( stateWithoutServer() ) );
+		String rendered = renderedText( serversListChildren( dashboard ) );
+		assertTrue( rendered.contains( "WELCOME TO ENDERSHARE" ) );
+		assertTrue( rendered.contains( "CREATE FORGE SERVER" ) );
+		assertTrue( rendered.contains( "02 / JOIN A SHARED WORLD" ) );
+
+		// Con servers en la lista, la guia desaparece y salen las filas
+		List<MinecraftDashboard.ServerEntry> servers = List.of(
+				new MinecraftDashboard.ServerEntry( "farmland", "/tmp/farm", "FABRIC READY", false ) );
+		SwingUtilities.invokeAndWait( () -> dashboard.setState( stateWithServers( MinecraftDashboard.Phase.OFFLINE, servers ) ) );
+		String board = renderedText( serversListChildren( dashboard ) );
+		assertTrue( board.contains( "farmland" ) );
+		assertFalse( board.contains( "WELCOME TO ENDERSHARE" ) );
+	}
+
 	private static MinecraftDashboard.State stateWithoutServer()
 	{
 		return new MinecraftDashboard.State( false, MinecraftDashboard.Phase.NO_SERVER, "Open or create a server", null,
