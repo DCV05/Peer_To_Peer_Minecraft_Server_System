@@ -1,0 +1,29 @@
+# Ensayo manual del ciclo del candado contra la API REAL de GitHub, sobre un
+# repo desechable. Requiere los secrets E2E_WORLD_REPO (owner/repo),
+# E2E_WORLD_NICK y E2E_WORLD_TOKEN (PAT con scope repo del repo desechable).
+name: E2E real GitHub
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-real:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Ciclo del candado contra GitHub real
+        env:
+          P2PMSS_E2E_REPO: ${{ secrets.E2E_WORLD_REPO }}
+          P2PMSS_E2E_NICK: ${{ secrets.E2E_WORLD_NICK }}
+          P2PMSS_E2E_TOKEN: ${{ secrets.E2E_WORLD_TOKEN }}
+        run: xvfb-run -a mvn -B test -Dtest=RealGitHubE2ETest -Dp2pmss.excludedTestGroups= -Dp2pmss.testGroups=e2e-real

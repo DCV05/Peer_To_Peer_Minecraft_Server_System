@@ -103,10 +103,10 @@ public final class WorldStatusScanner
 
 	/**
 	 * Refresca COMO MUCHO un mundo por llamada: el mas caducado de los que ya
-	 * superaron el intervalo. Visible para que los tests avancen el escaner a
-	 * mano sin depender de temporizadores reales.
+	 * superaron el intervalo. Publico para que los tests (tambien los E2E de
+	 * otro paquete) avancen el escaner a mano sin temporizadores reales.
 	 */
-	void tick()
+	public void tick()
 	{
 		try
 		{

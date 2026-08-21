@@ -442,7 +442,7 @@ public final class ForgeUtils
 	}
 
 	/** True only for the real server-ready line, e.g. Done (1.614s)! — chat containing "Done" must not match. */
-	static boolean isServerReadyLine( String line )
+	public static boolean isServerReadyLine( String line )
 	{
 		return line != null && line.matches( ".*\\bDone \\(.*\\)!.*" );
 	}

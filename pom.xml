@@ -8,12 +8,32 @@
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     <!-- Repo de GitHub cuyas releases consulta el update checker; cada fork pone el suyo al compilar -->
     <p2pmss.releasesRepo>DCV05/Peer_To_Peer_Minecraft_Server_System</p2pmss.releasesRepo>
+    <!-- Los E2E con server de Minecraft REAL (tag e2e-mc) no corren en el mvn test
+         rapido: se activan con el perfil e2e-mc (job propio del CI) -->
+    <p2pmss.excludedTestGroups>e2e-mc,e2e-real</p2pmss.excludedTestGroups>
+    <p2pmss.testGroups></p2pmss.testGroups>
   </properties>
+  <repositories>
+    <repository>
+      <!-- MCProtocolLib (bot de jugador para los tests E2E) se publica aqui -->
+      <id>opencollab</id>
+      <url>https://repo.opencollab.dev/main/</url>
+    </repository>
+  </repositories>
   <dependencies>
 	<dependency>
 	  <groupId>org.junit.jupiter</groupId>
 	  <artifactId>junit-jupiter</artifactId>
 	  <version>5.10.3</version>
+	  <scope>test</scope>
+	</dependency>
+	<dependency>
+	  <!-- Jugador-bot de los tests E2E: entra a un server real por protocolo.
+	       La version esta pineada al protocolo de Minecraft 1.21.7, que es la
+	       version que instala MinecraftServerE2ETest -->
+	  <groupId>org.geysermc.mcprotocollib</groupId>
+	  <artifactId>protocol</artifactId>
+	  <version>1.21.7-1</version>
 	  <scope>test</scope>
 	</dependency>
 	<dependency>
@@ -79,6 +99,15 @@
   	</resources>
     <plugins>
       <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+        <configuration>
+          <excludedGroups>${p2pmss.excludedTestGroups}</excludedGroups>
+          <groups>${p2pmss.testGroups}</groups>
+        </configuration>
+      </plugin>
+      <plugin>
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.13.0</version>
         <configuration>
@@ -134,4 +163,14 @@
       </plugin>
     </plugins>
   </build>
+  <profiles>
+    <profile>
+      <!-- mvn -Pe2e-mc test: SOLO los E2E con server de Minecraft real -->
+      <id>e2e-mc</id>
+      <properties>
+        <p2pmss.excludedTestGroups></p2pmss.excludedTestGroups>
+        <p2pmss.testGroups>e2e-mc</p2pmss.testGroups>
+      </properties>
+    </profile>
+  </profiles>
 </project>
