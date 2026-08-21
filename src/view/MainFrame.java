@@ -187,19 +187,32 @@ public final class MainFrame
 	private app.WorldStatusScanner worldStatusScanner;
 
 	/**
-	 * Arranca el escaner que vigila el candado de todos los mundos suscritos.
-	 * El listener guarda la foto; la interfaz la consume cuando repinta (las
-	 * tarjetas de mundos llegan en la fase de UI del plan).
+	 * Arranca el escaner que vigila el candado de todos los mundos del tablero:
+	 * los suscritos y los de los servers locales recientes. El listener guarda
+	 * la foto; la interfaz la consume cuando repinta.
 	 */
 	private void startWorldStatusScanner()
 	{
 		worldStatusScanner = new app.WorldStatusScanner(
-				() -> app.WorldSubscriptions.all( quietNickname() ),
+				this::watchedWorldRepos,
 				jgit.HostLock::readStatus,
 				// Cada foto nueva repinta las tarjetas de mundos; el skip-if-equal del
 				// dashboard descarta los refrescos sin cambios reales
 				status -> SwingUtilities.invokeLater( this::refreshDashboardState ) );
 		worldStatusScanner.start();
+	}
+
+	/** Todos los repos que el tablero multi-server vigila: suscritos + servers locales recientes. */
+	private java.util.List<String> watchedWorldRepos()
+	{
+		java.util.LinkedHashSet<String> repos = new java.util.LinkedHashSet<>( app.WorldSubscriptions.all( quietNickname() ) );
+		for( MinecraftDashboard.ServerEntry entry : readRecentServers() )
+		{
+			String repo = repoFullNameForPath( entry.path() );
+			if( repo != null )
+				repos.add( repo );
+		}
+		return new java.util.ArrayList<>( repos );
 	}
 
 	/** Nickname de la sesion abierta o null, sin dialogos: apto para hilos de fondo. */
@@ -2791,8 +2804,15 @@ public final class MainFrame
 					? null
 					: PlayitAgentFile.load( serverOpenedDirectory.toPath() );
 			PlayerPresenceTracker.Snapshot presence = playerPresence.snapshot();
+			// El tunel de playit manda; sin tunel se publica la IP publica del host
+			// con el puerto del server, que es lo que un peer pega en Minecraft.
+			// Quien elige el camino de la IP abre el puerto en su router el mismo
+			String tunnel = agent != null && agent.enabled ? agent.tunnel_address : null;
+			String address = app.PublicAddress.chooseAddress( tunnel,
+					tunnel == null || tunnel.isBlank() ? app.PublicAddress.resolvePublicIp() : null,
+					actualServerPort );
 			HostLock.publishDetails( new HostLock.HostDetails(
-					agent != null && agent.enabled ? agent.tunnel_address : null,
+					address,
 					presence.onlineCount(),
 					presence.maxPlayers(),
 					serverOpenedDirectory == null

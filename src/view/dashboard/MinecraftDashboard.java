@@ -70,7 +70,9 @@ public final class MinecraftDashboard extends JPanel
 
 	public enum Page
 	{
-		OVERVIEW("Overview"), SERVERS("Servers"), BACKUPS("Backups"), NETWORK("Network"), CONSOLE("Console"), SETTINGS("Settings");
+		// SERVERS va primero: el tablero multi-server es la pagina principal y
+		// OVERVIEW es el detalle del server que se tiene abierto
+		SERVERS("Servers"), OVERVIEW("Overview"), BACKUPS("Backups"), NETWORK("Network"), CONSOLE("Console"), SETTINGS("Settings");
 
 		private final String title;
 
@@ -354,7 +356,7 @@ public final class MinecraftDashboard extends JPanel
 	private final List<JButton> importWorldButtons = new ArrayList<>();
 	private final List<JButton> pullWorldButtons = new ArrayList<>();
 
-	private Page activePage = Page.OVERVIEW;
+	private Page activePage = Page.SERVERS;
 	private State state = State.empty( List.of() );
 	private Instant serverStartedAt;
 	/** Hay ediciones sin guardar: mientras este activo, ningun refresco pisa lo que el usuario escribio. */
@@ -377,7 +379,7 @@ public final class MinecraftDashboard extends JPanel
 		configureActions();
 		configureSettingsEditor();
 		configureUptimeClock();
-		showPage( Page.OVERVIEW );
+		showPage( Page.SERVERS );
 		setState( state );
 	}
 
@@ -1884,8 +1886,11 @@ public final class MinecraftDashboard extends JPanel
 		{
 			if( rowActions.getComponentCount() > 0 )
 				rowActions.add( Box.createVerticalStrut( 4 ) );
-			// PLAY prepara el launcher con la version del mundo y deja la IP copiada
-			rowActions.add( actionButton( "PLAY", DashboardTheme.ButtonKind.PRIMARY,
+			// El boton prepara el launcher con la version del mundo y deja la IP
+			// copiada. Con otro peer hosteando se llama JOIN: entrar a su partida
+			boolean joinable = entry.worldStatus() != null && entry.worldStatus().startsWith( "LIVE" )
+					&& !entry.worldStatus().contains( "you are hosting" );
+			rowActions.add( actionButton( joinable ? "JOIN" : "PLAY", DashboardTheme.ButtonKind.PRIMARY,
 					() -> actions.playWorld( entry ) ) );
 			rowActions.add( Box.createVerticalStrut( 4 ) );
 			// La direccion se copia, no se muestra entera: en la fila no cabe y
