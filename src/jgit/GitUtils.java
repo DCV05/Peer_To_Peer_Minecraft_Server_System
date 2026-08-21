@@ -346,8 +346,47 @@ public final class GitUtils
 
 	static boolean protectMachineLocalFiles( Path repoDirectory )
 	{
-		return protectMachineLocalFile( repoDirectory, Path.of( "server.properties" ) )
+		boolean protectedFiles = protectMachineLocalFile( repoDirectory, Path.of( "server.properties" ) )
 				&& protectMachineLocalFile( repoDirectory, Path.of( "user_jvm_args.txt" ) );
+		hideTrackedRuntimeFiles( repoDirectory );
+		return protectedFiles;
+	}
+
+	/**
+	 * Ficheros de runtime (mapa de BlueMap, caches de Fabric...) que quedaron
+	 * TRACKEADOS de antes de excluirlos del backup: no se vuelven a subir, pero
+	 * cada render los deja modificados y el arbol nunca esta limpio — y con el
+	 * arbol sucio TODO rebase de recuperacion muere con UNCOMMITTED_CHANGES.
+	 * Marcarlos como skip-worktree los saca del radar de git sin borrar nada.
+	 *
+	 * @return cuantos ficheros se ocultaron en esta pasada
+	 */
+	static int hideTrackedRuntimeFiles( Path repoDirectory )
+	{
+		int hidden = 0;
+		try (Git git = Git.open( repoDirectory.toFile() ))
+		{
+			Status status = git.status().call();
+			Set<String> dirty = new LinkedHashSet<>();
+			dirty.addAll( status.getModified() );
+			dirty.addAll( status.getMissing() );
+			dirty.addAll( status.getChanged() );
+			for( String relative : dirty )
+			{
+				if( !GitBackupPreflight.isRuntimeOnly( Path.of( relative ) ) )
+					continue;
+				if( setSkipWorktree( repoDirectory, Path.of( relative ), true ) )
+					hidden++;
+			}
+			if( hidden > 0 )
+				app.Log.event( "GIT_BACKUP", "Ocultados " + hidden + " ficheros de runtime trackeados en " + repoDirectory );
+		}
+		catch( Exception hideFailure )
+		{
+			// Es una limpieza oportunista: si falla, el backup sigue su curso
+			app.Log.event( "GIT_BACKUP", "No se pudieron ocultar los ficheros de runtime en " + repoDirectory, hideFailure );
+		}
+		return hidden;
 	}
 
 	private static boolean protectMachineLocalFile( Path repoDirectory, Path relativePath )
@@ -1418,6 +1457,17 @@ public final class GitUtils
 
 				try
 				{
+					// Dos cosas ensucian el arbol justo antes del rebase y lo matan con
+					// UNCOMMITTED_CHANGES: ficheros de runtime trackeados de antaño (el
+					// mapa de BlueMap) y lo que el servidor escribe MIENTRAS se respalda.
+					// Los primeros se ocultan, los segundos se commitean: son mundo
+					hideTrackedRuntimeFiles( git.getRepository().getWorkTree().toPath() );
+					String pendingFailure = commitChangesWrittenDuringBackup( git );
+					if( pendingFailure != null )
+					{
+						result = new PushCheckResult( false, result.message() + " " + pendingFailure, true );
+						break;
+					}
 					git.fetch().setCredentialsProvider( credentials ).setTimeout( REMOTE_GIT_TIMEOUT_SECONDS ).call();
 					String branch = git.getRepository().getBranch();
 					// Rebase normal; solo los ficheros en CONFLICTO se resuelven a favor del
@@ -1440,8 +1490,7 @@ public final class GitUtils
 							app.Log.event( "GIT_BACKUP", "No se pudo abortar el rebase de recuperacion", unwindFailure );
 						}
 						result = new PushCheckResult( false,
-								result.message() + " Automatic rebase onto the new remote state failed (" + rebase.getStatus() + ").",
-								true );
+								result.message() + " " + explainRebaseFailure( rebase.getStatus() ), true );
 						break;
 					}
 				}
@@ -1457,6 +1506,70 @@ public final class GitUtils
 			}
 		} while( false );
 		return result;
+	}
+
+	/**
+	 * Traduce el fallo del rebase de recuperación a algo que se pueda leer sin
+	 * saber git, diciendo SIEMPRE que el mundo local sigue intacto y cual es el
+	 * siguiente paso. El estado tecnico se conserva entre parentesis para poder
+	 * depurar con una captura de pantalla.
+	 */
+	static String explainRebaseFailure( RebaseResult.Status status )
+	{
+		String plain = switch( status )
+		{
+			case UNCOMMITTED_CHANGES -> "Some files in the server folder kept changing and could not be saved before syncing."
+					+ " Your world is safe on this machine: stop the server if it is running and press PULL WORLD, then retry the backup.";
+			case CONFLICTS, STOPPED -> "Your world and the one on GitHub changed the same files."
+					+ " Your world is safe on this machine: press PULL WORLD to bring the confirmed world and retry the backup.";
+			case FAILED -> "The automatic sync with GitHub could not be completed."
+					+ " Your world is safe on this machine: press PULL WORLD and retry the backup.";
+			default -> "The automatic sync with GitHub did not finish. Your world is safe on this machine; press PULL WORLD and retry.";
+		};
+		return plain + " (" + status + ")";
+	}
+
+	/**
+	 * Recoge en un commit lo que el servidor escribió mientras corría el backup,
+	 * para que el rebase de recuperación no se encuentre el árbol sucio. Devuelve
+	 * null si todo fue bien (o no había nada), o el motivo por el que no se pudo.
+	 */
+	static String commitChangesWrittenDuringBackup( Git git ) throws GitAPIException
+	{
+		Status status = git.status().call();
+		if( status.isClean() )
+			return null;
+
+		// Un fichero gigante recien aparecido no se cuela por esta puerta: el
+		// backup normal lo rechaza antes de crear el repo y aqui tambien
+		Path workTree = git.getRepository().getWorkTree().toPath();
+		Set<String> pending = new LinkedHashSet<>();
+		pending.addAll( status.getModified() );
+		pending.addAll( status.getUntracked() );
+		pending.addAll( status.getChanged() );
+		for( String relative : pending )
+		{
+			try
+			{
+				Path file = workTree.resolve( relative );
+				if( Files.isRegularFile( file ) && Files.size( file ) > GitBackupPreflight.MAX_GITHUB_FILE_BYTES )
+					return "The world changed during the backup and " + relative + " is over 100 MiB, so it cannot be committed.";
+			}
+			catch( IOException sizeFailure )
+			{
+				// Si no se puede medir, se deja pasar: el push dira la ultima palabra
+			}
+		}
+
+		git.add().addFilepattern( "." ).call();
+		// El segundo add con update recoge los borrados, que el primero ignora
+		git.add().addFilepattern( "." ).setUpdate( true ).call();
+		if( !hasStagedChanges( git.status().call() ) )
+			return null;
+		git.commit()
+				.setMessage( "World backup follow-up: files written while the backup was running" )
+				.call();
+		return null;
 	}
 
 	/**

@@ -354,4 +354,70 @@ class GitUtilsIntegrationTest
 		// Con el arbol ya limpio el rescate no crea snapshot y sigue sin fallar
 		assertEquals( "", GitUtils.snapshotLocalChangesAndTakeRemote( hostB ) );
 	}
+
+	@Test
+	void keepsTheTreeCleanSoTheRecoveryRebaseCanRun() throws Exception
+	{
+		Path server = Files.createDirectories( temporaryDirectory.resolve( "runtime-server" ) );
+		Path renderTile = Files.createDirectories( server.resolve( "bluemap/web/maps/overworld" ) ).resolve( "tile.json" );
+		Files.writeString( renderTile, "render-v1" );
+		Files.writeString( server.resolve( "world.txt" ), "world-v1" );
+		try (Git git = Git.init().setDirectory( server.toFile() ).call())
+		{
+			// El mapa quedo trackeado ANTES de excluirlo del backup: es el caso real
+			// que dejaba el arbol sucio para siempre y mataba todo rebase
+			git.add().addFilepattern( "." ).call();
+			git.commit().setMessage( "initial" )
+					.setAuthor( "hoster", "hoster@example.test" )
+					.setCommitter( "hoster", "hoster@example.test" ).call();
+		}
+		Files.writeString( renderTile, "render-v2-tras-un-render" );
+		try (Git git = Git.open( server.toFile() ))
+		{
+			assertFalse( git.status().call().isClean() );
+		}
+
+		assertEquals( 1, GitUtils.hideTrackedRuntimeFiles( server ) );
+
+		try (Git git = Git.open( server.toFile() ))
+		{
+			// Arbol limpio SIN borrar nada: el render sigue en disco tal cual
+			assertTrue( git.status().call().isClean() );
+		}
+		assertEquals( "render-v2-tras-un-render", Files.readString( renderTile ) );
+	}
+
+	@Test
+	void commitsWhatTheServerWroteDuringTheBackupBeforeRebasing() throws Exception
+	{
+		Path server = Files.createDirectories( temporaryDirectory.resolve( "busy-server" ) );
+		Files.writeString( server.resolve( "world.txt" ), "world-v1" );
+		try (Git git = Git.init().setDirectory( server.toFile() ).call())
+		{
+			git.add().addFilepattern( "." ).call();
+			git.commit().setMessage( "initial" )
+					.setAuthor( "hoster", "hoster@example.test" )
+					.setCommitter( "hoster", "hoster@example.test" ).call();
+
+			// El servidor sigue jugando mientras se respalda: region nueva y cambio
+			Files.writeString( server.resolve( "world.txt" ), "world-v2" );
+			Files.writeString( server.resolve( "r.0.0.mca" ), "region-nueva" );
+
+			assertNull( GitUtils.commitChangesWrittenDuringBackup( git ) );
+			assertTrue( git.status().call().isClean() );
+			assertTrue( GitUtils.commitChangesWrittenDuringBackup( git ) == null );
+		}
+	}
+
+	@Test
+	void explainsTheRebaseFailureWithoutGitJargonAndSaysTheWorldIsSafe()
+	{
+		String uncommitted = GitUtils.explainRebaseFailure( org.eclipse.jgit.api.RebaseResult.Status.UNCOMMITTED_CHANGES );
+		assertTrue( uncommitted.contains( "Your world is safe on this machine" ) );
+		assertTrue( uncommitted.contains( "PULL WORLD" ) );
+		// El estado tecnico sobrevive para poder depurar con una captura
+		assertTrue( uncommitted.contains( "UNCOMMITTED_CHANGES" ) );
+		assertTrue( GitUtils.explainRebaseFailure( org.eclipse.jgit.api.RebaseResult.Status.CONFLICTS )
+				.contains( "changed the same files" ) );
+	}
 }
