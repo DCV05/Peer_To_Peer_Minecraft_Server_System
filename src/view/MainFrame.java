@@ -1537,9 +1537,12 @@ public final class MainFrame
 	}
 
 	/**
-	 * PLAY de una tarjeta: prepara el perfil del launcher oficial con la version
-	 * del mundo, deja la direccion copiada en el portapapeles y abre el launcher.
-	 * De la cuenta se encarga el launcher: aqui no se toca ninguna credencial.
+	 * JOIN/PLAY de una tarjeta, flujo completo sin mods: el server queda en la
+	 * lista Multiplayer (servers.dat), se elige version mirando lo que el
+	 * jugador ya tiene instalado, y con Quick Play (1.20+) el juego arranca YA
+	 * DENTRO del server. Si Minecraft esta abierto, se ofrece cerrarlo y entrar
+	 * directo — un cliente en marcha no se puede teledirigir sin mod. De la
+	 * cuenta se encarga el launcher: aqui no se toca ninguna credencial.
 	 */
 	private void launchGameForWorld( MinecraftDashboard.ServerEntry entry )
 	{
@@ -1556,18 +1559,96 @@ public final class MainFrame
 			// un lease que quiza la omitio
 			if( version == null && !entry.remoteOnly() )
 				version = ForgeUtils.getMinecraftVersion( Path.of( entry.path() ) );
-
-			boolean profileReady = app.MinecraftLauncher.upsertProfile(
-					app.MinecraftLauncher.defaultProfilesFile(), entry.name(), version );
 			if( address != null )
 				copyAddressToClipboard( address );
+
+			Path minecraftDirectory = app.MinecraftLauncher.defaultMinecraftDirectory();
+
+			// 1. Red de seguridad: pase lo que pase despues, el server queda en la
+			// lista de Multiplayer del juego con la direccion fresca
+			boolean listed = address != null && app.ServersDat.upsertServer(
+					minecraftDirectory.resolve( "servers.dat" ), "Endershare · " + entry.name(), address );
+			if( listed )
+				appendDashboardActivity( entry.name() + " added to the in-game Multiplayer list" );
+
+			// 2. Con el juego YA abierto no se puede entrar solo: se ofrece cerrar.
+			// El proceso del server hosteado por esta app queda excluido SIEMPRE
+			var runningClient = app.RunningMinecraftClient.find( hostedServerPids() );
+			if( runningClient.isPresent() )
+			{
+				String runningVersion = runningClient.get().versionId();
+				boolean sameVersion = version != null && runningVersion != null && runningVersion.contains( version );
+				String message = sameVersion
+						? "Minecraft is already open.\nThe server is now in your Multiplayer list.\n\nClose Minecraft and rejoin "
+								+ entry.name() + " directly?"
+						: "Minecraft is open with " + (runningVersion == null ? "another version" : runningVersion)
+								+ ", but " + entry.name() + " runs " + version + ".\n\nClose Minecraft and join with the right version?";
+				int choice = optionDialogOnEdt( "Minecraft is running", message,
+						new Object[]{"CLOSE & JOIN", "KEEP PLAYING"} );
+				if( choice != 0 )
+				{
+					appendDashboardActivity( "Join postponed: Minecraft stays open — the server is in your Multiplayer list" );
+					return;
+				}
+				if( !app.RunningMinecraftClient.close( runningClient.get().pid() ) )
+				{
+					appendDashboardActivity( "Minecraft could not be closed — join it from the Multiplayer list" );
+					return;
+				}
+				appendDashboardActivity( "Minecraft closed to rejoin with the right version" );
+			}
+
+			if( version == null )
+			{
+				// Sin version conocida no hay perfil fiable ni quick play: launcher
+				// abierto y direccion copiada, como el flujo clasico
+				boolean opened = app.MinecraftLauncher.openLauncher();
+				appendDashboardActivity( opened
+						? "Launcher opened — world version unknown, pick it manually (address copied)"
+						: "Minecraft launcher not found on this machine" );
+				return;
+			}
+
+			// 3. Version de juego: vanilla exacta por defecto; si el jugador tiene
+			// instaladas variantes compatibles (su Fabric, OptiFine...) se le
+			// ofrecen UNA vez y la eleccion se recuerda por mundo
+			String baseVersion = version;
+			java.util.List<String> candidates = app.MinecraftLauncher.installedVersionCandidates( minecraftDirectory, version );
+			String remembered = repo == null ? null : app.MinecraftLauncher.rememberedJoinVersion( repo );
+			if( remembered != null && candidates.contains( remembered ) )
+			{
+				baseVersion = remembered;
+			}
+			else if( candidates.size() > 1 )
+			{
+				String chosen = versionDialogOnEdt( entry.name(), version, candidates );
+				if( chosen == null )
+				{
+					appendDashboardActivity( "Join cancelled" );
+					return;
+				}
+				baseVersion = chosen;
+				if( repo != null )
+					app.MinecraftLauncher.rememberJoinVersion( repo, chosen );
+			}
+
+			// 4. Quick play: version heredada con --quickPlayMultiplayer para que
+			// el juego arranque dentro del server; sin direccion (mundo libre) el
+			// perfil apunta a la version elegida a secas
+			boolean quickPlay = address != null
+					&& app.MinecraftLauncher.writeQuickPlayVersion( minecraftDirectory, baseVersion, address );
+			String profileVersion = quickPlay ? app.MinecraftLauncher.QUICK_PLAY_VERSION_ID : baseVersion;
+			boolean profileReady = app.MinecraftLauncher.upsertProfile(
+					app.MinecraftLauncher.defaultProfilesFile(), entry.name(), profileVersion );
 			boolean launcherOpened = app.MinecraftLauncher.openLauncher();
 
 			String summary;
 			if( launcherOpened )
 			{
-				summary = "Launcher opened" + (profileReady ? " with profile MC " + version : "")
-						+ (address != null ? " — server address copied, paste it in Direct Connect" : "");
+				summary = quickPlay
+						? "Launcher opened — press PLAY and you will spawn inside " + entry.name()
+						: "Launcher opened" + (profileReady ? " with profile MC " + baseVersion : "")
+								+ (listed ? " — the server is in your Multiplayer list" : "");
 			}
 			else
 			{
@@ -1577,6 +1658,55 @@ public final class MainFrame
 			}
 			appendDashboardActivity( summary );
 		}, "p2pmss-play-world" ).start();
+	}
+
+	/** PIDs que el detector de cliente debe ignorar: esta app y su server hosteado. */
+	private static java.util.List<Long> hostedServerPids()
+	{
+		java.util.List<Long> excluded = new java.util.ArrayList<>();
+		excluded.add( ProcessHandle.current().pid() );
+		Process hosted = serverProcess;
+		if( hosted != null && hosted.isAlive() )
+		{
+			excluded.add( hosted.pid() );
+			hosted.toHandle().descendants().forEach( child -> excluded.add( child.pid() ) );
+		}
+		return excluded;
+	}
+
+	/** Corre fuera del EDT: opcion elegida (indice) o CLOSED_OPTION. */
+	private int optionDialogOnEdt( String title, String message, Object[] options )
+	{
+		final int[] selection = {JOptionPane.CLOSED_OPTION};
+		try
+		{
+			SwingUtilities.invokeAndWait( () -> selection[0] = JOptionPane.showOptionDialog( frame, message, title,
+					JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0] ) );
+		}
+		catch( Exception dialogFailure )
+		{
+			// Sin dialogo (headless o EDT roto) se responde "no": el camino seguro
+		}
+		return selection[0];
+	}
+
+	/** Corre fuera del EDT: version elegida para entrar, o null si cancela. */
+	private String versionDialogOnEdt( String worldName, String minecraftVersion, java.util.List<String> candidates )
+	{
+		final Object[] chosen = {null};
+		try
+		{
+			SwingUtilities.invokeAndWait( () -> chosen[0] = JOptionPane.showInputDialog( frame,
+					"Join " + worldName + " (Minecraft " + minecraftVersion + ") with:",
+					"Choose game version", JOptionPane.QUESTION_MESSAGE, null,
+					candidates.toArray(), candidates.get( 0 ) ) );
+		}
+		catch( Exception dialogFailure )
+		{
+			// Sin dialogo, la vanilla exacta es siempre una eleccion valida
+			chosen[0] = minecraftVersion;
+		}
+		return (String) chosen[0];
 	}
 
 	private static void copyAddressToClipboard( String address )

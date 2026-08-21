@@ -86,6 +86,12 @@ public final class MinecraftLauncher
 	/** Ruta estandar de launcher_profiles.json en este sistema, exista o no. */
 	public static Path defaultProfilesFile()
 	{
+		return defaultMinecraftDirectory().resolve( "launcher_profiles.json" );
+	}
+
+	/** Carpeta .minecraft del CLIENTE en este sistema (no la del server). */
+	public static Path defaultMinecraftDirectory()
+	{
 		String os = System.getProperty( "os.name", "" ).toLowerCase( Locale.ROOT );
 		String home = System.getProperty( "user.home", "." );
 		Path minecraftDirectory;
@@ -98,7 +104,124 @@ public final class MinecraftLauncher
 		}
 		else
 			minecraftDirectory = Path.of( home, ".minecraft" );
-		return minecraftDirectory.resolve( "launcher_profiles.json" );
+		return minecraftDirectory;
+	}
+
+	// ---- FASE 3 — Version para el JOIN: candidatas, eleccion y quick play ---
+
+	public static final String QUICK_PLAY_VERSION_ID = "endershare-join";
+	private static final String JOIN_CHOICES_FILE = "join_choices.properties";
+
+	/**
+	 * Versiones con las que se puede entrar a un mundo de {@code minecraftVersion}:
+	 * SIEMPRE la vanilla exacta (el launcher la descarga solo si falta), y ademas
+	 * las instaladas en {@code versions/} cuyo id la contenga (el Fabric/OptiFine
+	 * del jugador, por si quiere sus mods de cliente o shaders).
+	 */
+	public static java.util.List<String> installedVersionCandidates( Path minecraftDirectory, String minecraftVersion )
+	{
+		java.util.LinkedHashSet<String> candidates = new java.util.LinkedHashSet<>();
+		candidates.add( minecraftVersion );
+		Path versions = minecraftDirectory.resolve( "versions" );
+		if( Files.isDirectory( versions ) )
+		{
+			try (var listing = Files.list( versions ))
+			{
+				listing.filter( Files::isDirectory )
+						.map( directory -> directory.getFileName().toString() )
+						.filter( id -> id.contains( minecraftVersion ) )
+						.filter( id -> !QUICK_PLAY_VERSION_ID.equals( id ) )
+						.sorted()
+						.forEach( candidates::add );
+			}
+			catch( IOException listFailure )
+			{
+				// Sin listado la vanilla basta: nunca es motivo para frenar el JOIN
+			}
+		}
+		return new java.util.ArrayList<>( candidates );
+	}
+
+	/**
+	 * Escribe la version {@code endershare-join}: hereda de la elegida y añade
+	 * {@code --quickPlayMultiplayer <direccion>}, el mecanismo OFICIAL (1.20+)
+	 * para que el juego arranque ya dentro del server, sin mods. Se reescribe en
+	 * cada JOIN porque la direccion del host puede cambiar.
+	 */
+	public static boolean writeQuickPlayVersion( Path minecraftDirectory, String baseVersionId, String address )
+	{
+		boolean result = false;
+		try
+		{
+			Path directory = minecraftDirectory.resolve( "versions" ).resolve( QUICK_PLAY_VERSION_ID );
+			Files.createDirectories( directory );
+			ObjectNode version = JSON_MAPPER.createObjectNode();
+			version.put( "id", QUICK_PLAY_VERSION_ID );
+			version.put( "inheritsFrom", baseVersionId );
+			version.put( "type", "release" );
+			version.put( "time", Instant.now().toString() );
+			version.put( "releaseTime", Instant.now().toString() );
+			version.putObject( "arguments" ).putArray( "game" )
+					.add( "--quickPlayMultiplayer" )
+					.add( address );
+			version.putArray( "libraries" );
+			Files.writeString( directory.resolve( QUICK_PLAY_VERSION_ID + ".json" ),
+					JSON_MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString( version ) );
+			result = true;
+		}
+		catch( IOException versionFailure )
+		{
+			Log.event( "MC_LAUNCHER", "No se pudo escribir la version quick-play", versionFailure );
+		}
+		return result;
+	}
+
+	/** Version elegida para un mundo en un JOIN anterior, o null. */
+	public static String rememberedJoinVersion( String repoFullName )
+	{
+		String result = null;
+		Path choices = AppPaths.dataFile( JOIN_CHOICES_FILE );
+		if( Files.isRegularFile( choices ) )
+		{
+			java.util.Properties properties = new java.util.Properties();
+			try (var input = Files.newInputStream( choices ))
+			{
+				properties.load( input );
+				result = properties.getProperty( repoFullName );
+			}
+			catch( IOException readFailure )
+			{
+				// Sin memoria de eleccion simplemente se vuelve a preguntar
+			}
+		}
+		return result;
+	}
+
+	/** Recuerda la version elegida para no volver a preguntar por este mundo. */
+	public static void rememberJoinVersion( String repoFullName, String versionId )
+	{
+		try
+		{
+			Path choices = AppPaths.dataFile( JOIN_CHOICES_FILE );
+			java.util.Properties properties = new java.util.Properties();
+			if( Files.isRegularFile( choices ) )
+			{
+				try (var input = Files.newInputStream( choices ))
+				{
+					properties.load( input );
+				}
+			}
+			properties.setProperty( repoFullName, versionId );
+			Files.createDirectories( choices.getParent() );
+			try (var output = Files.newOutputStream( choices ))
+			{
+				properties.store( output, "Endershare join version per world" );
+			}
+		}
+		catch( IOException writeFailure )
+		{
+			Log.event( "MC_LAUNCHER", "No se pudo guardar la eleccion de version", writeFailure );
+		}
 	}
 
 	// ---- FASE 2 — Apertura del launcher ------------------------------------
