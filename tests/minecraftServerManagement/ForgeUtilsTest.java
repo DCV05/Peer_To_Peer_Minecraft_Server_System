@@ -54,6 +54,20 @@ class ForgeUtilsTest
 	}
 
 	@Test
+	void recreatesTheJvmArgsFileOnlyWhenMissing() throws Exception
+	{
+		Path server = Files.createDirectories( temporaryDirectory.resolve( "args-server" ) );
+
+		ForgeUtils.ensureUserJvmArgsFile( server );
+		assertTrue( Files.readString( server.resolve( "user_jvm_args.txt" ) ).contains( "-Xmx4G" ) );
+
+		// Un fichero existente (la RAM elegida por esta maquina) jamas se pisa
+		Files.writeString( server.resolve( "user_jvm_args.txt" ), "-Xmx5G" );
+		ForgeUtils.ensureUserJvmArgsFile( server );
+		assertEquals( "-Xmx5G", Files.readString( server.resolve( "user_jvm_args.txt" ) ) );
+	}
+
+	@Test
 	void detectsTheMinecraftVersionFromTheVersionsDirectory() throws Exception
 	{
 		Path server = Files.createDirectories( temporaryDirectory.resolve( "versioned-server" ) );

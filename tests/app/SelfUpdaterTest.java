@@ -101,4 +101,30 @@ class SelfUpdaterTest
 		assertFalse( SelfUpdater.launchInstaller( null ) );
 		assertFalse( SelfUpdater.launchInstaller( temporaryDirectory.resolve( "no-existe.exe" ) ) );
 	}
+
+	@Test
+	void macInstallScriptReplacesTheAppAndFallsBackToOpeningTheDmg() throws Exception
+	{
+		System.setProperty( "p2pmss.dataDirectory", temporaryDirectory.toString() );
+		try
+		{
+			java.nio.file.Path dmg = temporaryDirectory.resolve( "P2PMSS-9.9.9.dmg" );
+			java.nio.file.Files.writeString( dmg, "not a real dmg" );
+
+			java.nio.file.Path script = SelfUpdater.writeMacInstallScript( dmg );
+			String content = java.nio.file.Files.readString( script );
+
+			// El contrato del script: montar el DMG concreto, copiar a Aplicaciones
+			// y, ante cualquier fallo, degradar a abrir el DMG para arrastrar a mano
+			assertTrue( content.contains( dmg.toAbsolutePath().toString() ) );
+			assertTrue( content.contains( "hdiutil attach" ) );
+			assertTrue( content.contains( "/Applications/" ) );
+			assertTrue( content.contains( "open \"$DMG\"" ) );
+			assertTrue( java.nio.file.Files.isExecutable( script ) );
+		}
+		finally
+		{
+			System.clearProperty( "p2pmss.dataDirectory" );
+		}
+	}
 }

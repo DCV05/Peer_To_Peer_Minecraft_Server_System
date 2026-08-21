@@ -397,6 +397,27 @@ class MinecraftDashboardTest
 		assertEquals( 1, rendered.split( "\nOPEN\n", -1 ).length - 1 );
 	}
 
+	@Test
+	void diagnosticsReportCarriesVersionStateAndRecentActivity() throws Exception
+	{
+		AtomicReference<MinecraftDashboard> reference = new AtomicReference<>();
+		SwingUtilities.invokeAndWait( () -> reference.set( new MinecraftDashboard( new MinecraftDashboard.Actions()
+		{
+		} ) ) );
+		MinecraftDashboard dashboard = reference.get();
+
+		SwingUtilities.invokeAndWait( () ->
+		{
+			dashboard.setState( stateWithServers( MinecraftDashboard.Phase.OFFLINE, List.of() ) );
+			dashboard.appendActivity( "Backup confirmed on GitHub" );
+		} );
+
+		String report = dashboard.diagnosticsReport();
+		assertTrue( report.contains( "P2PMSS" ) );
+		assertTrue( report.contains( "Phase: OFFLINE" ) );
+		assertTrue( report.contains( "Backup confirmed on GitHub" ) );
+	}
+
 	/** Aplana el texto visible (labels y botones) de un arbol de componentes. */
 	private static String renderedText( Component[] roots )
 	{

@@ -247,6 +247,9 @@ public final class GitBackupPreflight
 				|| first.startsWith( ".p2pmss-import-" )
 				|| ".DS_Store".equals( fileName )
 				|| "session.lock".equals( fileName )
+				// RAM por-maquina: cada peer tiene la suya y compartirla via backup
+				// fue la causa real de dos conflictos de rebase
+				|| "user_jvm_args.txt".equals( fileName )
 				|| portable.endsWith( ".tmp" );
 	}
 

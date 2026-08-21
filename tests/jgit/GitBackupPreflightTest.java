@@ -77,6 +77,20 @@ class GitBackupPreflightTest
 	}
 
 	@Test
+	void perMachineRamFileStaysOutOfTheBackup() throws Exception
+	{
+		Path world = Files.createDirectories( temporaryDirectory.resolve( "world" ) );
+		Files.writeString( world.resolve( "level.dat" ), "world data" );
+		// La RAM es por-maquina: compartirla via backup causo conflictos reales
+		Files.writeString( temporaryDirectory.resolve( "user_jvm_args.txt" ), "-Xmx5G" );
+
+		GitBackupPreflight.Result result = GitBackupPreflight.inspect( temporaryDirectory );
+
+		assertTrue( result.safe() );
+		assertEquals( 1, result.fileCount() );
+	}
+
+	@Test
 	void rejectsRepositoriesBeyondGithubRecommendedSizeWithoutOneOversizedFile()
 	{
 		List<GitBackupPreflight.FileEntry> files = new ArrayList<>();

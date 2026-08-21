@@ -3,6 +3,7 @@ package jgit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.RandomAccessFile;
@@ -123,7 +124,9 @@ class GitUtilsIntegrationTest
 		assertTrue( GitUtils.linkLocalRepoToExternal( remote.toUri().toString(), "unused", hostA ) );
 		assertTrue( GitUtils.hasRemoteOrigin( hostA ) );
 		assertTrue( GitUtils.setSkipWorktree( hostA, Path.of( "server.properties" ), true ) );
-		assertTrue( GitUtils.setSkipWorktree( hostA, Path.of( "user_jvm_args.txt" ), true ) );
+		// user_jvm_args.txt es por-maquina y desde el bloque de ignore gestionado ya
+		// NO entra en repos nuevos: sin entrada en el indice no hay flag que poner
+		assertFalse( GitUtils.setSkipWorktree( hostA, Path.of( "user_jvm_args.txt" ), true ) );
 		assertFalse( GitUtils.setSkipWorktree( hostA, temporaryDirectory.resolve( "outside.txt" ), true ) );
 
 		try (Git git = Git.open( hostA.toFile() ))
@@ -154,7 +157,8 @@ class GitUtilsIntegrationTest
 		try (Git git = Git.open( hostB.toFile() ))
 		{
 			assertTrue( git.getRepository().readDirCache().getEntry( "server.properties" ).isAssumeValid() );
-			assertTrue( git.getRepository().readDirCache().getEntry( "user_jvm_args.txt" ).isAssumeValid() );
+			// El fichero de RAM ya no viaja en el repo: en el clon ni siquiera existe
+			assertNull( git.getRepository().readDirCache().getEntry( "user_jvm_args.txt" ) );
 		}
 
 		Files.writeString( hostA.resolve( "world.txt" ), "world-v3\n" );

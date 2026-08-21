@@ -95,6 +95,8 @@ public final class GitUtils
 			"/.p2pmss-import-*/",
 			"/bluemap/",
 			"/.fabric/",
+			"# La RAM del server es por-maquina: compartirla solo genera conflictos.",
+			"/user_jvm_args.txt",
 			"**/session.lock",
 			"**/*.tmp",
 			"**/.DS_Store",

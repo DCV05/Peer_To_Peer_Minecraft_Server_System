@@ -362,6 +362,7 @@ public final class ForgeUtils
 		Process result = null;
 		try
 		{
+			ensureUserJvmArgsFile( serverDirectory );
 			List<String> command = buildStartupCommand( serverDirectory, isWindows() );
 			if( command != null )
 			{
@@ -630,6 +631,32 @@ public final class ForgeUtils
 	}
 
 	// ---- FASE 6 — Memoria y jar del servidor -------------------------------
+
+	/**
+	 * Garantiza que exista {@code user_jvm_args.txt}: los scripts de arranque de
+	 * Fabric/Forge lo referencian y un pull que lo haya quitado (paso a ser
+	 * fichero por-maquina, fuera del backup) no debe impedir arrancar. Nunca
+	 * pisa un fichero existente.
+	 */
+	public static void ensureUserJvmArgsFile( Path serverDirectory )
+	{
+		Path arguments = serverDirectory == null ? null : serverDirectory.resolve( "user_jvm_args.txt" );
+		if( arguments == null || Files.exists( arguments ) )
+			return;
+		try
+		{
+			Files.writeString( arguments, """
+					# JVM arguments for this machine only (not part of the shared backup).
+					# Set the maximum RAM for the server below.
+					-Xmx4G
+					""" );
+		}
+		catch( IOException writeFailure )
+		{
+			// Sin fichero, buildStartupCommand cae al default -Xmx4G igualmente
+			app.Log.event( "FORGE", "No se pudo recrear user_jvm_args.txt en " + serverDirectory, writeFailure );
+		}
+	}
 
 	/**
 	 * Version de Minecraft de un servidor instalado, o null si no se reconoce.

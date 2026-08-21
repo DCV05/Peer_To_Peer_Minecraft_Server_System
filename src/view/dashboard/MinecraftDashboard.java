@@ -1072,6 +1072,10 @@ public final class MinecraftDashboard extends JPanel
 		actionsPanel.add( actionButton( "OPEN MODS", DashboardTheme.ButtonKind.SECONDARY, actions::openModsFolder ) );
 		actionsPanel.add( actionButton( "OPEN FOLDER", DashboardTheme.ButtonKind.SECONDARY, actions::openServerFolder ) );
 		actionsPanel.add( actionButton( "GENERAL CONFIG", DashboardTheme.ButtonKind.QUIET, actions::openGeneralSettings ) );
+		// El informe junta version, estado y actividad reciente en el portapapeles:
+		// es lo que se pega por WhatsApp cuando algo falla, sin buscar logs a mano
+		actionsPanel.add( actionButton( "COPY REPORT", DashboardTheme.ButtonKind.QUIET,
+				() -> copyToClipboard( diagnosticsReport() ) ) );
 		page.add( actionsPanel );
 		page.add( Box.createVerticalStrut( 18 ) );
 
@@ -1891,6 +1895,34 @@ public final class MinecraftDashboard extends JPanel
 		}
 		row.add( rowActions, BorderLayout.EAST );
 		return row;
+	}
+
+	/**
+	 * Informe de diagnostico listo para pegar en un chat: version, sistema,
+	 * estado del mundo y las ultimas lineas de actividad. Sin datos sensibles —
+	 * ni token, ni rutas de otros usuarios, ni contenido del mundo.
+	 */
+	String diagnosticsReport()
+	{
+		StringBuilder report = new StringBuilder();
+		report.append( "P2PMSS " ).append( app.UpdateChecker.currentVersion() )
+				.append( " · " ).append( System.getProperty( "os.name", "?" ) )
+				.append( ' ' ).append( System.getProperty( "os.version", "" ) ).append( '\n' );
+		report.append( "Phase: " ).append( state.phase() )
+				.append( " · Sync: " ).append( state.syncState() )
+				.append( " · Server: " ).append( state.serverName() ).append( '\n' );
+		report.append( "Host: " ).append( state.hostAddress() )
+				.append( " · Repo: " ).append( state.repository() ).append( '\n' );
+		String activity = activityArea.getText();
+		if( !activity.isBlank() )
+		{
+			String[] lines = activity.split( "\n" );
+			int from = Math.max( 0, lines.length - 15 );
+			report.append( "--- recent activity ---\n" );
+			for( int index = from; index < lines.length; index++ )
+				report.append( lines[index] ).append( '\n' );
+		}
+		return report.toString();
 	}
 
 	private static void copyToClipboard( String value )

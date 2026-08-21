@@ -107,9 +107,28 @@ public final class SelfUpdater
 				command.add( "\"P2PMSS update\"" );
 				command.add( installer.toAbsolutePath().toString() );
 			}
+			else if( osName.contains( "mac" ) && name.endsWith( ".dmg" ) )
+			{
+				// Instalacion automatica: un script independiente espera a que la app
+				// muera, monta el DMG, copia la .app a Aplicaciones y la relanza. El
+				// usuario ya no arrastra nada
+				try
+				{
+					Path script = writeMacInstallScript( installer );
+					command.add( "bash" );
+					command.add( script.toAbsolutePath().toString() );
+				}
+				catch( IOException scriptFailure )
+				{
+					// Sin script se degrada al flujo clasico: abrir el DMG y arrastrar
+					Log.event( "UPDATER", "No se pudo preparar el instalador automatico de macOS", scriptFailure );
+					command.add( "open" );
+					command.add( installer.toAbsolutePath().toString() );
+				}
+			}
 			else if( osName.contains( "mac" ) )
 			{
-				// El DMG (o cualquier otro artefacto) se abre con el visor del sistema
+				// Artefacto no-DMG en macOS: se abre con el visor del sistema
 				command.add( "open" );
 				command.add( installer.toAbsolutePath().toString() );
 			}
@@ -132,6 +151,46 @@ public final class SelfUpdater
 			}
 		} while( false );
 		return launched;
+	}
+
+	/**
+	 * Script de instalacion automatica para macOS. Corre como proceso aparte
+	 * (sobrevive al exit de la app): espera, monta el DMG en un punto propio,
+	 * reemplaza la .app de Aplicaciones y la relanza. Cualquier fallo aborta con
+	 * el DMG abierto en el visor para que el usuario pueda arrastrar a mano.
+	 */
+	static Path writeMacInstallScript( Path installer ) throws IOException
+	{
+		Files.createDirectories( updatesDirectory() );
+		Path script = updatesDirectory().resolve( "install-update.sh" );
+		String dmg = installer.toAbsolutePath().toString();
+		Files.writeString( script, """
+				#!/bin/bash
+				# Instalador automatico de P2PMSS para macOS (generado por la app)
+				DMG="%s"
+				MOUNT=$(mktemp -d)/p2pmss-update
+				mkdir -p "$MOUNT"
+				sleep 3
+				if ! hdiutil attach "$DMG" -mountpoint "$MOUNT" -nobrowse -quiet; then
+				  open "$DMG"; exit 1
+				fi
+				APP=$(ls -d "$MOUNT"/*.app 2>/dev/null | head -1)
+				if [ -z "$APP" ]; then hdiutil detach "$MOUNT" -quiet; open "$DMG"; exit 1; fi
+				NAME=$(basename "$APP")
+				if ditto "$APP" "/Applications/$NAME.new"; then
+				  rm -rf "/Applications/$NAME"
+				  mv "/Applications/$NAME.new" "/Applications/$NAME"
+				  hdiutil detach "$MOUNT" -quiet
+				  open "/Applications/$NAME"
+				else
+				  rm -rf "/Applications/$NAME.new"
+				  hdiutil detach "$MOUNT" -quiet
+				  open "$DMG"
+				  exit 1
+				fi
+				""".formatted( dmg ) );
+		script.toFile().setExecutable( true );
+		return script;
 	}
 
 	/** Nombre de fichero local para la descarga, derivado de la URL del asset. */
