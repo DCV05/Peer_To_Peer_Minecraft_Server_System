@@ -178,14 +178,20 @@ public final class UpdateChecker
 		return null;
 	}
 
-	/** Installer preference by platform: mac wants a dmg, windows an exe, and the jar always works. */
+	/**
+	 * Instalador por plataforma, SIN fallback al jar en mac/windows: durante los
+	 * minutos en que el CI solo ha subido el jar (compila antes que el dmg/exe),
+	 * ofrecerlo actualizaba por el camino degradado — un jar suelto en updates y
+	 * la app instalada quedandose vieja. Sin asset nativo no se ofrece nada; el
+	 * chequeo periodico recoge la release en cuanto esta completa.
+	 */
 	static java.util.List<String> preferredAssetExtensions( String osName )
 	{
 		String os = osName == null ? "" : osName.toLowerCase();
 		if( os.contains( "mac" ) || os.contains( "darwin" ) )
-			return java.util.List.of( ".dmg", ".pkg", ".jar" );
+			return java.util.List.of( ".dmg", ".pkg" );
 		if( os.contains( "win" ) )
-			return java.util.List.of( ".exe", ".msi", ".jar" );
+			return java.util.List.of( ".exe", ".msi" );
 		return java.util.List.of( ".jar" );
 	}
 

@@ -121,10 +121,14 @@ class UpdateCheckerTest
 		assertEquals( "https://example.test/app.exe", UpdateChecker.pickDownloadUrl( assets, "Windows 11" ) );
 		assertEquals( "https://example.test/app.jar", UpdateChecker.pickDownloadUrl( assets, "Linux" ) );
 
+		// Release a medio subir (solo el jar): en mac/windows NO se ofrece nada —
+		// el jar suelto dejaba la app instalada vieja; el siguiente chequeo la
+		// recogera cuando el instalador nativo este colgado
 		com.fasterxml.jackson.databind.JsonNode onlyJar = new com.fasterxml.jackson.databind.ObjectMapper().readTree(
 				"[ { \"name\": \"P2PMSS-99.0.0.jar\", \"browser_download_url\": \"https://example.test/app.jar\" } ]" );
-		assertEquals( "https://example.test/app.jar", UpdateChecker.pickDownloadUrl( onlyJar, "Mac OS X" ) );
-		assertEquals( "https://example.test/app.jar", UpdateChecker.pickDownloadUrl( onlyJar, "Windows 11" ) );
+		assertEquals( null, UpdateChecker.pickDownloadUrl( onlyJar, "Mac OS X" ) );
+		assertEquals( null, UpdateChecker.pickDownloadUrl( onlyJar, "Windows 11" ) );
+		assertEquals( "https://example.test/app.jar", UpdateChecker.pickDownloadUrl( onlyJar, "Linux" ) );
 	}
 
 	@Test
