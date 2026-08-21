@@ -909,6 +909,7 @@ public final class MainFrame
 		// El discovery UDP solo ve la LAN: sin host ahi, el escaneo consulta ademas
 		// el candado de GitHub, que es el mismo arbitro que usa START. Asi SCAN y
 		// START cuentan la misma historia cuando el peer hostea por internet
+		remoteHostTunnelAddress = null;
 		if( !serverIsOn && !remoteHostFound )
 		{
 			HostLock.Status lock = cachedHostLockStatus();
@@ -916,6 +917,15 @@ public final class MainFrame
 			{
 				remoteHostFound = true;
 				remoteHostLabel = lock.hostNickname() + " (INTERNET)";
+				// El host publica junto al lease su tunel y su aforo: los invitados
+				// ven donde conectarse y cuanta gente hay sin mas canal que el candado
+				jgit.HostLock.HostDetails details = lock.details();
+				if( details != null )
+				{
+					remoteHostTunnelAddress = details.tunnelAddress();
+					if( details.onlinePlayers() >= 0 && details.maxPlayers() > 0 )
+						remoteHostLabel += " · " + details.onlinePlayers() + "/" + details.maxPlayers();
+				}
 			}
 		}
 		discoveredHost = remoteHostFound ? remoteHostLabel : (serverIsOn ? "LOCAL PROCESS" : "—");
@@ -929,6 +939,8 @@ public final class MainFrame
 
 	private volatile HostLock.Status lastHostLockStatus;
 	private volatile long lastHostLockCheckMillis;
+	/** Direccion publica del host remoto, leida del candado; null sin host por internet. */
+	private volatile String remoteHostTunnelAddress;
 
 	/**
 	 * Estado del candado de GitHub con cache de 60 segundos: el polling de fase
@@ -1100,8 +1112,16 @@ public final class MainFrame
 				readRecentServers() );
 		dashboard.setState( dashboardState );
 		PlayitAgentFile playitAgent = loaded ? PlayitAgentFile.load( serverOpenedDirectory.toPath() ) : null;
-		dashboard.showPublicUrl( playitAgent != null && playitAgent.enabled,
-				playitAgent == null ? null : playitAgent.tunnel_address );
+		boolean publicUrlEnabled = playitAgent != null && playitAgent.enabled;
+		String publicUrlAddress = playitAgent == null ? null : playitAgent.tunnel_address;
+		// Con un host remoto, la direccion buena es la que ese host publico en el
+		// candado: es la que los invitados deben copiar para conectarse
+		if( dashboardPhase == Phase.REMOTE_HOST && remoteHostTunnelAddress != null )
+		{
+			publicUrlEnabled = true;
+			publicUrlAddress = remoteHostTunnelAddress;
+		}
+		dashboard.showPublicUrl( publicUrlEnabled, publicUrlAddress );
 		dashboard.showWorldMap( loaded && blueMapInstalled( serverOpenedDirectory.toPath() ), serverIsOn );
 		turnOnOffBtn = dashboard.primaryActionButton();
 		consoleArea = dashboard.consoleArea();
@@ -2507,6 +2527,9 @@ public final class MainFrame
 						stopHostLockHeartbeat();
 						return;
 					}
+					// Cada latido lleva la foto fresca: tunel, aforo y version, para que
+					// los invitados lo vean sin mas canal que el propio candado
+					publishHostDetails();
 					if( HostLock.heartbeat( repoFullName ) )
 					{
 						consecutiveFailures = 0;
@@ -2533,6 +2556,40 @@ public final class MainFrame
 			GitUtils.activeAutoSave();
 		}
 		startPlayitTunnelIfConfigured();
+		if( repoFullName != null )
+		{
+			// Latido inmediato fuera de ciclo: el primero programado tarda 5 minutos
+			// y la direccion de conexion debe estar visible para los invitados YA
+			new Thread( () ->
+			{
+				publishHostDetails();
+				HostLock.heartbeat( repoFullName );
+			}, "p2pmss-host-details-publish" ).start();
+		}
+	}
+
+	/** Construye y publica la foto del host que viaja adjunta al lease del candado. */
+	private void publishHostDetails()
+	{
+		try
+		{
+			PlayitAgentFile agent = serverOpenedDirectory == null
+					? null
+					: PlayitAgentFile.load( serverOpenedDirectory.toPath() );
+			PlayerPresenceTracker.Snapshot presence = playerPresence.snapshot();
+			HostLock.publishDetails( new HostLock.HostDetails(
+					agent != null && agent.enabled ? agent.tunnel_address : null,
+					presence.onlineCount(),
+					presence.maxPlayers(),
+					serverOpenedDirectory == null
+							? null
+							: ForgeUtils.getMinecraftVersion( serverOpenedDirectory.toPath() ) ) );
+		}
+		catch( Exception detailFailure )
+		{
+			// La publicacion es cosmetica: un fallo aqui jamas debe frenar el latido
+			app.Log.event( "HOST_LOCK", "No se pudo componer la foto del host", detailFailure );
+		}
 	}
 
 	private static void stopHostLockHeartbeat()
@@ -2542,6 +2599,8 @@ public final class MainFrame
 			hostLockHeartbeatTimer.cancel();
 			hostLockHeartbeatTimer = null;
 		}
+		// Sin hosting activo no hay foto que publicar en el siguiente lease
+		HostLock.clearPublishedDetails();
 	}
 
 	/** Levanta el tunel publico opcional de playit.gg si este mundo lo tiene activado. */

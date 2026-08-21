@@ -17,12 +17,13 @@ class WorldStatusScannerTest
 
 	private static HostLock.Status hostedBy( String nickname )
 	{
-		return new HostLock.Status( true, false, false, nickname, Instant.now(), 900, "sha" );
+		return new HostLock.Status( true, false, false, nickname, Instant.now(), 900, "sha",
+				new HostLock.HostDetails( "farm.ply.gg:123", 2, 4, "1.19" ) );
 	}
 
 	private static HostLock.Status free()
 	{
-		return new HostLock.Status( false, false, false, null, null, 900, null );
+		return new HostLock.Status( false, false, false, null, null, 900, null, HostLock.HostDetails.empty() );
 	}
 
 	@Test
@@ -60,6 +61,10 @@ class WorldStatusScannerTest
 		WorldStatusScanner.WorldStatus status = scanner.statusOf( "DCV05/farmland_mc" ).orElseThrow();
 		assertTrue( status.hosted() );
 		assertEquals( "Vikkavv", status.hostNickname() );
+		// La foto arrastra los detalles publicados por el host en el lease
+		assertEquals( "farm.ply.gg:123", status.details().tunnelAddress() );
+		assertEquals( 2, status.details().onlinePlayers() );
+		assertEquals( "1.19", status.details().minecraftVersion() );
 		assertEquals( 1, notified.size() );
 	}
 
@@ -67,7 +72,9 @@ class WorldStatusScannerTest
 	void staleLeaseCountsAsNotHosted()
 	{
 		WorldStatusScanner scanner = new WorldStatusScanner( () -> List.of( "a/uno" ),
-				repo -> new HostLock.Status( true, false, true, "Vikkavv", Instant.now(), 900, "sha" ), null );
+				repo -> new HostLock.Status( true, false, true, "Vikkavv", Instant.now(), 900, "sha",
+						HostLock.HostDetails.empty() ),
+				null );
 
 		scanner.tick();
 

@@ -34,7 +34,7 @@ public final class WorldStatusScanner
 
 	/** Foto inmutable del estado de un mundo en el momento de consultarlo. */
 	public record WorldStatus( String repoFullName, boolean hosted, boolean mine, boolean stale,
-			String hostNickname, Instant checkedAt )
+			String hostNickname, Instant checkedAt, HostLock.HostDetails details )
 	{
 	}
 
@@ -133,7 +133,8 @@ public final class WorldStatusScanner
 
 			HostLock.Status lock = statusReader.apply( candidate );
 			WorldStatus refreshed = new WorldStatus( candidate,
-					lock.locked() && !lock.stale(), lock.mine(), lock.stale(), lock.hostNickname(), Instant.now() );
+					lock.locked() && !lock.stale(), lock.mine(), lock.stale(), lock.hostNickname(), Instant.now(),
+					lock.details() );
 			statuses.put( candidate, refreshed );
 			if( listener != null )
 				listener.accept( refreshed );

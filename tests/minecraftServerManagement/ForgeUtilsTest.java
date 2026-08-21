@@ -54,6 +54,19 @@ class ForgeUtilsTest
 	}
 
 	@Test
+	void detectsTheMinecraftVersionFromTheVersionsDirectory() throws Exception
+	{
+		Path server = Files.createDirectories( temporaryDirectory.resolve( "versioned-server" ) );
+		Files.createDirectories( server.resolve( "versions/1.19" ) );
+		// Los directorios que no son una version numerica no cuentan
+		Files.createDirectories( server.resolve( "versions/backup-old" ) );
+
+		assertEquals( "1.19", ForgeUtils.getMinecraftVersion( server ) );
+		// Sin carpeta versions/ no se inventa nada
+		assertEquals( null, ForgeUtils.getMinecraftVersion( temporaryDirectory.resolve( "no-existe" ) ) );
+	}
+
+	@Test
 	void readsAndUpdatesRamWithoutDependingOnCurrentlyFreeMemory() throws Exception
 	{
 		Path server = Files.createDirectories( temporaryDirectory.resolve( "ram-server" ) );

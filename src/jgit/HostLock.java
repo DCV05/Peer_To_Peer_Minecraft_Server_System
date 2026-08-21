@@ -40,20 +40,48 @@ public final class HostLock
 	public static final long DEFAULT_LEASE_SECONDS = 900;
 
 	public record Status( boolean locked, boolean mine, boolean stale, String hostNickname,
-			Instant lastHeartbeat, long leaseSeconds, String contentSha )
+			Instant lastHeartbeat, long leaseSeconds, String contentSha, HostDetails details )
 	{
 		/** Nadie hostea: es tambien el default seguro cuando no hay fichero de lock. */
 		static Status free()
 		{
-			return new Status( false, false, false, null, null, DEFAULT_LEASE_SECONDS, null );
+			return new Status( false, false, false, null, null, DEFAULT_LEASE_SECONDS, null, HostDetails.empty() );
 		}
 
 		/** Hay lease escrito; quien lo tiene y si esta caducado lo dicen los flags. */
 		static Status held( boolean mine, boolean stale, String hostNickname, Instant lastHeartbeat,
-				long leaseSeconds, String contentSha )
+				long leaseSeconds, String contentSha, HostDetails details )
 		{
-			return new Status( true, mine, stale, hostNickname, lastHeartbeat, leaseSeconds, contentSha );
+			return new Status( true, mine, stale, hostNickname, lastHeartbeat, leaseSeconds, contentSha, details );
 		}
+	}
+
+	/**
+	 * Datos que el host publica junto al lease para que los invitados los vean
+	 * sin mas canal que el propio candado: direccion publica del tunel, aforo y
+	 * version de Minecraft. Todos opcionales: un lease antiguo sin estos campos
+	 * sigue siendo valido (compatibilidad entre versiones mezcladas de peers).
+	 */
+	public record HostDetails( String tunnelAddress, int onlinePlayers, int maxPlayers, String minecraftVersion )
+	{
+		public static HostDetails empty()
+		{
+			return new HostDetails( null, -1, -1, null );
+		}
+	}
+
+	// El host activo la actualiza (tunel arriba, roster cambiado) y cada
+	// escritura del lease la adjunta; los peers solo la leen
+	private static volatile HostDetails publishedDetails = HostDetails.empty();
+
+	public static void publishDetails( HostDetails details )
+	{
+		publishedDetails = details == null ? HostDetails.empty() : details;
+	}
+
+	public static void clearPublishedDetails()
+	{
+		publishedDetails = HostDetails.empty();
 	}
 
 	public record AcquireResult( boolean acquired, boolean blockedByPeer, String message )
@@ -281,7 +309,8 @@ public final class HostLock
 			boolean stale = heartbeat.commitDate() == null
 					|| Duration.between( heartbeat.commitDate(), heartbeat.serverNow() ).getSeconds() > leaseSeconds;
 			boolean mine = host != null && host.equals( myNickname );
-			result = Status.held( mine, stale, host, heartbeat.commitDate(), leaseSeconds, contentSha );
+			result = Status.held( mine, stale, host, heartbeat.commitDate(), leaseSeconds, contentSha,
+					detailsFrom( lease ) );
 		} while( false );
 		return result;
 	}
@@ -330,11 +359,7 @@ public final class HostLock
 	private static int writeLease( String repoFullName, String token, String nickname,
 			String expectedSha, String commitMessage ) throws Exception
 	{
-		ObjectNode lease = GitUtils.JSON_MAPPER.createObjectNode()
-				.put( "host_nickname", nickname )
-				.put( "machine", System.getProperty( "user.name", "unknown" ) )
-				.put( "started_at", Instant.now().toString() )
-				.put( "lease_seconds", DEFAULT_LEASE_SECONDS );
+		ObjectNode lease = leaseJson( nickname, publishedDetails );
 		String encodedLease = Base64.getEncoder().encodeToString( lease.toString().getBytes( StandardCharsets.UTF_8 ) );
 		ObjectNode body = GitUtils.JSON_MAPPER.createObjectNode()
 				.put( "message", commitMessage )
@@ -350,6 +375,37 @@ public final class HostLock
 				.header( "Content-Type", "application/json" )
 				.build();
 		return GitUtils.HTTP_CLIENT.send( request, HttpResponse.BodyHandlers.ofString() ).statusCode();
+	}
+
+	/** Cuerpo del lease. Visible para tests: es el contrato entre host e invitados. */
+	static ObjectNode leaseJson( String nickname, HostDetails details )
+	{
+		ObjectNode lease = GitUtils.JSON_MAPPER.createObjectNode()
+				.put( "host_nickname", nickname )
+				.put( "machine", System.getProperty( "user.name", "unknown" ) )
+				.put( "started_at", Instant.now().toString() )
+				.put( "lease_seconds", DEFAULT_LEASE_SECONDS );
+		// Campos opcionales: solo se escriben cuando hay dato, y los lectores
+		// antiguos los ignoran — versiones mezcladas de peers conviven sin drama
+		if( details.tunnelAddress() != null && !details.tunnelAddress().isBlank() )
+			lease.put( "tunnel_address", details.tunnelAddress() );
+		if( details.onlinePlayers() >= 0 )
+			lease.put( "online_players", details.onlinePlayers() );
+		if( details.maxPlayers() >= 0 )
+			lease.put( "max_players", details.maxPlayers() );
+		if( details.minecraftVersion() != null && !details.minecraftVersion().isBlank() )
+			lease.put( "minecraft_version", details.minecraftVersion() );
+		return lease;
+	}
+
+	/** Lado lector del contrato: tolera leases antiguos sin ninguno de los campos. */
+	static HostDetails detailsFrom( JsonNode lease )
+	{
+		return new HostDetails(
+				lease.path( "tunnel_address" ).asText( null ),
+				lease.path( "online_players" ).asInt( -1 ),
+				lease.path( "max_players" ).asInt( -1 ),
+				lease.path( "minecraft_version" ).asText( null ) );
 	}
 
 	static boolean ensureLockBranch( String repoFullName, String token ) throws Exception

@@ -631,6 +631,34 @@ public final class ForgeUtils
 
 	// ---- FASE 6 — Memoria y jar del servidor -------------------------------
 
+	/**
+	 * Version de Minecraft de un servidor instalado, o null si no se reconoce.
+	 * Fuente primaria: la carpeta {@code versions/} que deja el instalador del
+	 * server (contiene un directorio por version, en la practica uno solo).
+	 */
+	public static String getMinecraftVersion( Path serverDirectory )
+	{
+		String result = null;
+		Path versions = serverDirectory == null ? null : serverDirectory.resolve( "versions" );
+		if( versions != null && Files.isDirectory( versions ) )
+		{
+			try (var entries = Files.list( versions ))
+			{
+				result = entries
+						.map( entry -> entry.getFileName().toString() )
+						.filter( name -> name.matches( "[0-9]+(\\.[0-9]+)*" ) )
+						.sorted()
+						.reduce( ( first, second ) -> second )
+						.orElse( null );
+			}
+			catch( IOException unreadable )
+			{
+				// Sin acceso a versions/ simplemente no se publica la version
+			}
+		}
+		return result;
+	}
+
 	/** -Xmx efectivo: manda user_jvm_args.txt y, si no lo trae, los scripts de arranque. */
 	public static String getServerRAMAlloc( Path serverDirectory )
 	{
