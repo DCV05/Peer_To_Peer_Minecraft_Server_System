@@ -394,6 +394,10 @@ class MinecraftDashboardTest
 		assertTrue( rendered.contains( "FREE TO HOST" ) );
 		// La direccion se ve como texto en la propia fila del tablero
 		assertTrue( rendered.contains( "farm.ply.gg:123" ) );
+		// El boton de entrar existe en AMBAS filas: en la del mundo libre sale
+		// deshabilitado, pero visible — escondido no lo encontraba nadie
+		assertEquals( 1, rendered.split( "\nJOIN\n", -1 ).length - 1 );
+		assertEquals( 1, rendered.split( "\nPLAY\n", -1 ).length - 1 );
 		// Solo el server local ofrece OPEN: el mundo remoto sin clonar no tiene
 		// carpeta que abrir, asi que de dos filas sale UN solo boton OPEN
 		assertEquals( 1, rendered.split( "\nOPEN\n", -1 ).length - 1 );

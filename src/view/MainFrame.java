@@ -200,6 +200,13 @@ public final class MainFrame
 				// dashboard descarta los refrescos sin cambios reales
 				status -> SwingUtilities.invokeLater( this::refreshDashboardState ) );
 		worldStatusScanner.setTransitionListener( this::announceWorldTransition );
+		// El progreso de clone/pull/push viaja del hilo de trabajo a la franja
+		// de abajo a la derecha; Swing solo se toca desde el EDT
+		app.TransferProgress.setListener( snapshot -> SwingUtilities.invokeLater( () ->
+		{
+			if( dashboard != null )
+				dashboard.showTransferProgress( snapshot.title(), snapshot.detail(), snapshot.percent(), snapshot.active() );
+		} ) );
 		worldStatusScanner.setEventsReader( jgit.WorldEvents::fetchNew );
 		worldStatusScanner.setEventListener( this::onWorldEvent );
 		worldStatusScanner.start();

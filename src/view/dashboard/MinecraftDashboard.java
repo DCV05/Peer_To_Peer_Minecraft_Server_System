@@ -302,6 +302,10 @@ public final class MinecraftDashboard extends JPanel
 	private final JPanel pages = new JPanel( pageLayout );
 	private final Map<Page, JButton> navigationButtons = new EnumMap<>( Page.class );
 
+	private final JLabel transferProgressLabel = DashboardTheme.label( "", TEXT_MUTED, 10, Font.PLAIN );
+	private final javax.swing.JProgressBar transferProgressBar = new javax.swing.JProgressBar( 0, 100 );
+	private JPanel transferProgressStrip;
+
 	/**
 	 * Guia de bienvenida (crear server, abrir uno o unirse al de un amigo). Vive
 	 * en el tablero SERVERS: es lo que ve una persona nueva sin ningun server.
@@ -666,11 +670,52 @@ public final class MinecraftDashboard extends JPanel
 		return sidebar;
 	}
 
+	/**
+	 * Franja de progreso abajo a la derecha (estilo IDE): mientras se clona, se
+	 * trae o se respalda un mundo, dice QUE se esta esperando y cuanto queda.
+	 * Oculta cuando no hay nada en marcha.
+	 */
+	private JPanel buildProgressStrip()
+	{
+		JPanel strip = new JPanel( new FlowLayout( FlowLayout.RIGHT, 10, 6 ) );
+		strip.setOpaque( false );
+		strip.setBorder( BorderFactory.createMatteBorder( 1, 0, 0, 0, HAIRLINE ) );
+		transferProgressLabel.setAlignmentY( Component.CENTER_ALIGNMENT );
+		transferProgressBar.setPreferredSize( new Dimension( 170, 8 ) );
+		transferProgressBar.setBorderPainted( false );
+		transferProgressBar.setForeground( CYAN );
+		transferProgressBar.setBackground( BORDER );
+		strip.add( transferProgressLabel );
+		strip.add( transferProgressBar );
+		strip.setVisible( false );
+		transferProgressStrip = strip;
+		return strip;
+	}
+
+	/**
+	 * Progreso de una transferencia con GitHub. Solo desde el EDT.
+	 * {@code percent} negativo = indeterminado (JGit aun no sabe el total).
+	 */
+	public void showTransferProgress( String title, String detail, int percent, boolean active )
+	{
+		if( transferProgressStrip == null )
+			return;
+		transferProgressStrip.setVisible( active );
+		if( !active )
+			return;
+		String text = detail == null || detail.isBlank() ? title : title + " · " + detail;
+		transferProgressLabel.setText( percent >= 0 ? text + "  " + percent + "%" : text );
+		transferProgressBar.setIndeterminate( percent < 0 );
+		if( percent >= 0 )
+			transferProgressBar.setValue( percent );
+	}
+
 	private JPanel buildWorkspace()
 	{
 		JPanel workspace = new JPanel( new BorderLayout() );
 		workspace.setBackground( APP_BACKGROUND );
 		workspace.add( buildTopBar(), BorderLayout.NORTH );
+		workspace.add( buildProgressStrip(), BorderLayout.SOUTH );
 
 		pages.setBackground( APP_BACKGROUND );
 		pages.add( wrapPage( buildOverviewPage() ), Page.OVERVIEW.name() );
@@ -1966,16 +2011,24 @@ public final class MinecraftDashboard extends JPanel
 			open.setEnabled( !entry.selected() );
 			rowActions.add( open );
 		}
-		if( entry.connectAddress() != null && !entry.connectAddress().isBlank() )
+		boolean hasAddress = entry.connectAddress() != null && !entry.connectAddress().isBlank();
+		if( entry.worldStatus() != null )
 		{
 			if( rowActions.getComponentCount() > 0 )
 				rowActions.add( Box.createVerticalStrut( 4 ) );
-			// El boton prepara el launcher con la version del mundo y deja la IP
-			// copiada. Con otro peer hosteando se llama JOIN: entrar a su partida
-			boolean joinable = entry.worldStatus() != null && entry.worldStatus().startsWith( "LIVE" )
-					&& !entry.worldStatus().contains( "you are hosting" );
-			rowActions.add( actionButton( joinable ? "JOIN" : "PLAY", DashboardTheme.ButtonKind.PRIMARY,
-					() -> actions.playWorld( entry ) ) );
+			// El boton de entrar se ve SIEMPRE: escondido cuando nadie hostea, la
+			// gente no lo encontraba nunca. Sin direccion sale en gris y dice por que
+			boolean joinable = entry.worldStatus().startsWith( "LIVE" ) && !entry.worldStatus().contains( "you are hosting" );
+			JButton join = actionButton( joinable ? "JOIN" : "PLAY", DashboardTheme.ButtonKind.PRIMARY,
+					() -> actions.playWorld( entry ) );
+			join.setEnabled( hasAddress );
+			join.setToolTipText( hasAddress
+					? "Open Minecraft straight into this world"
+					: "Nobody is hosting this world right now — press WANT TO PLAY to ask" );
+			rowActions.add( join );
+		}
+		if( hasAddress )
+		{
 			rowActions.add( Box.createVerticalStrut( 4 ) );
 			// La direccion se copia, no se muestra entera: en la fila no cabe y
 			// el destino real es el boton de conectar del cliente de Minecraft

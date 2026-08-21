@@ -1138,6 +1138,18 @@ public final class GitUtils
 
 	static boolean cloneRepoFromUrl( Path clonePath, String cloneUrl )
 	{
+		try
+		{
+			return cloneRepoFromUrlInternal( clonePath, cloneUrl );
+		}
+		finally
+		{
+			app.TransferProgress.done();
+		}
+	}
+
+	private static boolean cloneRepoFromUrlInternal( Path clonePath, String cloneUrl )
+	{
 		boolean result;
 		do
 		{
@@ -1161,6 +1173,9 @@ public final class GitUtils
 					.setDirectory( clonePath.toFile() )
 					.setCredentialsProvider( credentials )
 					.setTimeout( CLONE_TIMEOUT_SECONDS )
+					// Clonar un mundo son minutos y muchos megas: sin barra, el
+					// usuario no sabe si esta pasando algo o se ha colgado
+					.setProgressMonitor( app.TransferProgress.monitorFor( "Downloading world" ) )
 					.call())
 			{
 				if( !setLocalIdentity( git, userdata ) )
@@ -1216,6 +1231,20 @@ public final class GitUtils
 	 * cuanto GitHub rechaza uno, informando de cuántos quedaron confirmados.</p>
 	 */
 	public static synchronized BackupPushResult commitAndPush( Path repoDirectory, boolean isServerStopping )
+	{
+		// La barra de progreso se apaga pase lo que pase: salidas tempranas,
+		// fallos de red o exito. El cuerpo real tiene varios returns
+		try
+		{
+			return commitAndPushInternal( repoDirectory, isServerStopping );
+		}
+		finally
+		{
+			app.TransferProgress.done();
+		}
+	}
+
+	private static BackupPushResult commitAndPushInternal( Path repoDirectory, boolean isServerStopping )
 	{
 		if( repoDirectory == null || !Files.isDirectory( repoDirectory ) )
 		{
@@ -1437,7 +1466,11 @@ public final class GitUtils
 	 */
 	private static PushCheckResult pushOnce( Git git, UsernamePasswordCredentialsProvider credentials ) throws GitAPIException
 	{
-		Iterable<PushResult> pushResults = git.push().setCredentialsProvider( credentials ).setTimeout( REMOTE_GIT_TIMEOUT_SECONDS ).call();
+		Iterable<PushResult> pushResults = git.push()
+				.setCredentialsProvider( credentials )
+				.setTimeout( REMOTE_GIT_TIMEOUT_SECONDS )
+				.setProgressMonitor( app.TransferProgress.monitorFor( "Backing up world" ) )
+				.call();
 		boolean updateFound = false;
 		for( PushResult pushResult : pushResults )
 		{
@@ -1756,6 +1789,18 @@ public final class GitUtils
 	 */
 	public static boolean pull( Path repoPath, boolean treeConfirmedClean )
 	{
+		try
+		{
+			return pullInternal( repoPath, treeConfirmedClean );
+		}
+		finally
+		{
+			app.TransferProgress.done();
+		}
+	}
+
+	private static boolean pullInternal( Path repoPath, boolean treeConfirmedClean )
+	{
 		boolean result;
 		do
 		{
@@ -1784,6 +1829,7 @@ public final class GitUtils
 				PullResult pullResult = git.pull()
 						.setCredentialsProvider( credentials )
 						.setTimeout( REMOTE_GIT_TIMEOUT_SECONDS )
+						.setProgressMonitor( app.TransferProgress.monitorFor( "Pulling world" ) )
 						.call();
 				result = pullResult.isSuccessful();
 			}
