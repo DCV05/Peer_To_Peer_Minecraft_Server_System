@@ -199,7 +199,44 @@ public final class MainFrame
 				// Cada foto nueva repinta las tarjetas de mundos; el skip-if-equal del
 				// dashboard descarta los refrescos sin cambios reales
 				status -> SwingUtilities.invokeLater( this::refreshDashboardState ) );
+		worldStatusScanner.setTransitionListener( this::announceWorldTransition );
 		worldStatusScanner.start();
+	}
+
+	/**
+	 * Notificacion de escritorio cuando un mundo del tablero cambia de verdad:
+	 * alguien empieza a hostear, lo deja libre o el host cambia de manos. Lo que
+	 * hosteas tu no se anuncia: ya lo estas viendo.
+	 */
+	private void announceWorldTransition( app.WorldStatusScanner.Transition change )
+	{
+		app.WorldStatusScanner.WorldStatus was = change.previous();
+		app.WorldStatusScanner.WorldStatus now = change.current();
+		if( now.mine() || was.mine() )
+			return;
+		String world = now.repoFullName().contains( "/" )
+				? now.repoFullName().substring( now.repoFullName().indexOf( '/' ) + 1 )
+				: now.repoFullName();
+		String message = null;
+		if( !was.hosted() && now.hosted() )
+		{
+			String address = now.details() == null ? null : now.details().tunnelAddress();
+			message = now.hostNickname() + " is hosting " + world
+					+ (address != null && !address.isBlank() ? " — " + address : "");
+		}
+		else if( was.hosted() && !now.hosted() )
+		{
+			message = world + " is free to host";
+		}
+		else if( now.hosted() )
+		{
+			message = now.hostNickname() + " took over " + world;
+		}
+		if( message != null )
+		{
+			app.Notifier.notifyWorldEvent( "Endershare", message );
+			appendDashboardActivity( message );
+		}
 	}
 
 	/** Todos los repos que el tablero multi-server vigila: suscritos + servers locales recientes. */

@@ -119,4 +119,44 @@ class WorldStatusScannerTest
 		assertEquals( 2, calls.get() );
 		assertTrue( scanner.snapshot().isEmpty() );
 	}
+
+	@Test
+	void firesTransitionsOnlyOnRealChanges()
+	{
+		java.util.concurrent.atomic.AtomicReference<HostLock.Status> current = new java.util.concurrent.atomic.AtomicReference<>(
+				free() );
+		List<WorldStatusScanner.Transition> transitions = new ArrayList<>();
+		WorldStatusScanner scanner = new WorldStatusScanner( () -> List.of( "DCV05/farmland_mc" ),
+				repo -> current.get(), null );
+		scanner.setTransitionListener( transitions::add );
+
+		// Primer avistamiento: nunca es transicion (evita rafagas al arrancar)
+		scanner.tick();
+		assertTrue( transitions.isEmpty() );
+
+		// Refresco sin cambio real: silencio
+		scanner.ageStatusForTests( "DCV05/farmland_mc", 120 );
+		scanner.tick();
+		assertTrue( transitions.isEmpty() );
+
+		// Libre -> hosteado
+		current.set( hostedBy( "Vikkavv" ) );
+		scanner.ageStatusForTests( "DCV05/farmland_mc", 120 );
+		scanner.tick();
+		assertEquals( 1, transitions.size() );
+		assertTrue( !transitions.get( 0 ).previous().hosted() && transitions.get( 0 ).current().hosted() );
+
+		// Cambio de manos
+		current.set( hostedBy( "OtherPeer" ) );
+		scanner.ageStatusForTests( "DCV05/farmland_mc", 120 );
+		scanner.tick();
+		assertEquals( 2, transitions.size() );
+		assertEquals( "OtherPeer", transitions.get( 1 ).current().hostNickname() );
+
+		// Hosteado -> libre
+		current.set( free() );
+		scanner.ageStatusForTests( "DCV05/farmland_mc", 120 );
+		scanner.tick();
+		assertEquals( 3, transitions.size() );
+	}
 }

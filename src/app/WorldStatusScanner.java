@@ -38,11 +38,27 @@ public final class WorldStatusScanner
 	{
 	}
 
+	/** Cambio REAL de estado de un mundo entre dos refrescos consecutivos. */
+	public record Transition( WorldStatus previous, WorldStatus current )
+	{
+	}
+
 	private final Supplier<List<String>> subscriptions;
 	private final Function<String, HostLock.Status> statusReader;
 	private final Consumer<WorldStatus> listener;
 	private final Map<String, WorldStatus> statuses = new ConcurrentHashMap<>();
 	private ScheduledExecutorService scheduler;
+	private volatile Consumer<Transition> transitionListener;
+
+	/**
+	 * Avisado SOLO cuando un mundo cambia de verdad (libre<->hosteado o cambia el
+	 * host), nunca en el primer avistamiento: asi el arranque no dispara rafagas.
+	 * Corre en el hilo del escaner.
+	 */
+	public void setTransitionListener( Consumer<Transition> transitionListener )
+	{
+		this.transitionListener = transitionListener;
+	}
 
 	/**
 	 * @param subscriptions lista viva de repos a vigilar (se relee en cada tick)
@@ -89,6 +105,15 @@ public final class WorldStatusScanner
 		statuses.clear();
 	}
 
+	/** Solo para tests: envejece la foto de un repo para forzar su refresco. */
+	void ageStatusForTests( String repoFullName, long seconds )
+	{
+		WorldStatus known = statuses.get( repoFullName );
+		if( known != null )
+			statuses.put( repoFullName, new WorldStatus( known.repoFullName(), known.hosted(), known.mine(),
+					known.stale(), known.hostNickname(), known.checkedAt().minusSeconds( seconds ), known.details() ) );
+	}
+
 	public Optional<WorldStatus> statusOf( String repoFullName )
 	{
 		return Optional.ofNullable( statuses.get( repoFullName ) );
@@ -132,12 +157,18 @@ public final class WorldStatusScanner
 				return;
 
 			HostLock.Status lock = statusReader.apply( candidate );
+			WorldStatus previous = statuses.get( candidate );
 			WorldStatus refreshed = new WorldStatus( candidate,
 					lock.locked() && !lock.stale(), lock.mine(), lock.stale(), lock.hostNickname(), Instant.now(),
 					lock.details() );
 			statuses.put( candidate, refreshed );
 			if( listener != null )
 				listener.accept( refreshed );
+			Consumer<Transition> transitions = transitionListener;
+			boolean changed = previous != null && (previous.hosted() != refreshed.hosted()
+					|| (refreshed.hosted() && !java.util.Objects.equals( previous.hostNickname(), refreshed.hostNickname() )));
+			if( transitions != null && changed )
+				transitions.accept( new Transition( previous, refreshed ) );
 		}
 		catch( Exception scanFailure )
 		{

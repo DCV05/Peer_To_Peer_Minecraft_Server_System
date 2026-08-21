@@ -1088,6 +1088,18 @@ public final class MinecraftDashboard extends JPanel
 		actionsPanel.add( actionButton( "COPY REPORT", DashboardTheme.ButtonKind.QUIET,
 				() -> copyToClipboard( diagnosticsReport() ) ) );
 		page.add( actionsPanel );
+		page.add( Box.createVerticalStrut( 14 ) );
+
+		// Notificaciones de escritorio: el ajuste vive en Notifier (persistido en
+		// el data dir), asi que el checkbox habla con el directamente
+		JCheckBox worldNotifications = new JCheckBox( "Notify me when a world goes live or becomes free" );
+		worldNotifications.setOpaque( false );
+		worldNotifications.setForeground( TEXT );
+		worldNotifications.setFont( DashboardTheme.font( Font.PLAIN, 12 ) );
+		worldNotifications.setSelected( app.Notifier.isEnabled() );
+		worldNotifications.addActionListener( event -> app.Notifier.setEnabled( worldNotifications.isSelected() ) );
+		worldNotifications.setAlignmentX( Component.LEFT_ALIGNMENT );
+		page.add( worldNotifications );
 		page.add( Box.createVerticalStrut( 18 ) );
 
 		JPanel note = sectionPanel();
