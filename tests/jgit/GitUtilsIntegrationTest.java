@@ -287,4 +287,71 @@ class GitUtilsIntegrationTest
 			assertEquals( confirmedHead, remoteGit.getRepository().resolve( "refs/heads/master" ) );
 		}
 	}
+
+	@Test
+	void rescuesDirtyWorldIntoSnapshotAndTakesTheRemoteState() throws Exception
+	{
+		Path remote = temporaryDirectory.resolve( "rescue-remote.git" );
+		try (Git ignored = Git.init().setBare( true ).setDirectory( remote.toFile() ).call())
+		{
+		}
+
+		// El peer A publica el mundo v1 y luego lo avanza a v2 (el estado bueno)
+		Path hostA = Files.createDirectories( temporaryDirectory.resolve( "rescue-host-a" ) );
+		try (Git git = Git.init().setDirectory( hostA.toFile() ).call())
+		{
+			Files.writeString( hostA.resolve( "world.txt" ), "world-v1\n" );
+			git.add().addFilepattern( "." ).call();
+			git.commit().setMessage( "world v1" )
+					.setAuthor( "hoster", "hoster@example.test" )
+					.setCommitter( "hoster", "hoster@example.test" ).call();
+			git.push().setRemote( remote.toUri().toString() ).setPushAll().call();
+		}
+
+		// El peer B clona v1 y se queda con cambios locales nunca respaldados
+		Path hostB = temporaryDirectory.resolve( "rescue-host-b" );
+		try (Git ignored = Git.cloneRepository().setURI( remote.toUri().toString() ).setDirectory( hostB.toFile() ).call())
+		{
+		}
+		try (Git git = Git.open( hostA.toFile() ))
+		{
+			Files.writeString( hostA.resolve( "world.txt" ), "world-v2\n" );
+			git.add().addFilepattern( "." ).call();
+			git.commit().setMessage( "world v2" )
+					.setAuthor( "hoster", "hoster@example.test" )
+					.setCommitter( "hoster", "hoster@example.test" ).call();
+			git.push().setRemote( remote.toUri().toString() ).setPushAll().call();
+		}
+		Files.writeString( hostB.resolve( "world.txt" ), "stale-local-change\n" );
+		Files.writeString( hostB.resolve( "leftover.txt" ), "never-backed-up\n" );
+
+		// El pull normal se niega (arbol sucio) y el detector lo explica
+		assertFalse( GitUtils.pull( hostB ) );
+		assertTrue( GitUtils.hasLocalChanges( hostB ) );
+
+		String snapshotBranch = GitUtils.snapshotLocalChangesAndTakeRemote( hostB );
+
+		assertNotNull( snapshotBranch );
+		assertTrue( snapshotBranch.startsWith( "p2pmss-local-snapshot-" ) );
+		// La rama de trabajo queda en el mundo confirmado v2, con el arbol limpio
+		assertEquals( "world-v2\n", Files.readString( hostB.resolve( "world.txt" ) ) );
+		assertFalse( Files.exists( hostB.resolve( "leftover.txt" ) ) );
+		try (Git git = Git.open( hostB.toFile() ))
+		{
+			assertTrue( git.status().call().isClean() );
+			// Nada se borra: el snapshot conserva integro el estado apartado
+			ObjectId snapshot = git.getRepository().resolve( "refs/heads/" + snapshotBranch );
+			assertNotNull( snapshot );
+			try (RevWalk walk = new RevWalk( git.getRepository() ))
+			{
+				RevCommit snapshotCommit = walk.parseCommit( snapshot );
+				assertTrue( snapshotCommit.getFullMessage().contains( "Local snapshot" ) );
+			}
+			ObjectId remoteHead = git.getRepository().resolve( "refs/remotes/origin/master" );
+			assertEquals( remoteHead, git.getRepository().resolve( "HEAD" ) );
+		}
+
+		// Con el arbol ya limpio el rescate no crea snapshot y sigue sin fallar
+		assertEquals( "", GitUtils.snapshotLocalChangesAndTakeRemote( hostB ) );
+	}
 }

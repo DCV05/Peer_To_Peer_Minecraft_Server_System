@@ -1796,6 +1796,90 @@ public final class GitUtils
 		return result;
 	}
 
+	/** El pull manual se niega con el árbol sucio; esto deja al llamador explicar el porqué. */
+	public static boolean hasLocalChanges( Path repoPath )
+	{
+		boolean result = false;
+		try (Git git = Git.open( repoPath.toFile() ))
+		{
+			result = !git.status().call().isClean();
+		}
+		catch( Exception statusFailure )
+		{
+			app.Log.event( "GIT_BACKUP", "No se pudo comprobar el estado local de " + repoPath, statusFailure );
+		}
+		return result;
+	}
+
+	/**
+	 * Rescate del pull: cuando el mundo local tiene cambios que nunca llegaron a
+	 * respaldarse (una sesión cerrada a las bravas, por ejemplo), el estado actual
+	 * se conserva ÍNTEGRO en una rama local de snapshot y la rama de trabajo
+	 * vuelve al último mundo confirmado en GitHub. No se borra nada: el snapshot
+	 * queda en el propio repositorio por si hiciera falta recuperarlo.
+	 *
+	 * @return el nombre de la rama snapshot creada (o cadena vacía si el árbol ya
+	 *         estaba limpio), o {@code null} si la operación no pudo completarse.
+	 */
+	public static String snapshotLocalChangesAndTakeRemote( Path repoPath )
+	{
+		String result = null;
+		do
+		{
+			Map<String, String> userdata;
+			try
+			{
+				userdata = TokenStore.getSavedUserData();
+			}
+			catch( Exception invalidSession )
+			{
+				break;
+			}
+
+			UsernamePasswordCredentialsProvider credentials = new UsernamePasswordCredentialsProvider( userdata.get( "nickname" ),
+					userdata.get( "token" ) );
+
+			try (Git git = Git.open( repoPath.toFile() ))
+			{
+				git.fetch().setCredentialsProvider( credentials ).setTimeout( REMOTE_GIT_TIMEOUT_SECONDS ).call();
+
+				Repository repo = git.getRepository();
+				String branch = repo.getBranch();
+				if( repo.resolve( "refs/remotes/origin/" + branch ) == null )
+					break;
+
+				String snapshotBranch = "";
+				if( !git.status().call().isClean() )
+				{
+					// Todo lo local (nuevo, modificado y borrado) queda en un commit...
+					git.add().addFilepattern( "." ).call();
+					git.add().addFilepattern( "." ).setUpdate( true ).call();
+					git.commit()
+							.setAuthor( userdata.get( "nickname" ), userdata.get( "email" ) )
+							.setCommitter( userdata.get( "nickname" ), userdata.get( "email" ) )
+							.setMessage( "Local snapshot before taking the remote world on " + LocalDate.now() )
+							.call();
+					// ...apuntado por una rama local que nunca se sube al remoto
+					snapshotBranch = "p2pmss-local-snapshot-" + java.time.LocalDateTime.now()
+							.format( java.time.format.DateTimeFormatter.ofPattern( "yyyyMMdd-HHmmss" ) );
+					git.branchCreate().setName( snapshotBranch ).call();
+				}
+
+				// La rama de trabajo vuelve al último mundo confirmado del remoto; lo
+				// recién commiteado sobrevive en la rama snapshot
+				git.reset().setMode( org.eclipse.jgit.api.ResetCommand.ResetType.HARD )
+						.setRef( "refs/remotes/origin/" + branch )
+						.call();
+				result = snapshotBranch;
+			}
+			catch( Exception rescueFailure )
+			{
+				app.Log.event( "GIT_BACKUP", "El rescate del pull en " + repoPath + " no pudo completarse", rescueFailure );
+			}
+		} while( false );
+		return result;
+	}
+
 	// ---- FASE 8 — Utilidades HTTP y de rutas -------------------------------
 
 	static HttpRequest.Builder authenticatedRequest( String url, String token )

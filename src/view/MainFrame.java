@@ -1668,7 +1668,7 @@ public final class MainFrame
 					{
 						syncState = "FAILED";
 						setDashboardFailure(
-								"GitHub synchronization failed. The server was not started to avoid using an outdated world." );
+								"GitHub synchronization failed. The server was not started to avoid using an outdated world. Try PULL WORLD to repair synchronization." );
 						return;
 					}
 					syncState = "UP TO DATE";
@@ -1681,6 +1681,7 @@ public final class MainFrame
 				serverProcess = ForgeUtils.executeMinecraftServer( serverOpenedDirectory.toPath() );
 				if( serverProcess == null )
 					throw new IOException( "Minecraft startup command failed" );
+				worldSessionDirty = true;
 
 				SwingUtilities.invokeLater( () ->
 				{
@@ -1762,21 +1763,69 @@ public final class MainFrame
 			appendDashboardActivity( "Manual world pull requested" );
 			new Thread( () ->
 			{
-				boolean success = GitUtils.pull( selectedServer );
-				if( success )
+				if( GitUtils.pull( selectedServer ) )
 				{
 					syncState = "UP TO DATE";
 					lastSync = "JUST NOW";
 					appendDashboardActivity( "Latest GitHub world pulled successfully" );
 					setDashboardPhase( Phase.OFFLINE, "World is current and safe to start" );
 				}
+				else if( GitUtils.hasLocalChanges( selectedServer ) )
+				{
+					// Cambios locales que nunca se respaldaron (tipico: la sesion anterior
+					// se cerro a las bravas). El usuario decide: apartarlos a un snapshot
+					// local y traer el mundo confirmado, o dejarlo todo como esta
+					if( !confirmSnapshotAndTakeRemote() )
+					{
+						syncState = "LOCAL CHANGES";
+						setDashboardPhase( Phase.OFFLINE, "Pull cancelled; local changes were preserved" );
+						appendDashboardActivity( "Manual pull cancelled by the user; local changes kept" );
+						return;
+					}
+					setDashboardPhase( Phase.SYNCING, "Saving a local snapshot and downloading the latest world" );
+					String snapshotBranch = GitUtils.snapshotLocalChangesAndTakeRemote( selectedServer );
+					if( snapshotBranch != null )
+					{
+						syncState = "UP TO DATE";
+						lastSync = "JUST NOW";
+						appendDashboardActivity( snapshotBranch.isEmpty()
+								? "Latest GitHub world pulled successfully"
+								: "Local changes kept in snapshot " + snapshotBranch + "; latest GitHub world pulled" );
+						setDashboardPhase( Phase.OFFLINE, "World is current and safe to start" );
+					}
+					else
+					{
+						syncState = "FAILED";
+						setDashboardFailure( "GitHub synchronization failed. Local changes were preserved." );
+					}
+				}
 				else
 				{
 					syncState = "FAILED";
-					setDashboardFailure( "GitHub synchronization failed. Local changes were preserved." );
+					setDashboardFailure( "GitHub synchronization failed. Check your connection and try again." );
 				}
 			}, "p2pmss-manual-sync" ).start();
 		} while( false );
+	}
+
+	/** Corre fuera del EDT: el dialogo se pide con invokeAndWait y se espera la respuesta. */
+	private boolean confirmSnapshotAndTakeRemote()
+	{
+		final int[] selection = {JOptionPane.NO_OPTION};
+		try
+		{
+			SwingUtilities.invokeAndWait( () -> selection[0] = JOptionPane.showConfirmDialog( frame,
+					"This world has local changes that were never backed up to GitHub\n"
+							+ "(usually from a session that closed without SAVE & CLOSE).\n\n"
+							+ "Keep those changes in a local snapshot and download the latest\n"
+							+ "confirmed world from GitHub? Nothing is deleted.",
+					"Local changes found", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE ) );
+		}
+		catch( Exception dialogFailure )
+		{
+			return false;
+		}
+		return selection[0] == JOptionPane.YES_OPTION;
 	}
 
 	/**
@@ -1843,6 +1892,7 @@ public final class MainFrame
 			WorldImportService.ImportResult result = WorldImportService.importWorld( source, selectedServer.toPath() );
 			if( result.success() )
 			{
+				worldSessionDirty = true;
 				if( GitUtils.repoExistInPath( selectedServer.toPath() ) )
 					syncState = "LOCAL CHANGES";
 				appendDashboardActivity( "World import completed; previous world preserved" );
@@ -2178,9 +2228,11 @@ public final class MainFrame
 			}
 
 			// Sin server arrancado y con el repo limpio no hay nada que salvar:
-			// cerrar la app debe ser instantaneo, no un ciclo de backup vacio
+			// cerrar la app debe ser instantaneo, no un ciclo de backup vacio.
+			// El status de JGit recorre el mundo ENTERO (minutos en discos lentos):
+			// solo se consulta si esta sesion llego a tocar el mundo
 			boolean somethingToSave = processToStop != null
-					|| (serverOpenedDirectory != null && worldHasUnsavedChanges());
+					|| (worldSessionDirty && serverOpenedDirectory != null && worldHasUnsavedChanges());
 			GitUtils.PrivateBackupSetupResult backup = null;
 			if( somethingToSave && serverOpenedDirectory != null && isGitHubSelected() )
 			{
@@ -2236,6 +2288,13 @@ public final class MainFrame
 	}
 
 	private volatile java.nio.file.Path pendingInstallerToLaunch = null;
+
+	/**
+	 * true si ESTA sesion arranco el servidor o importo un mundo: solo entonces el
+	 * cierre paga el status completo del repo. Restos de sesiones anteriores se
+	 * resuelven por el flujo del mundo (START hace backup, PULL ofrece rescate).
+	 */
+	private volatile boolean worldSessionDirty = false;
 
 	/** El cierre solo hace backup si hay algo que salvar; ante la duda, se salva. */
 	private boolean worldHasUnsavedChanges()
