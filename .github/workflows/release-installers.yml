@@ -95,7 +95,7 @@ jobs:
         run: |
           mkdir -p stage dist
           POM_VERSION=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)
-          cp "target/Peer_To_Peer_Minecraft_Server_System-$POM_VERSION.jar" stage/P2PMSS.jar
+          cp "target/Endershare-$POM_VERSION.jar" stage/Endershare.jar
 
       - name: Instalador DMG (macOS)
         if: matrix.kind == 'dmg'
@@ -103,11 +103,11 @@ jobs:
         env:
           VERSION: ${{ steps.tag.outputs.version }}
         run: |
-          jpackage --type dmg --name P2PMSS --app-version "$VERSION" \
+          jpackage --type dmg --name Endershare --app-version "$VERSION" \
             --icon packaging/P2PMSS.icns \
-            --input stage --main-jar P2PMSS.jar --main-class view.MainFrame --dest dist
+            --input stage --main-jar Endershare.jar --main-class view.MainFrame --dest dist
           for built in dist/*.dmg; do
-            [ "$built" = "dist/P2PMSS-$VERSION.dmg" ] || mv "$built" "dist/P2PMSS-$VERSION.dmg"
+            [ "$built" = "dist/Endershare-$VERSION.dmg" ] || mv "$built" "dist/Endershare-$VERSION.dmg"
           done
 
       - name: Instalador EXE (Windows)
@@ -116,15 +116,16 @@ jobs:
         env:
           VERSION: ${{ steps.tag.outputs.version }}
         run: |
-          # El upgrade-uuid FIJO hace que cada version REEMPLACE a la anterior en el
-          # mismo directorio: los accesos directos sobreviven a las actualizaciones
-          jpackage --type exe --name P2PMSS --app-version "$VERSION" \
+          # El upgrade-uuid FIJO (y el vendor original) hace que cada version
+          # REEMPLACE a la anterior aunque el nombre visible haya cambiado a
+          # Endershare: NO tocar ninguno de los dos
+          jpackage --type exe --name Endershare --app-version "$VERSION" \
             --vendor P2PMSS --win-upgrade-uuid 61CF6467-CAD1-4F24-B033-3BD205D8D7CE \
             --icon packaging/P2PMSS.ico \
-            --input stage --main-jar P2PMSS.jar --main-class view.MainFrame \
+            --input stage --main-jar Endershare.jar --main-class view.MainFrame \
             --win-shortcut --win-menu --win-per-user-install --dest dist
           for built in dist/*.exe; do
-            [ "$built" = "dist/P2PMSS-$VERSION.exe" ] || mv "$built" "dist/P2PMSS-$VERSION.exe"
+            [ "$built" = "dist/Endershare-$VERSION.exe" ] || mv "$built" "dist/Endershare-$VERSION.exe"
           done
 
       - name: Jar portable (cualquier sistema)
@@ -132,11 +133,11 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ steps.tag.outputs.version }}
-        run: cp stage/P2PMSS.jar "dist/P2PMSS-$VERSION.jar"
+        run: cp stage/Endershare.jar "dist/Endershare-$VERSION.jar"
 
       - name: Adjuntar asset a la release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
-        run: gh release upload "$TAG" dist/P2PMSS-* --clobber
+        run: gh release upload "$TAG" dist/Endershare-* --clobber

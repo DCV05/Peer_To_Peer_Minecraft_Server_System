@@ -104,7 +104,7 @@ public final class SelfUpdater
 				command.add( "cmd" );
 				command.add( "/c" );
 				command.add( "start" );
-				command.add( "\"P2PMSS update\"" );
+				command.add( "\"Endershare update\"" );
 				command.add( installer.toAbsolutePath().toString() );
 			}
 			else if( osName.contains( "mac" ) && name.endsWith( ".dmg" ) )
@@ -166,7 +166,7 @@ public final class SelfUpdater
 		String dmg = installer.toAbsolutePath().toString();
 		Files.writeString( script, """
 				#!/bin/bash
-				# Instalador automatico de P2PMSS para macOS (generado por la app)
+				# Instalador automatico de Endershare para macOS (generado por la app)
 				DMG="%s"
 				MOUNT=$(mktemp -d)/p2pmss-update
 				mkdir -p "$MOUNT"
@@ -204,6 +204,6 @@ public final class SelfUpdater
 			if( lastDot >= 0 && lastDot > lowered.lastIndexOf( '/' ) )
 				extension = lowered.substring( lastDot );
 		}
-		return "P2PMSS-" + version + extension;
+		return "Endershare-" + version + extension;
 	}
 }

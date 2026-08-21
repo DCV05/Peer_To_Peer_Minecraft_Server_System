@@ -62,7 +62,7 @@ public final class MinecraftLauncher
 				ObjectNode profile = profiles.has( PROFILE_ID ) && profiles.get( PROFILE_ID ) instanceof ObjectNode reused
 						? reused
 						: profiles.putObject( PROFILE_ID );
-				profile.put( "name", "P2PMSS · " + worldName );
+				profile.put( "name", "Endershare · " + worldName );
 				profile.put( "type", "custom" );
 				profile.put( "icon", "Grass" );
 				profile.put( "lastVersionId", minecraftVersion );

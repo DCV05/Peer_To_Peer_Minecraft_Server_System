@@ -107,7 +107,7 @@ public final class FabricInstaller
 		if( Files.isRegularFile( jvmArgs ) )
 			return;
 		Files.writeString( jvmArgs,
-				"# JVM arguments for the Fabric server managed by P2PMSS.\n"
+				"# JVM arguments for the Fabric server managed by Endershare.\n"
 						+ "-Xmx4G\n",
 				StandardCharsets.UTF_8 );
 	}

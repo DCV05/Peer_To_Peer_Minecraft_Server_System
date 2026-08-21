@@ -296,7 +296,7 @@ public final class MainFrame
 
 		frame.setIconImages( icons );
 
-		frame.setTitle( "Peer To Peer Minecraft Server System" );
+		frame.setTitle( "Endershare" );
 
 		// DO_NOTHING_ON_CLOSE arriba + este listener: la X no puede cerrar la ventana
 		// de golpe, tiene que pasar por el guardado y la liberacion del lock
@@ -1160,7 +1160,7 @@ public final class MainFrame
 			String[] options = {"UPDATE NOW", "LATER"};
 			int choice = JOptionPane.showOptionDialog(
 					frame,
-					"P2PMSS " + release.version() + " is available (you are running " + app.UpdateChecker.currentVersion() + ").\n"
+					"Endershare " + release.version() + " is available (you are running " + app.UpdateChecker.currentVersion() + ").\n"
 							+ "The app downloads the installer, closes itself and opens the installer for you.",
 					"Update available",
 					JOptionPane.YES_NO_OPTION,
@@ -2477,7 +2477,7 @@ public final class MainFrame
 		catch( IOException cannotWrite )
 		{
 			JOptionPane.showMessageDialog( null,
-					"P2PMSS cannot write its data folder:\n"
+					"Endershare cannot write its data folder:\n"
 							+ app.AppPaths.data() + "\n\n"
 							+ "Check the permissions of your user home directory.",
 					"Folder not writable", JOptionPane.ERROR_MESSAGE );

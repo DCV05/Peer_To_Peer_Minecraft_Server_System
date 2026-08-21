@@ -32,7 +32,7 @@ class MinecraftLauncherTest
 
 		JsonNode root = JSON.readTree( Files.readString( profiles ) );
 		JsonNode created = root.path( "profiles" ).path( MinecraftLauncher.PROFILE_ID );
-		assertEquals( "P2PMSS · farmland", created.path( "name" ).asText() );
+		assertEquals( "Endershare · farmland", created.path( "name" ).asText() );
 		assertEquals( "1.19", created.path( "lastVersionId" ).asText() );
 		// Los perfiles del usuario no se tocan
 		assertEquals( "latest-release", root.path( "profiles" ).path( "vanilla" ).path( "lastVersionId" ).asText() );

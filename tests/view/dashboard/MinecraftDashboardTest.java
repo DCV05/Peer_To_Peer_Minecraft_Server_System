@@ -413,7 +413,7 @@ class MinecraftDashboardTest
 		} );
 
 		String report = dashboard.diagnosticsReport();
-		assertTrue( report.contains( "P2PMSS" ) );
+		assertTrue( report.contains( "Endershare" ) );
 		assertTrue( report.contains( "Phase: OFFLINE" ) );
 		assertTrue( report.contains( "Backup confirmed on GitHub" ) );
 	}

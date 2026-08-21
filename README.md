@@ -1,6 +1,6 @@
-# Peer To Peer Minecraft Server System
+# Endershare
 
-Peer To Peer Minecraft Server System is a desktop application designed to solve one of the most common problems when playing **Minecraft Java Edition** with friends:  
+Endershare (formerly Peer To Peer Minecraft Server System) is a desktop application designed to solve one of the most common problems when playing **Minecraft Java Edition** with friends:  
 the server depends entirely on a single host who is not always available to keep it running or even online at the same time as the rest of the group.
 
 This application allows a group of players to **share the responsibility of hosting a Minecraft server**, enabling any member to start the server on their own machine and continue playing **exactly where the progress was left**, without requiring the original host to be online.
@@ -74,7 +74,7 @@ The desktop interface uses an operations-first layout with persistent pages for 
 - Keeps `server.properties` and `user_jvm_args.txt` local to each host
 
 **Important:**  
-Use the dashboard stop control (or enter `stop` in its console). P2PMSS waits for Forge to finish saving and only then starts the verified cloud backup.
+Use the dashboard stop control (or enter `stop` in its console). Endershare waits for Forge to finish saving and only then starts the verified cloud backup.
 
 ---
 
@@ -99,11 +99,11 @@ Mods are also synchronized through the cloud.
 #### Automatic Private Server Backup
 After a GitHub account is connected, opening an offline server automatically creates and links a **private** repository (Git installation is not required). The same check runs before start, after stop, and before the application exits.
 
-Large existing servers are not staged as one enormous push. P2PMSS inspects the complete tree first, divides changed files into conservative commit batches, pushes each batch separately, and continues only after the remote confirms it. A network failure leaves the accepted batches in GitHub and the pending batch locally, so **Retry private backup** resumes the process.
+Large existing servers are not staged as one enormous push. Endershare inspects the complete tree first, divides changed files into conservative commit batches, pushes each batch separately, and continues only after the remote confirms it. A network failure leaves the accepted batches in GitHub and the pending batch locally, so **Retry private backup** resumes the process.
 
 Generated logs, crash reports, temporary session locks, and local import rollback folders are excluded. The playable server state—including the world, mods, configuration, Forge libraries, and startup files—remains versioned. Files over GitHub's 100 MiB per-object limit are rejected before a remote repository is created, with the blocking path shown in the dashboard.
 
-To use this feature, sign in with a GitHub **classic personal access token** carrying the `repo` scope. P2PMSS validates the token against GitHub and derives the account identity itself.
+To use this feature, sign in with a GitHub **classic personal access token** carrying the `repo` scope. Endershare validates the token against GitHub and derives the account identity itself.
 
 It is recommended to use a separate GitHub account to avoid mixing personal or professional repositories.
 
@@ -182,7 +182,7 @@ The specific VPN software does not matter, as long as all users are connected to
    Select Minecraft and Forge versions.
 
 3. **Log in to GitHub**
-   Generate a classic token with the `repo` scope and log in. P2PMSS creates the private repository and uploads the offline server automatically.
+   Generate a classic token with the `repo` scope and log in. Endershare creates the private repository and uploads the offline server automatically.
 
 4. **Invite server members** (multiplayer)  
    `Git > Add hosting user` and enter GitHub usernames.

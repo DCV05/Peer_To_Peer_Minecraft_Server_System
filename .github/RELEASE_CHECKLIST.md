@@ -21,7 +21,7 @@ avisar al equipo de que actualice.
 
 - [ ] La tarjeta del mundo muestra el estado correcto (FREE / LIVE con aforo)
 - [ ] Con un host activo: COPY IP copia la dirección del túnel y funciona en el juego
-- [ ] PLAY abre el launcher con el perfil "P2PMSS · <mundo>" y la versión correcta
+- [ ] PLAY abre el launcher con el perfil "Endershare · <mundo>" y la versión correcta
 - [ ] SAVE & CLOSE: backup confirmado y el otro peer puede arrancar al momento
 
 ## Si algo falla

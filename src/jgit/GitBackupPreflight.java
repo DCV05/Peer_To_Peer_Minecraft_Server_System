@@ -15,7 +15,7 @@ import java.util.Locale;
  * Revisa un servidor de Minecraft ANTES de que Git lo prepare para subir.
  *
  * <p>GitHub rechaza objetos Git sueltos de más de 100 MiB y limita cada push a
- * 2 GiB. P2PMSS se queda muy por debajo del límite de push construyendo commits
+ * 2 GiB. Endershare se queda muy por debajo del límite de push construyendo commits
  * de 256 MiB; este preflight rechaza además los ficheros que Git normal no puede
  * representar en absoluto. Los ficheros generados en tiempo de ejecución se
  * ignoran tanto aquí como en el {@code .gitignore} gestionado por
@@ -178,7 +178,7 @@ public final class GitBackupPreflight
 			{
 				result = Result.rejected( totalBytes, files, largeFiles, blockedFiles,
 						"This server needs " + humanSize( totalBytes )
-								+ ". P2PMSS caps GitHub world repositories at the recommended 10 GiB size; no remote repository was created." );
+								+ ". Endershare caps GitHub world repositories at the recommended 10 GiB size; no remote repository was created." );
 				break;
 			}
 

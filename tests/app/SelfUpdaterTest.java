@@ -90,9 +90,9 @@ class SelfUpdaterTest
 	@Test
 	void installerFileNameKeepsThePlatformExtension()
 	{
-		assertEquals( "P2PMSS-1.8.0.exe", SelfUpdater.installerFileName( "https://example.test/x/P2PMSS-1.8.0.exe", "1.8.0" ) );
-		assertEquals( "P2PMSS-1.8.0.dmg", SelfUpdater.installerFileName( "https://example.test/x/P2PMSS-1.8.0.DMG", "1.8.0" ) );
-		assertEquals( "P2PMSS-1.8.0.jar", SelfUpdater.installerFileName( null, "1.8.0" ) );
+		assertEquals( "Endershare-1.8.0.exe", SelfUpdater.installerFileName( "https://example.test/x/Endershare-1.8.0.exe", "1.8.0" ) );
+		assertEquals( "Endershare-1.8.0.dmg", SelfUpdater.installerFileName( "https://example.test/x/Endershare-1.8.0.DMG", "1.8.0" ) );
+		assertEquals( "Endershare-1.8.0.jar", SelfUpdater.installerFileName( null, "1.8.0" ) );
 	}
 
 	@Test

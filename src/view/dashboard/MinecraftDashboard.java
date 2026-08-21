@@ -52,7 +52,7 @@ import static view.dashboard.DashboardTheme.TEXT_DIM;
 import static view.dashboard.DashboardTheme.TEXT_MUTED;
 
 /**
- * Dashboard operativo de P2PMSS.
+ * Dashboard operativo de Endershare.
  *
  * A proposito no contiene ni una linea de Forge, Git o red: MainFrame le pasa
  * el estado real y las acciones, y esta clase solo posee la jerarquia visual y
@@ -300,7 +300,7 @@ public final class MinecraftDashboard extends JPanel
 
 	private final JLabel phaseSquare = new JLabel( "■" );
 	private final JLabel phaseLabel = DashboardTheme.eyebrow( "NO SERVER" );
-	private final JLabel contextLabel = DashboardTheme.eyebrow( "P2P SERVER CONTROL" );
+	private final JLabel contextLabel = DashboardTheme.eyebrow( "ENDERSHARE CONTROL" );
 	private final JLabel pageTitle = DashboardTheme.label( "Overview", TEXT, 30, Font.PLAIN );
 	private final JLabel serverPathLabel = DashboardTheme.label( "Open or create a Minecraft server to begin", TEXT_MUTED, 11, Font.PLAIN );
 	private final JLabel accountStatus = DashboardTheme.label( "■  GITHUB OFFLINE", TEXT_MUTED, 11, Font.PLAIN );
@@ -598,7 +598,7 @@ public final class MinecraftDashboard extends JPanel
 		brand.setOpaque( false );
 		brand.setLayout( new BoxLayout( brand, BoxLayout.Y_AXIS ) );
 		brand.setBorder( BorderFactory.createEmptyBorder( 19, 20, 18, 16 ) );
-		JLabel name = DashboardTheme.label( "P2P MINECRAFT", TEXT, 14, Font.PLAIN );
+		JLabel name = DashboardTheme.label( "ENDERSHARE", TEXT, 14, Font.PLAIN );
 		// La version va siempre a la vista: los reportes de fallos llegan con captura
 		// y sin ella no se sabe contra que build se esta depurando
 		String descriptorText = "/ SERVER CONTROL · v" + app.UpdateChecker.currentVersion();
@@ -771,7 +771,7 @@ public final class MinecraftDashboard extends JPanel
 	private JPanel buildOnboardingPage()
 	{
 		JPanel page = pagePanel();
-		page.add( sectionHeading( "WELCOME TO P2P MINECRAFT", "Choose how this computer will join the shared hosting workflow." ) );
+		page.add( sectionHeading( "WELCOME TO ENDERSHARE", "Choose how this computer will join the shared hosting workflow." ) );
 
 		JPanel primary = sectionPanel();
 		primary.setLayout( new BorderLayout( 24, 0 ) );
@@ -1387,7 +1387,7 @@ public final class MinecraftDashboard extends JPanel
 		phaseLabel.setForeground( state.phase().color() );
 		String context = state.serverLoaded()
 				? state.loader().toUpperCase( Locale.ROOT ) + " SERVER CONTROL"
-				: "P2P SERVER CONTROL";
+				: "ENDERSHARE CONTROL";
 		contextLabel.setText( context );
 		serverPathLabel.setText( state.serverPath() );
 		errorBanner.setText( state.errorMessage() );
@@ -1905,7 +1905,7 @@ public final class MinecraftDashboard extends JPanel
 	String diagnosticsReport()
 	{
 		StringBuilder report = new StringBuilder();
-		report.append( "P2PMSS " ).append( app.UpdateChecker.currentVersion() )
+		report.append( "Endershare " ).append( app.UpdateChecker.currentVersion() )
 				.append( " · " ).append( System.getProperty( "os.name", "?" ) )
 				.append( ' ' ).append( System.getProperty( "os.version", "" ) ).append( '\n' );
 		report.append( "Phase: " ).append( state.phase() )
