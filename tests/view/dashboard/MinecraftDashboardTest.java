@@ -370,4 +370,52 @@ class MinecraftDashboardTest
 		SwingUtilities.invokeAndWait( () -> dashboard.setState( stateWithServers( MinecraftDashboard.Phase.OFFLINE, changed ) ) );
 		assertTrue( serversListChildren( dashboard ).length > second.length );
 	}
+
+	@Test
+	void worldStatusAndConnectAddressRenderOnServerRows() throws Exception
+	{
+		AtomicReference<MinecraftDashboard> reference = new AtomicReference<>();
+		SwingUtilities.invokeAndWait( () -> reference.set( new MinecraftDashboard( new MinecraftDashboard.Actions()
+		{
+		} ) ) );
+		MinecraftDashboard dashboard = reference.get();
+
+		// Un mundo vivo con direccion publicada y un mundo suscrito sin copia local
+		List<MinecraftDashboard.ServerEntry> servers = List.of(
+				new MinecraftDashboard.ServerEntry( "farmland", "/tmp/farm", "FABRIC READY", false,
+						"LIVE · Vikkavv hosting · 2/4 · MC 1.19", "farm.ply.gg:123", false ),
+				new MinecraftDashboard.ServerEntry( "otro_mundo", "DCV05/otro_mundo", "REMOTE WORLD", false,
+						"FREE TO HOST", null, true ) );
+		SwingUtilities.invokeAndWait( () -> dashboard.setState( stateWithServers( MinecraftDashboard.Phase.OFFLINE, servers ) ) );
+
+		String rendered = renderedText( serversListChildren( dashboard ) );
+		assertTrue( rendered.contains( "LIVE · Vikkavv hosting · 2/4 · MC 1.19" ) );
+		assertTrue( rendered.contains( "COPY IP" ) );
+		assertTrue( rendered.contains( "FREE TO HOST" ) );
+		// Solo el server local ofrece OPEN: el mundo remoto sin clonar no tiene
+		// carpeta que abrir, asi que de dos filas sale UN solo boton OPEN
+		assertEquals( 1, rendered.split( "\nOPEN\n", -1 ).length - 1 );
+	}
+
+	/** Aplana el texto visible (labels y botones) de un arbol de componentes. */
+	private static String renderedText( Component[] roots )
+	{
+		StringBuilder collected = new StringBuilder();
+		for( Component root : roots )
+			collectText( root, collected );
+		return collected.toString();
+	}
+
+	private static void collectText( Component component, StringBuilder collected )
+	{
+		if( component instanceof javax.swing.JLabel label )
+			collected.append( label.getText() ).append( '\n' );
+		if( component instanceof javax.swing.JButton button )
+			collected.append( button.getText() ).append( '\n' );
+		if( component instanceof java.awt.Container container )
+		{
+			for( Component child : container.getComponents() )
+				collectText( child, collected );
+		}
+	}
 }

@@ -196,9 +196,9 @@ public final class MainFrame
 		worldStatusScanner = new app.WorldStatusScanner(
 				() -> app.WorldSubscriptions.all( quietNickname() ),
 				jgit.HostLock::readStatus,
-				status ->
-				{
-				} );
+				// Cada foto nueva repinta las tarjetas de mundos; el skip-if-equal del
+				// dashboard descarta los refrescos sin cambios reales
+				status -> SwingUtilities.invokeLater( this::refreshDashboardState ) );
 		worldStatusScanner.start();
 	}
 
@@ -1109,7 +1109,7 @@ public final class MainFrame
 				displayedSyncState,
 				lastSync,
 				dashboardError,
-				readRecentServers() );
+				decoratedRecentServers() );
 		dashboard.setState( dashboardState );
 		PlayitAgentFile playitAgent = loaded ? PlayitAgentFile.load( serverOpenedDirectory.toPath() ) : null;
 		boolean publicUrlEnabled = playitAgent != null && playitAgent.enabled;
@@ -1342,6 +1342,100 @@ public final class MainFrame
 		recentServersCache = entries;
 		recentServersCacheKey = cacheKey;
 		return entries;
+	}
+
+	// Path del server -> repo de GitHub; leer el remote toca disco, asi que se
+	// resuelve una sola vez por ruta ("" = sin repo enlazado)
+	private final java.util.concurrent.ConcurrentHashMap<String, String> repoNameByPath = new java.util.concurrent.ConcurrentHashMap<>();
+
+	private String repoFullNameForPath( String path )
+	{
+		String repo = repoNameByPath.computeIfAbsent( path, key ->
+		{
+			try
+			{
+				Path directory = Path.of( key );
+				String resolved = GitUtils.repoExistInPath( directory ) && GitUtils.hasRemoteOrigin( directory )
+						? GitUtils.remoteRepoFullName( directory )
+						: null;
+				return resolved == null ? "" : resolved;
+			}
+			catch( Exception unreadableRepo )
+			{
+				return "";
+			}
+		} );
+		return repo.isEmpty() ? null : repo;
+	}
+
+	/**
+	 * Filas de la pagina SERVERS: los servers locales recientes decorados con el
+	 * estado en vivo del escaner, mas los mundos suscritos que no estan clonados
+	 * en esta maquina. La base cacheada no incluye el estado: se decora en cada
+	 * refresco (baratisimo, es un lookup en memoria) para que las tarjetas
+	 * cambien en cuanto el escaner ve algo nuevo.
+	 */
+	private List<MinecraftDashboard.ServerEntry> decoratedRecentServers()
+	{
+		List<MinecraftDashboard.ServerEntry> base = readRecentServers();
+		if( worldStatusScanner == null )
+			return base;
+		List<MinecraftDashboard.ServerEntry> decorated = new ArrayList<>();
+		java.util.Set<String> coveredRepos = new java.util.HashSet<>();
+		for( MinecraftDashboard.ServerEntry entry : base )
+		{
+			String repo = repoFullNameForPath( entry.path() );
+			MinecraftDashboard.ServerEntry enriched = entry;
+			if( repo != null )
+			{
+				coveredRepos.add( repo );
+				var status = worldStatusScanner.statusOf( repo ).orElse( null );
+				if( status != null )
+				{
+					enriched = new MinecraftDashboard.ServerEntry( entry.name(), entry.path(), entry.detail(),
+							entry.selected(), worldStatusLine( status ), connectAddressOf( status ), false );
+				}
+			}
+			decorated.add( enriched );
+		}
+		// Mundos suscritos sin copia local: se ven (y se puede copiar su IP si
+		// estan vivos) aunque nunca se hayan clonado en esta maquina
+		for( String repo : app.WorldSubscriptions.all( quietNickname() ) )
+		{
+			if( coveredRepos.contains( repo ) )
+				continue;
+			var status = worldStatusScanner.statusOf( repo ).orElse( null );
+			String name = repo.contains( "/" ) ? repo.substring( repo.indexOf( '/' ) + 1 ) : repo;
+			decorated.add( new MinecraftDashboard.ServerEntry( name, repo, "REMOTE WORLD", false,
+					status == null ? "CHECKING…" : worldStatusLine( status ),
+					status == null ? null : connectAddressOf( status ), true ) );
+		}
+		return decorated;
+	}
+
+	private static String worldStatusLine( app.WorldStatusScanner.WorldStatus status )
+	{
+		String result;
+		if( !status.hosted() )
+		{
+			result = "FREE TO HOST";
+		}
+		else
+		{
+			result = status.mine() ? "LIVE · you are hosting" : "LIVE · " + status.hostNickname() + " hosting";
+			jgit.HostLock.HostDetails details = status.details();
+			if( details != null && details.onlinePlayers() >= 0 && details.maxPlayers() > 0 )
+				result += " · " + details.onlinePlayers() + "/" + details.maxPlayers();
+			if( details != null && details.minecraftVersion() != null )
+				result += " · MC " + details.minecraftVersion();
+		}
+		return result;
+	}
+
+	private static String connectAddressOf( app.WorldStatusScanner.WorldStatus status )
+	{
+		jgit.HostLock.HostDetails details = status.details();
+		return status.hosted() && details != null ? details.tunnelAddress() : null;
 	}
 
 	private void loadMostRecentServer()

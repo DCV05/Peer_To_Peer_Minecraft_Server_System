@@ -117,12 +117,19 @@ public final class MinecraftDashboard extends JPanel
 		}
 	}
 
-	public record ServerEntry( String name, String path, String detail, boolean selected )
+	public record ServerEntry( String name, String path, String detail, boolean selected,
+			String worldStatus, String connectAddress, boolean remoteOnly )
 	{
 		public ServerEntry {
 			name = valueOr( name, "Unnamed server" );
 			path = valueOr( path, "—" );
 			detail = valueOr( detail, "Forge server" );
+		}
+
+		/** Entrada local clasica, sin estado de mundo conocido. */
+		public ServerEntry( String name, String path, String detail, boolean selected )
+		{
+			this( name, path, detail, selected, null, null, false );
 		}
 	}
 
@@ -1846,14 +1853,50 @@ public final class MinecraftDashboard extends JPanel
 		copy.add( DashboardTheme.label( entry.name(), TEXT, 13, Font.PLAIN ) );
 		copy.add( Box.createVerticalStrut( 4 ) );
 		copy.add( DashboardTheme.label( entry.detail() + "  ·  " + entry.path(), TEXT_MUTED, 10, Font.PLAIN ) );
+		if( entry.worldStatus() != null )
+		{
+			copy.add( Box.createVerticalStrut( 4 ) );
+			// Verde solo cuando hay un mundo VIVO: es la señal de "puedes entrar ya"
+			boolean live = entry.worldStatus().startsWith( "LIVE" );
+			copy.add( DashboardTheme.label( entry.worldStatus(), live ? GREEN : TEXT_MUTED, 10, Font.PLAIN ) );
+		}
 		row.add( copy, BorderLayout.CENTER );
 
-		JButton open = actionButton( entry.selected() ? "CURRENT" : "OPEN",
-				entry.selected() ? DashboardTheme.ButtonKind.QUIET : DashboardTheme.ButtonKind.SECONDARY,
-				() -> actions.selectServer( entry.path() ) );
-		open.setEnabled( !entry.selected() );
-		row.add( open, BorderLayout.EAST );
+		JPanel rowActions = new JPanel();
+		rowActions.setOpaque( false );
+		rowActions.setLayout( new BoxLayout( rowActions, BoxLayout.Y_AXIS ) );
+		if( !entry.remoteOnly() )
+		{
+			JButton open = actionButton( entry.selected() ? "CURRENT" : "OPEN",
+					entry.selected() ? DashboardTheme.ButtonKind.QUIET : DashboardTheme.ButtonKind.SECONDARY,
+					() -> actions.selectServer( entry.path() ) );
+			open.setEnabled( !entry.selected() );
+			rowActions.add( open );
+		}
+		if( entry.connectAddress() != null && !entry.connectAddress().isBlank() )
+		{
+			if( rowActions.getComponentCount() > 0 )
+				rowActions.add( Box.createVerticalStrut( 4 ) );
+			// La direccion se copia, no se muestra entera: en la fila no cabe y
+			// el destino real es el boton de conectar del cliente de Minecraft
+			rowActions.add( actionButton( "COPY IP", DashboardTheme.ButtonKind.SECONDARY,
+					() -> copyToClipboard( entry.connectAddress() ) ) );
+		}
+		row.add( rowActions, BorderLayout.EAST );
 		return row;
+	}
+
+	private static void copyToClipboard( String value )
+	{
+		try
+		{
+			java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
+					.setContents( new java.awt.datatransfer.StringSelection( value ), null );
+		}
+		catch( Exception clipboardFailure )
+		{
+			// Sin portapapeles (headless, permisos): no hay nada util que hacer
+		}
 	}
 
 	private JLabel separatorLabel()
