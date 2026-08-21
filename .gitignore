@@ -5,3 +5,6 @@ tokens/
 /data
 /target/
 dependency-reduced-pom.xml
+
+# Documentacion interna de planes: solo local, nunca en GitHub
+/docs/
