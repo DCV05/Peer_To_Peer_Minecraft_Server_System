@@ -58,7 +58,7 @@ class UpdateCheckerTest
 	}
 
 	@Test
-	void newerReleaseIsReportedWithJarDownloadUrl() throws Exception
+	void newerCompleteReleaseIsReportedWithThePlatformInstaller() throws Exception
 	{
 		serveLatestRelease( """
 				{
@@ -66,7 +66,9 @@ class UpdateCheckerTest
 				  "html_url": "https://github.com/%s/releases/tag/v99.0.0-p2p",
 				  "assets": [
 				    { "name": "README.txt", "browser_download_url": "https://example.test/readme" },
-				    { "name": "P2PMSS-99.0.0.jar", "browser_download_url": "https://example.test/P2PMSS-99.0.0.jar" }
+				    { "name": "Endershare-99.0.0.jar", "browser_download_url": "https://example.test/app.jar" },
+				    { "name": "Endershare-99.0.0.dmg", "browser_download_url": "https://example.test/app.dmg" },
+				    { "name": "Endershare-99.0.0.exe", "browser_download_url": "https://example.test/app.exe" }
 				  ]
 				}
 				""".formatted( TEST_REPO ), 200 );
@@ -74,7 +76,30 @@ class UpdateCheckerTest
 		Optional<UpdateChecker.ReleaseInfo> release = UpdateChecker.findNewerRelease();
 		assertTrue( release.isPresent() );
 		assertEquals( "99.0.0", release.get().version() );
-		assertEquals( "https://example.test/P2PMSS-99.0.0.jar", release.get().downloadUrl() );
+		// El test corre en mac (local) y linux (CI): la URL esperada es la del
+		// primer instalador preferido por la plataforma actual
+		String extension = UpdateChecker.preferredAssetExtensions( System.getProperty( "os.name", "" ) ).get( 0 );
+		assertEquals( "https://example.test/app" + extension, release.get().downloadUrl() );
+	}
+
+	@Test
+	void halfUploadedReleaseIsNotOfferedOnDesktopPlatforms() throws Exception
+	{
+		// Solo el jar subido (el CI aun compila el dmg/exe): en mac/windows el
+		// chequeo debe callar y reintentar mas tarde, jamas instalar el jar
+		serveLatestRelease( """
+				{
+				  "tag_name": "v99.0.0-p2p",
+				  "assets": [ { "name": "Endershare-99.0.0.jar", "browser_download_url": "https://example.test/app.jar" } ]
+				}
+				""", 200 );
+
+		String os = System.getProperty( "os.name", "" ).toLowerCase();
+		Optional<UpdateChecker.ReleaseInfo> release = UpdateChecker.findNewerRelease();
+		if( os.contains( "mac" ) || os.contains( "win" ) )
+			assertTrue( release.isEmpty() );
+		else
+			assertTrue( release.isPresent() );
 	}
 
 	@Test
