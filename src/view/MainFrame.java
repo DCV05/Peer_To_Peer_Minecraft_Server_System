@@ -200,7 +200,36 @@ public final class MainFrame
 				// dashboard descarta los refrescos sin cambios reales
 				status -> SwingUtilities.invokeLater( this::refreshDashboardState ) );
 		worldStatusScanner.setTransitionListener( this::announceWorldTransition );
+		worldStatusScanner.setEventsReader( jgit.WorldEvents::fetchNew );
+		worldStatusScanner.setEventListener( this::onWorldEvent );
 		worldStatusScanner.start();
+	}
+
+	/**
+	 * Evento de otro peer llegado por el canal de GitHub. Los arranques/paradas
+	 * de host ya se notifican via transiciones del candado: aqui solo van a la
+	 * actividad; la notificacion de escritorio queda para el "quiero jugar".
+	 */
+	private void onWorldEvent( String repoFullName, jgit.WorldEvents.WorldEvent event )
+	{
+		String me = quietNickname();
+		if( me != null && me.equalsIgnoreCase( event.nick() ) )
+			return;
+		if( System.currentTimeMillis() - event.atMillis() > 10 * 60 * 1000L )
+			return;
+		String world = repoFullName.contains( "/" ) ? repoFullName.substring( repoFullName.indexOf( '/' ) + 1 ) : repoFullName;
+		switch( event.type() )
+		{
+			case "want_to_play" ->
+			{
+				String message = event.nick() + " wants to play " + world;
+				app.Notifier.notifyWorldEvent( "Endershare", message );
+				appendDashboardActivity( message );
+			}
+			case "host_started" -> appendDashboardActivity( event.nick() + " started hosting " + world );
+			case "host_stopped" -> appendDashboardActivity( event.nick() + " stopped hosting " + world );
+			default -> appendDashboardActivity( event.nick() + " · " + event.type() + " · " + world );
+		}
 	}
 
 	/**
@@ -249,6 +278,10 @@ public final class MainFrame
 			if( repo != null )
 				repos.add( repo );
 		}
+		// De paso se refresca cual es el mundo activo: corre en el hilo del
+		// escaner en cada tick, asi el canal de eventos sigue al server abierto
+		File opened = serverOpenedDirectory;
+		worldStatusScanner.setActiveRepo( opened == null ? null : repoFullNameForPath( opened.getPath() ) );
 		return new java.util.ArrayList<>( repos );
 	}
 
@@ -816,6 +849,16 @@ public final class MainFrame
 			public void playWorld( MinecraftDashboard.ServerEntry entry )
 			{
 				launchGameForWorld( entry );
+			}
+			@Override
+			public void wantToPlay( MinecraftDashboard.ServerEntry entry )
+			{
+				new Thread( () ->
+				{
+					String repo = entry.remoteOnly() ? entry.path() : repoFullNameForPath( entry.path() );
+					if( repo != null && jgit.WorldEvents.publish( repo, "want_to_play" ) )
+						appendDashboardActivity( "Ping sent: you want to play " + entry.name() );
+				}, "p2pmss-want-to-play" ).start();
 			}
 			@Override
 			public void cloneInvitedServer()
@@ -2320,6 +2363,7 @@ public final class MainFrame
 			{
 				if( HostLock.release( lockRepo ) )
 					appendDashboardActivity( "GitHub host lock released before exit" );
+				jgit.WorldEvents.publish( lockRepo, "host_stopped" );
 				activeHostLockRepo = null;
 			}
 
@@ -2682,6 +2726,7 @@ public final class MainFrame
 					else
 						appendDashboardActivity( "The host lock could not be released; it will expire on its own within "
 								+ (HostLock.DEFAULT_LEASE_SECONDS / 60) + " minutes" );
+					jgit.WorldEvents.publish( lockRepo, "host_stopped" );
 				}
 			}
 			activeHostLockRepo = null;
@@ -2828,6 +2873,7 @@ public final class MainFrame
 			{
 				publishHostDetails();
 				HostLock.heartbeat( repoFullName );
+				jgit.WorldEvents.publish( repoFullName, "host_started" );
 			}, "p2pmss-host-details-publish" ).start();
 		}
 	}

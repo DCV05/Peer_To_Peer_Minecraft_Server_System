@@ -41,6 +41,8 @@ public final class MockGitHub implements AutoCloseable
 		String lockSha;
 		Instant lockCommittedAt;
 		int shaCounter;
+		final Map<String, String> eventFiles = new java.util.LinkedHashMap<>();
+		int eventEtagVersion;
 	}
 
 	private final Map<String, RepoState> repositories = new HashMap<>();
@@ -140,6 +142,14 @@ public final class MockGitHub implements AutoCloseable
 			{
 				handleLockContents( exchange, method, repo );
 			}
+			else if( "contents/p2pmss/events".equals( rest ) && "GET".equals( method ) )
+			{
+				handleEventsListing( exchange, repo );
+			}
+			else if( rest.startsWith( "contents/p2pmss/events/" ) )
+			{
+				handleEventFile( exchange, method, repo, rest.substring( "contents/p2pmss/events/".length() ) );
+			}
 			else if( "commits".equals( rest ) && "GET".equals( method ) )
 			{
 				ArrayNode commits = JSON.createArrayNode();
@@ -224,6 +234,64 @@ public final class MockGitHub implements AutoCloseable
 				repo.lockSha = null;
 				repo.lockCommittedAt = null;
 				respond( exchange, 200, "{}" );
+			}
+			default -> respond( exchange, 404, "{\"message\":\"Not Found\"}" );
+		}
+	}
+
+	// ---- Canal de eventos: listado con ETag + fichero-por-evento -----------
+
+	private void handleEventsListing( HttpExchange exchange, RepoState repo ) throws IOException
+	{
+		if( repo.eventFiles.isEmpty() )
+		{
+			respond( exchange, 404, "{\"message\":\"Not Found\"}" );
+			return;
+		}
+		// El ETag reproduce lo esencial de la API real: sin cambios, 304 y a otra cosa
+		String etag = "\"events-" + repo.eventEtagVersion + "\"";
+		String requested = exchange.getRequestHeaders().getFirst( "If-None-Match" );
+		exchange.getResponseHeaders().add( "ETag", etag );
+		if( etag.equals( requested ) )
+		{
+			exchange.sendResponseHeaders( 304, -1 );
+			return;
+		}
+		ArrayNode listing = JSON.createArrayNode();
+		for( Map.Entry<String, String> file : repo.eventFiles.entrySet() )
+		{
+			listing.addObject().put( "name", file.getKey() ).put( "sha", file.getValue() );
+		}
+		respond( exchange, 200, listing.toString() );
+	}
+
+	private void handleEventFile( HttpExchange exchange, String method, RepoState repo, String fileName ) throws IOException
+	{
+		switch( method )
+		{
+			case "PUT" ->
+			{
+				JSON.readTree( exchange.getRequestBody() );
+				String sha = "event-sha-" + (++repo.shaCounter);
+				repo.eventFiles.put( fileName, sha );
+				repo.eventEtagVersion++;
+				respond( exchange, 201, "{\"content\":{\"sha\":\"" + sha + "\"}}" );
+			}
+			case "DELETE" ->
+			{
+				JsonNode body = JSON.readTree( exchange.getRequestBody() );
+				String expectedSha = body.path( "sha" ).asText( null );
+				String currentSha = repo.eventFiles.get( fileName );
+				if( currentSha == null )
+					respond( exchange, 404, "{\"message\":\"Not Found\"}" );
+				else if( !currentSha.equals( expectedSha ) )
+					respond( exchange, 409, "{\"message\":\"sha mismatch\"}" );
+				else
+				{
+					repo.eventFiles.remove( fileName );
+					repo.eventEtagVersion++;
+					respond( exchange, 200, "{}" );
+				}
 			}
 			default -> respond( exchange, 404, "{\"message\":\"Not Found\"}" );
 		}

@@ -236,6 +236,9 @@ public final class MinecraftDashboard extends JPanel
 		default void playWorld( ServerEntry entry )
 		{
 		}
+		default void wantToPlay( ServerEntry entry )
+		{
+		}
 		default void cloneInvitedServer()
 		{
 		}
@@ -1978,6 +1981,14 @@ public final class MinecraftDashboard extends JPanel
 			// el destino real es el boton de conectar del cliente de Minecraft
 			rowActions.add( actionButton( "COPY IP", DashboardTheme.ButtonKind.SECONDARY,
 					() -> copyToClipboard( entry.connectAddress() ) ) );
+		}
+		if( entry.worldStatus() != null && entry.worldStatus().startsWith( "FREE" ) )
+		{
+			if( rowActions.getComponentCount() > 0 )
+				rowActions.add( Box.createVerticalStrut( 4 ) );
+			// Ping al grupo por el canal de eventos de GitHub: "quiero jugar aqui"
+			rowActions.add( actionButton( "WANT TO PLAY", DashboardTheme.ButtonKind.SECONDARY,
+					() -> actions.wantToPlay( entry ) ) );
 		}
 		row.add( rowActions, BorderLayout.EAST );
 		return row;

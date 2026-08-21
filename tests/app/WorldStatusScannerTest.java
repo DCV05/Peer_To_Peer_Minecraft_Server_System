@@ -159,4 +159,33 @@ class WorldStatusScannerTest
 		scanner.tick();
 		assertEquals( 3, transitions.size() );
 	}
+
+	@Test
+	void pollsTheActiveWorldEventsOnEveryTickAndDeliversThem()
+	{
+		AtomicInteger polls = new AtomicInteger();
+		List<String> delivered = new ArrayList<>();
+		WorldStatusScanner scanner = new WorldStatusScanner( () -> List.of( "a/uno" ), repo -> free(), null );
+		scanner.setEventsReader( repo ->
+		{
+			polls.incrementAndGet();
+			return List.of( new jgit.WorldEvents.WorldEvent( 1L, "guest", "want_to_play", "1-guest-want_to_play.json", "s" ) );
+		} );
+		scanner.setEventListener( ( repo, event ) -> delivered.add( repo + ":" + event.type() ) );
+
+		// Sin repo activo: solo el refresco normal del mundo recoge sus eventos
+		scanner.tick();
+		assertEquals( 1, polls.get() );
+		assertEquals( List.of( "a/uno:want_to_play" ), delivered );
+
+		// Foto fresca y sin activo: ningun poll extra
+		scanner.tick();
+		assertEquals( 1, polls.get() );
+
+		// Con el mundo ACTIVO, sus eventos se consultan en cada tick
+		scanner.setActiveRepo( "a/uno" );
+		scanner.tick();
+		scanner.tick();
+		assertEquals( 3, polls.get() );
+	}
 }

@@ -49,6 +49,31 @@ public final class WorldStatusScanner
 	private final Map<String, WorldStatus> statuses = new ConcurrentHashMap<>();
 	private ScheduledExecutorService scheduler;
 	private volatile Consumer<Transition> transitionListener;
+	private volatile String activeRepo;
+	private volatile Function<String, List<jgit.WorldEvents.WorldEvent>> eventsReader;
+	private volatile java.util.function.BiConsumer<String, jgit.WorldEvents.WorldEvent> eventListener;
+
+	/**
+	 * Repo del server en el que se esta trabajando: sus eventos se consultan en
+	 * CADA tick (el ETag hace que los 304 no gasten cuota); el resto de mundos
+	 * solo cuando les toca su refresco normal.
+	 */
+	public void setActiveRepo( String repoFullName )
+	{
+		activeRepo = repoFullName;
+	}
+
+	/** Lector de eventos; en produccion {@code WorldEvents::fetchNew}, en tests un stub. */
+	public void setEventsReader( Function<String, List<jgit.WorldEvents.WorldEvent>> eventsReader )
+	{
+		this.eventsReader = eventsReader;
+	}
+
+	/** Avisado (repo, evento) por cada evento NUEVO, desde el hilo del escaner. */
+	public void setEventListener( java.util.function.BiConsumer<String, jgit.WorldEvents.WorldEvent> eventListener )
+	{
+		this.eventListener = eventListener;
+	}
 
 	/**
 	 * Avisado SOLO cuando un mundo cambia de verdad (libre<->hosteado o cambia el
@@ -135,6 +160,11 @@ public final class WorldStatusScanner
 	{
 		try
 		{
+			// El mundo activo se escucha en cada tick: es el canal "casi en vivo"
+			String live = activeRepo;
+			if( live != null )
+				pollEvents( live );
+
 			String candidate = null;
 			Instant oldest = null;
 			for( String repo : subscriptions.get() )
@@ -169,12 +199,28 @@ public final class WorldStatusScanner
 					|| (refreshed.hosted() && !java.util.Objects.equals( previous.hostNickname(), refreshed.hostNickname() )));
 			if( transitions != null && changed )
 				transitions.accept( new Transition( previous, refreshed ) );
+
+			// El refresco normal tambien recoge eventos del mundo que toco
+			if( !candidate.equals( activeRepo ) )
+				pollEvents( candidate );
 		}
 		catch( Exception scanFailure )
 		{
 			// Un fallo puntual (red, API) no puede matar el hilo programado: el
 			// siguiente tick lo reintenta de forma natural
 			Log.event( "WORLD_SCANNER", "Fallo refrescando el estado de un mundo", scanFailure );
+		}
+	}
+
+	private void pollEvents( String repoFullName )
+	{
+		Function<String, List<jgit.WorldEvents.WorldEvent>> reader = eventsReader;
+		java.util.function.BiConsumer<String, jgit.WorldEvents.WorldEvent> consumer = eventListener;
+		if( reader == null || consumer == null )
+			return;
+		for( jgit.WorldEvents.WorldEvent event : reader.apply( repoFullName ) )
+		{
+			consumer.accept( repoFullName, event );
 		}
 	}
 }
