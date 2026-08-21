@@ -1877,10 +1877,17 @@ public final class MinecraftDashboard extends JPanel
 		lifecycleSteps.put( phase, square );
 		row.add( square, BorderLayout.WEST );
 
-		JPanel copy = new JPanel( new BorderLayout() );
+		JPanel copy = new JPanel( new BorderLayout( 8, 0 ) );
 		copy.setOpaque( false );
 		copy.add( DashboardTheme.label( title, TEXT, 11, Font.PLAIN ), BorderLayout.WEST );
-		copy.add( DashboardTheme.label( detail, TEXT_DIM, 10, Font.PLAIN ), BorderLayout.EAST );
+		// El detalle va en CENTER, no en EAST: en EAST reclama su ancho preferido y
+		// en un panel estrecho (tres columnas en la misma fila) acaba PISANDO al
+		// titulo. En CENTER se queda con lo que sobra y se recorta con puntos
+		JLabel detailLabel = DashboardTheme.label( detail, TEXT_DIM, 10, Font.PLAIN );
+		detailLabel.setHorizontalAlignment( SwingConstants.RIGHT );
+		detailLabel.setMinimumSize( new Dimension( 0, detailLabel.getMinimumSize().height ) );
+		detailLabel.setToolTipText( detail );
+		copy.add( detailLabel, BorderLayout.CENTER );
 		row.add( copy, BorderLayout.CENTER );
 		parent.add( row );
 		parent.add( Box.createVerticalStrut( 4 ) );
