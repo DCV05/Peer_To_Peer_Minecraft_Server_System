@@ -24,7 +24,7 @@ import java.util.Set;
  *
  * <p>Con esto, el flujo completo host/invitado se prueba en cada push del CI
  * sin red, sin cuenta y sin cuota: la app apunta aqui via la system property
- * {@code p2pmss.githubApiBase} que ya existe para tests.</p>
+ * {@code endershare.githubApiBase} que ya existe para tests.</p>
  */
 public final class MockGitHub implements AutoCloseable
 {

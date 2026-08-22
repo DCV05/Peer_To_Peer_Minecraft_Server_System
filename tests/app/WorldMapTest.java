@@ -27,13 +27,13 @@ class WorldMapTest
 	@BeforeEach
 	void useATemporaryDataDirectory()
 	{
-		System.setProperty( "p2pmss.dataDirectory", temporary.resolve( "data" ).toString() );
+		System.setProperty( "endershare.dataDirectory", temporary.resolve( "data" ).toString() );
 	}
 
 	@AfterEach
 	void restoreDataDirectory()
 	{
-		System.clearProperty( "p2pmss.dataDirectory" );
+		System.clearProperty( "endershare.dataDirectory" );
 	}
 
 	@Test

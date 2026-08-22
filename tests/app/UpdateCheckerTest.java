@@ -24,8 +24,8 @@ class UpdateCheckerTest
 	@AfterEach
 	void tearDown()
 	{
-		System.clearProperty( "p2pmss.githubApiBase" );
-		System.clearProperty( "p2pmss.releasesRepo" );
+		System.clearProperty( "endershare.githubApiBase" );
+		System.clearProperty( "endershare.releasesRepo" );
 		if( server != null )
 			server.stop( 0 );
 	}
@@ -43,15 +43,15 @@ class UpdateCheckerTest
 			}
 		} );
 		server.start();
-		System.setProperty( "p2pmss.githubApiBase", "http://127.0.0.1:" + server.getAddress().getPort() );
-		System.setProperty( "p2pmss.releasesRepo", TEST_REPO );
+		System.setProperty( "endershare.githubApiBase", "http://127.0.0.1:" + server.getAddress().getPort() );
+		System.setProperty( "endershare.releasesRepo", TEST_REPO );
 	}
 
 	@Test
 	void repoAndVersionComeFromTheBuildWithSystemPropertyOverride()
 	{
 		assertEquals( UpdateChecker.DEFAULT_RELEASES_REPO, UpdateChecker.releasesRepo() );
-		System.setProperty( "p2pmss.releasesRepo", TEST_REPO );
+		System.setProperty( "endershare.releasesRepo", TEST_REPO );
 		assertEquals( TEST_REPO, UpdateChecker.releasesRepo() );
 		// La version bakeada por Maven debe existir y ser numerica, no el placeholder
 		assertFalse( UpdateChecker.normalizeVersion( UpdateChecker.currentVersion() ).isEmpty() );
@@ -137,9 +137,9 @@ class UpdateCheckerTest
 	{
 		com.fasterxml.jackson.databind.JsonNode assets = new com.fasterxml.jackson.databind.ObjectMapper().readTree( """
 				[
-				  { "name": "P2PMSS-99.0.0.jar", "browser_download_url": "https://example.test/app.jar" },
-				  { "name": "P2PMSS-99.0.0.dmg", "browser_download_url": "https://example.test/app.dmg" },
-				  { "name": "P2PMSS-99.0.0.exe", "browser_download_url": "https://example.test/app.exe" }
+				  { "name": "Endershare-99.0.0.jar", "browser_download_url": "https://example.test/app.jar" },
+				  { "name": "Endershare-99.0.0.dmg", "browser_download_url": "https://example.test/app.dmg" },
+				  { "name": "Endershare-99.0.0.exe", "browser_download_url": "https://example.test/app.exe" }
 				]
 				""" );
 		assertEquals( "https://example.test/app.dmg", UpdateChecker.pickDownloadUrl( assets, "Mac OS X" ) );
@@ -150,7 +150,7 @@ class UpdateCheckerTest
 		// el jar suelto dejaba la app instalada vieja; el siguiente chequeo la
 		// recogera cuando el instalador nativo este colgado
 		com.fasterxml.jackson.databind.JsonNode onlyJar = new com.fasterxml.jackson.databind.ObjectMapper().readTree(
-				"[ { \"name\": \"P2PMSS-99.0.0.jar\", \"browser_download_url\": \"https://example.test/app.jar\" } ]" );
+				"[ { \"name\": \"Endershare-99.0.0.jar\", \"browser_download_url\": \"https://example.test/app.jar\" } ]" );
 		assertEquals( null, UpdateChecker.pickDownloadUrl( onlyJar, "Mac OS X" ) );
 		assertEquals( null, UpdateChecker.pickDownloadUrl( onlyJar, "Windows 11" ) );
 		assertEquals( "https://example.test/app.jar", UpdateChecker.pickDownloadUrl( onlyJar, "Linux" ) );

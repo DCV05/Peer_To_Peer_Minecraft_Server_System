@@ -64,7 +64,7 @@ public final class WorldImportService
 
 				// Todo se prepara en una carpeta de staging dentro del propio servidor:
 				// asi el movimiento final es en el mismo volumen y puede ser atomico
-				staging = server.resolve( ".p2pmss-import-" + UUID.randomUUID() ).normalize();
+				staging = server.resolve( ".endershare-import-" + UUID.randomUUID() ).normalize();
 				Files.createDirectory( staging );
 				Path extracted = staging.resolve( "source" );
 				if( Files.isDirectory( candidate ) )
@@ -95,7 +95,7 @@ public final class WorldImportService
 				{
 					Path backupRoot = server.resolve( "world-import-backups" );
 					if( target.equals( backupRoot ) )
-						backupRoot = server.resolve( ".p2pmss-world-import-backups" );
+						backupRoot = server.resolve( ".endershare-world-import-backups" );
 					Files.createDirectories( backupRoot );
 					backup = uniqueBackupPath( backupRoot, target.getFileName().toString() );
 					move( target, backup );
@@ -301,7 +301,7 @@ public final class WorldImportService
 	private static void cleanupStaging( Path staging )
 	{
 		if( staging == null || !Files.exists( staging )
-				|| !staging.getFileName().toString().startsWith( ".p2pmss-import-" ) )
+				|| !staging.getFileName().toString().startsWith( ".endershare-import-" ) )
 			return;
 		try
 		{

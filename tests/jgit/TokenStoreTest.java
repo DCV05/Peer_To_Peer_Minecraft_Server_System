@@ -25,14 +25,14 @@ class TokenStoreTest
 	void configureIsolatedDataDirectory()
 	{
 		dataDirectory = temporaryDirectory.resolve( "data" );
-		System.setProperty( "p2pmss.dataDirectory", dataDirectory.toString() );
+		System.setProperty( "endershare.dataDirectory", dataDirectory.toString() );
 	}
 
 	@AfterEach
 	void clearConfiguration()
 	{
 		TokenStore.invalidateSession();
-		System.clearProperty( "p2pmss.dataDirectory" );
+		System.clearProperty( "endershare.dataDirectory" );
 	}
 
 	@Test

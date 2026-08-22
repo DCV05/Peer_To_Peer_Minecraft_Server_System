@@ -27,7 +27,7 @@ import view.MainFrame;
  * cierra. GitHub es {@link MockGitHub}; el repo del mundo es un bare local.
  *
  * <p>Cada peer es un data-dir distinto (la identidad y la sesion viven ahi),
- * cambiado via la system property {@code p2pmss.dataDirectory} que ya usan el
+ * cambiado via la system property {@code endershare.dataDirectory} que ya usan el
  * resto de tests.</p>
  */
 class TwoPeerFlowTest
@@ -41,8 +41,8 @@ class TwoPeerFlowTest
 	void tearDownSession()
 	{
 		TokenStore.invalidateSession();
-		System.clearProperty( "p2pmss.dataDirectory" );
-		System.clearProperty( "p2pmss.githubApiBase" );
+		System.clearProperty( "endershare.dataDirectory" );
+		System.clearProperty( "endershare.githubApiBase" );
 		HostLock.clearPublishedDetails();
 		MainFrame.serverOpenedDirectory = null;
 		if( github != null )
@@ -52,7 +52,7 @@ class TwoPeerFlowTest
 	/** Cambia de peer: su data-dir y su sesion de GitHub propios. */
 	private void actAs( String nickname, Path dataDirectory )
 	{
-		System.setProperty( "p2pmss.dataDirectory", dataDirectory.toString() );
+		System.setProperty( "endershare.dataDirectory", dataDirectory.toString() );
 		HostLock.clearPublishedDetails();
 		assertTrue( TokenStore.saveUserData( nickname, nickname + "@example.test", "token-" + nickname ) );
 	}
@@ -61,7 +61,7 @@ class TwoPeerFlowTest
 	void hostPublishesGuestSeesAndInheritsTheWorld() throws Exception
 	{
 		github = MockGitHub.start();
-		System.setProperty( "p2pmss.githubApiBase", github.baseUrl() );
+		System.setProperty( "endershare.githubApiBase", github.baseUrl() );
 		String worldRepo = "dcv/farmland";
 		github.registerRepository( worldRepo );
 
@@ -145,7 +145,7 @@ class TwoPeerFlowTest
 	void aStaleLeaseFromACrashedHostCanBeTakenOver() throws Exception
 	{
 		github = MockGitHub.start();
-		System.setProperty( "p2pmss.githubApiBase", github.baseUrl() );
+		System.setProperty( "endershare.githubApiBase", github.baseUrl() );
 		String worldRepo = "dcv/farmland";
 		github.registerRepository( worldRepo );
 

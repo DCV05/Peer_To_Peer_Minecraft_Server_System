@@ -110,7 +110,7 @@ class MinecraftLauncherTest
 	@Test
 	void remembersTheChosenJoinVersionPerWorld() throws Exception
 	{
-		System.setProperty( "p2pmss.dataDirectory", temporaryDirectory.resolve( "data" ).toString() );
+		System.setProperty( "endershare.dataDirectory", temporaryDirectory.resolve( "data" ).toString() );
 		try
 		{
 			assertEquals( null, MinecraftLauncher.rememberedJoinVersion( "DCV05/farmland_mc" ) );
@@ -120,7 +120,7 @@ class MinecraftLauncherTest
 		}
 		finally
 		{
-			System.clearProperty( "p2pmss.dataDirectory" );
+			System.clearProperty( "endershare.dataDirectory" );
 		}
 	}
 }

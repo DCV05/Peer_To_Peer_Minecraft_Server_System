@@ -8,15 +8,20 @@ import java.util.stream.Stream;
 
 /**
  * Single resolver for the app's private storage. The data lives in the user's
- * home ({@code ~/.p2pmss/data}) so the app works no matter where the jar sits
- * (Program Files, Desktop, a freshly extracted ZIP...). A legacy {@code ./data}
- * folder next to the jar is migrated in on first run and kept as a fallback if
- * the home directory cannot be created.
+ * home ({@code ~/.endershare/data}) so the app works no matter where the jar
+ * sits (Program Files, Desktop, a freshly extracted ZIP...).
+ *
+ * <p>Se migran dos sitios antiguos, sin borrar ninguno: la carpeta del nombre
+ * anterior ({@code ~/.p2pmss/data}) y un {@code ./data} de al lado del jar. Una
+ * persona que actualiza no puede perder su sesion de GitHub ni la lista de sus
+ * servidores porque la aplicacion haya cambiado de nombre.</p>
  */
 public final class AppPaths
 {
 
-	private static final String DATA_DIRECTORY_PROPERTY = "p2pmss.dataDirectory";
+	private static final String DATA_DIRECTORY_PROPERTY = "endershare.dataDirectory";
+	/** Nombre anterior de la propiedad; se sigue aceptando para no romper scripts. */
+	private static final String LEGACY_DATA_DIRECTORY_PROPERTY = "p2pmss.dataDirectory";
 	private static volatile Path resolvedDataDirectory = null;
 
 	private AppPaths()
@@ -26,6 +31,8 @@ public final class AppPaths
 	public static Path data()
 	{
 		String overridden = System.getProperty( DATA_DIRECTORY_PROPERTY );
+		if( overridden == null )
+			overridden = System.getProperty( LEGACY_DATA_DIRECTORY_PROPERTY );
 		// La property de tests se evalua SIEMPRE: los tests la ponen y quitan por caso
 		if( overridden != null )
 			return Path.of( overridden );
@@ -45,8 +52,9 @@ public final class AppPaths
 
 	private static Path resolveDataDirectory()
 	{
-		Path legacy = Path.of( "data" ).toAbsolutePath();
-		Path home = Path.of( System.getProperty( "user.home" ), ".p2pmss", "data" );
+		Path besideTheJar = Path.of( "data" ).toAbsolutePath();
+		Path previousName = Path.of( System.getProperty( "user.home" ), ".p2pmss", "data" );
+		Path home = Path.of( System.getProperty( "user.home" ), ".endershare", "data" );
 		Path result = home;
 		do
 		{
@@ -63,35 +71,40 @@ public final class AppPaths
 			{
 				// Home no escribible (permisos, perfil movil): se degrada al ./data
 				// de al lado del jar en vez de dejar la app sin almacenamiento
-				Log.event( "APP_PATHS", "No se pudo crear " + home + ", se usa el data local " + legacy, homeUnavailable );
-				result = legacy;
+				Log.event( "APP_PATHS", "No se pudo crear " + home + ", se usa el data local " + besideTheJar,
+						homeUnavailable );
+				result = besideTheJar;
 				break;
 			}
 
-			if( Files.isDirectory( legacy ) && !legacy.equals( home ) )
+			// Primero lo del nombre anterior, que es lo que tiene la gente que ya
+			// usaba la aplicacion; despues el ./data suelto, mas viejo todavia
+			for( Path older : new Path[] { previousName, besideTheJar } )
 			{
+				if( !Files.isDirectory( older ) || older.equals( home ) )
+					continue;
 				try
 				{
-					migrateLegacyData( legacy, home );
+					copyMissingFiles( older, home );
 				}
 				catch( IOException partialMigration )
 				{
-					// Migracion incompleta: se sigue con lo copiado; el legacy queda intacto
-					Log.event( "APP_PATHS", "Migracion parcial de " + legacy + " a " + home, partialMigration );
+					// Migracion incompleta: se sigue con lo copiado; el origen queda intacto
+					Log.event( "APP_PATHS", "Migracion parcial de " + older + " a " + home, partialMigration );
 				}
 			}
 		} while( false );
 		return result;
 	}
 
-	/** Copies the legacy tree into the home directory without deleting the original. */
-	private static void migrateLegacyData( Path legacy, Path home ) throws IOException
+	/** Copia lo que falte sin borrar ni pisar nada del destino. */
+	private static void copyMissingFiles( Path from, Path to ) throws IOException
 	{
-		try (Stream<Path> tree = Files.walk( legacy ))
+		try (Stream<Path> tree = Files.walk( from ))
 		{
 			for( Path source : tree.toList() )
 			{
-				Path destination = home.resolve( legacy.relativize( source ).toString() );
+				Path destination = to.resolve( from.relativize( source ).toString() );
 				if( Files.isDirectory( source ) )
 				{
 					Files.createDirectories( destination );

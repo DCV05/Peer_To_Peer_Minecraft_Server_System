@@ -677,7 +677,7 @@ public final class GitWindows
 	/** La base se puede sobreescribir por system property para poder testear contra un servidor local. */
 	private static String githubApiBase()
 	{
-		String base = System.getProperty( "p2pmss.githubApiBase", "https://api.github.com" );
+		String base = System.getProperty( "endershare.githubApiBase", "https://api.github.com" );
 		boolean endsWithSlash = base.endsWith( "/" );
 		return endsWithSlash ? base.substring( 0, base.length() - 1 ) : base;
 	}

@@ -1,5 +1,5 @@
 // Vendorizado del plugin oficial playit-cloud/playit-minecraft-plugin (MIT).
-// Cambios P2PMSS: base URL configurable via -Dp2pmss.playitApiBase (tests),
+// Cambios Endershare: base URL configurable via -Dendershare.playitApiBase (tests),
 // sin JavaTimeModule (los modelos no usan java.time) y mapper tolerante a
 // campos nuevos que playit pueda añadir a su API.
 package gg.playit.api;
@@ -28,7 +28,7 @@ public class ApiClient
 
 	static String apiBaseUrl()
 	{
-		return System.getProperty( "p2pmss.playitApiBase", "https://api.playit.gg" );
+		return System.getProperty( "endershare.playitApiBase", "https://api.playit.gg" );
 	}
 
 	public ApiClient( String agentSecret )

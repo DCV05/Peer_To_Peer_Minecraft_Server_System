@@ -44,7 +44,7 @@ class PlayitTunnelTest
 		server = HttpServer.create( new InetSocketAddress( "127.0.0.1", 0 ), 0 );
 		server.createContext( "/", this::handleRequest );
 		server.start();
-		System.setProperty( "p2pmss.playitApiBase", "http://127.0.0.1:" + server.getAddress().getPort() );
+		System.setProperty( "endershare.playitApiBase", "http://127.0.0.1:" + server.getAddress().getPort() );
 	}
 
 	@AfterEach
@@ -52,7 +52,7 @@ class PlayitTunnelTest
 	{
 		if( server != null )
 			server.stop( 0 );
-		System.clearProperty( "p2pmss.playitApiBase" );
+		System.clearProperty( "endershare.playitApiBase" );
 	}
 
 	@Test
@@ -223,7 +223,7 @@ class PlayitTunnelTest
 						return;
 					}
 					respond( exchange, "{\"status\":\"success\",\"data\":{\"tunnels\":[{"
-							+ "\"id\":\"t-1\",\"name\":\"P2PMSS\",\"tunnel_type\":\"minecraft-java\","
+							+ "\"id\":\"t-1\",\"name\":\"Endershare\",\"tunnel_type\":\"minecraft-java\","
 							+ "\"connect_addresses\":[{\"type\":\"auto\",\"value\":{\"address\":\"farmland.ply.gg:25565\"}}]}]}}" );
 				}
 				case "/v1/tunnels/create" ->

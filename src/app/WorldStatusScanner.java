@@ -108,7 +108,7 @@ public final class WorldStatusScanner
 			return;
 		scheduler = Executors.newSingleThreadScheduledExecutor( runnable ->
 		{
-			Thread worker = new Thread( runnable, "p2pmss-world-scanner" );
+			Thread worker = new Thread( runnable, "endershare-world-scanner" );
 			worker.setDaemon( true );
 			return worker;
 		} );

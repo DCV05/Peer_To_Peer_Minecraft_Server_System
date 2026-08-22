@@ -76,7 +76,7 @@ public final class GitUtils
 	public static Thread autoSaveProcess = null; //By default.
 
 	public static final Path JOINED_REPOS = app.AppPaths.dataFile( "joined_repos.properties" );
-	private static final String GITHUB_API_PROPERTY = "p2pmss.githubApiBase";
+	private static final String GITHUB_API_PROPERTY = "endershare.githubApiBase";
 	static final Duration REQUEST_TIMEOUT = Duration.ofSeconds( 30 );
 	// Sin timeout, una red colgada a medias deja push/pull bloqueados para siempre
 	// (y con ellos el boton STOP). Valores generosos para mundos grandes.
@@ -84,15 +84,15 @@ public final class GitUtils
 	static final int CLONE_TIMEOUT_SECONDS = 1800;
 	static final HttpClient HTTP_CLIENT = HttpClient.newBuilder().connectTimeout( REQUEST_TIMEOUT ).build();
 	static final ObjectMapper JSON_MAPPER = new ObjectMapper();
-	private static final String BACKUP_IGNORE_START = "# BEGIN P2PMSS MANAGED BACKUP EXCLUDES";
-	private static final String BACKUP_IGNORE_END = "# END P2PMSS MANAGED BACKUP EXCLUDES";
+	private static final String BACKUP_IGNORE_START = "# BEGIN Endershare MANAGED BACKUP EXCLUDES";
+	private static final String BACKUP_IGNORE_END = "# END Endershare MANAGED BACKUP EXCLUDES";
 	private static final List<String> BACKUP_IGNORE_LINES = List.of(
 			BACKUP_IGNORE_START,
 			"# Runtime output and local rollback data are not part of a playable server backup.",
 			"/logs/",
 			"/crash-reports/",
 			"/world-import-backups/",
-			"/.p2pmss-import-*/",
+			"/.endershare-import-*/",
 			"/bluemap/",
 			"/.fabric/",
 			"# La RAM del server es por-maquina: compartirla solo genera conflictos.",
@@ -1761,7 +1761,7 @@ public final class GitUtils
 					performLiveSave();
 				}
 				serverAutoSaveIsActive = false;
-			}, "p2pmss-live-autosave" );
+			}, "endershare-live-autosave" );
 			autoSaveProcess.setDaemon( true );
 			autoSaveProcess.start();
 		}
@@ -2019,7 +2019,7 @@ public final class GitUtils
 							.setMessage( "Local snapshot before taking the remote world on " + LocalDate.now() )
 							.call();
 					// ...apuntado por una rama local que nunca se sube al remoto
-					snapshotBranch = "p2pmss-local-snapshot-" + java.time.LocalDateTime.now()
+					snapshotBranch = "endershare-local-snapshot-" + java.time.LocalDateTime.now()
 							.format( java.time.format.DateTimeFormatter.ofPattern( "yyyyMMdd-HHmmss" ) );
 					git.branchCreate().setName( snapshotBranch ).call();
 				}

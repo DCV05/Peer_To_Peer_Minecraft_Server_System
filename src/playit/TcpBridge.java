@@ -27,7 +27,7 @@ public final class TcpBridge
 	/** Launches the bridge on a daemon thread; onClose always runs once at the end. */
 	public static Thread open( InetSocketAddress claimAddress, byte[] claimToken, int minecraftPort, Runnable onClose )
 	{
-		Thread bridge = new Thread( () -> run( claimAddress, claimToken, minecraftPort, onClose ), "p2pmss-playit-bridge" );
+		Thread bridge = new Thread( () -> run( claimAddress, claimToken, minecraftPort, onClose ), "endershare-playit-bridge" );
 		bridge.setDaemon( true );
 		bridge.start();
 		return bridge;
@@ -69,7 +69,7 @@ public final class TcpBridge
 
 	private static Thread copyAsync( InputStream source, OutputStream destination, Socket toCloseOnEnd )
 	{
-		Thread pump = new Thread( () -> copy( source, destination, toCloseOnEnd ), "p2pmss-playit-bridge-up" );
+		Thread pump = new Thread( () -> copy( source, destination, toCloseOnEnd ), "endershare-playit-bridge-up" );
 		pump.setDaemon( true );
 		pump.start();
 		return pump;

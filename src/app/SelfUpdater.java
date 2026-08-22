@@ -168,7 +168,7 @@ public final class SelfUpdater
 				#!/bin/bash
 				# Instalador automatico de Endershare para macOS (generado por la app)
 				DMG="%s"
-				MOUNT=$(mktemp -d)/p2pmss-update
+				MOUNT=$(mktemp -d)/endershare-update
 				mkdir -p "$MOUNT"
 				sleep 3
 				if ! hdiutil attach "$DMG" -mountpoint "$MOUNT" -nobrowse -quiet; then

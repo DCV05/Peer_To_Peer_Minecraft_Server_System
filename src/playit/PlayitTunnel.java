@@ -241,7 +241,7 @@ public final class PlayitTunnel
 				return existing;
 
 			api.v1TunnelsCreate( new ReqTunnelsCreateV1(
-					"P2PMSS",
+					"Endershare",
 					new TunnelProtocol.TunnelTypeDetail( TunnelType.MinecraftJava ),
 					new AccountTunnelOriginCreate.Agent( new AgentOrigin( agentId, new AgentTunnelConfig() ) ),
 					new CreateTunnelEndpoint.Region( new UseAllocRegion( PlayitNetwork.Global, null ) ),
@@ -316,7 +316,7 @@ public final class PlayitTunnel
 			return;
 		running = true;
 		phase = Phase.CONNECTING;
-		worker = new Thread( this::runWorker, "p2pmss-playit-tunnel" );
+		worker = new Thread( this::runWorker, "endershare-playit-tunnel" );
 		worker.setDaemon( true );
 		worker.start();
 	}

@@ -23,7 +23,7 @@ jobs:
 
       - name: Ciclo del candado contra GitHub real
         env:
-          P2PMSS_E2E_REPO: ${{ secrets.E2E_WORLD_REPO }}
-          P2PMSS_E2E_NICK: ${{ secrets.E2E_WORLD_NICK }}
-          P2PMSS_E2E_TOKEN: ${{ secrets.E2E_WORLD_TOKEN }}
-        run: xvfb-run -a mvn -B test -Dtest=RealGitHubE2ETest -Dp2pmss.excludedTestGroups= -Dp2pmss.testGroups=e2e-real
+          Endershare_E2E_REPO: ${{ secrets.E2E_WORLD_REPO }}
+          Endershare_E2E_NICK: ${{ secrets.E2E_WORLD_NICK }}
+          Endershare_E2E_TOKEN: ${{ secrets.E2E_WORLD_TOKEN }}
+        run: xvfb-run -a mvn -B test -Dtest=RealGitHubE2ETest -Dendershare.excludedTestGroups= -Dendershare.testGroups=e2e-real

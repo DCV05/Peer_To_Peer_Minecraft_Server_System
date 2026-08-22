@@ -42,7 +42,7 @@ public final class FabricInstaller
 
 	static String metaBase()
 	{
-		return System.getProperty( "p2pmss.fabricMetaBase", "https://meta.fabricmc.net" );
+		return System.getProperty( "endershare.fabricMetaBase", "https://meta.fabricmc.net" );
 	}
 
 	// ---- FASE 1 — Catalogo de versiones estables ---------------------------

@@ -38,9 +38,9 @@ class UpdateChannelTest
 	@AfterEach
 	void tearDown()
 	{
-		System.clearProperty( "p2pmss.githubApiBase" );
-		System.clearProperty( "p2pmss.releasesRepo" );
-		System.clearProperty( "p2pmss.channel" );
+		System.clearProperty( "endershare.githubApiBase" );
+		System.clearProperty( "endershare.releasesRepo" );
+		System.clearProperty( "endershare.channel" );
 		if( server != null )
 			server.stop( 0 );
 	}
@@ -50,7 +50,7 @@ class UpdateChannelTest
 	{
 		assertEquals( UpdateChecker.STABLE_CHANNEL, UpdateChecker.currentChannel() );
 
-		System.setProperty( "p2pmss.channel", "dev" );
+		System.setProperty( "endershare.channel", "dev" );
 		assertEquals( UpdateChecker.DEV_CHANNEL, UpdateChecker.currentChannel() );
 	}
 
@@ -77,7 +77,7 @@ class UpdateChannelTest
 	@Test
 	void aDevInstallOnlyTakesPreReleases() throws Exception
 	{
-		System.setProperty( "p2pmss.channel", "dev" );
+		System.setProperty( "endershare.channel", "dev" );
 		AtomicReference<String> requestedPath = new AtomicReference<>();
 		// La definitiva es mas nueva, pero una instalacion de pruebas no debe cogerla
 		serve( requestedPath, """
@@ -107,7 +107,7 @@ class UpdateChannelTest
 	@Test
 	void aDevInstallWithNothingNewToTryStaysWhereItIs() throws Exception
 	{
-		System.setProperty( "p2pmss.channel", "dev" );
+		System.setProperty( "endershare.channel", "dev" );
 		serve( new AtomicReference<>(), """
 				[ { "tag_name": "v99.9.9", "prerelease": false, "draft": false, "html_url": "https://example.test/s",
 				    "assets": [ { "name": "Endershare-99.9.9.dmg", "browser_download_url": "https://example.test/s.dmg" },
@@ -180,7 +180,7 @@ class UpdateChannelTest
 			}
 		} );
 		server.start();
-		System.setProperty( "p2pmss.githubApiBase", "http://127.0.0.1:" + server.getAddress().getPort() );
-		System.setProperty( "p2pmss.releasesRepo", TEST_REPO );
+		System.setProperty( "endershare.githubApiBase", "http://127.0.0.1:" + server.getAddress().getPort() );
+		System.setProperty( "endershare.releasesRepo", TEST_REPO );
 	}
 }

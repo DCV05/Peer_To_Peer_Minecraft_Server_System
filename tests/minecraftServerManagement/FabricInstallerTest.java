@@ -37,7 +37,7 @@ class FabricInstallerTest
 		server = HttpServer.create( new InetSocketAddress( "127.0.0.1", 0 ), 0 );
 		server.createContext( "/", this::handleRequest );
 		server.start();
-		System.setProperty( "p2pmss.fabricMetaBase", "http://127.0.0.1:" + server.getAddress().getPort() );
+		System.setProperty( "endershare.fabricMetaBase", "http://127.0.0.1:" + server.getAddress().getPort() );
 	}
 
 	@AfterEach
@@ -45,7 +45,7 @@ class FabricInstallerTest
 	{
 		if( server != null )
 			server.stop( 0 );
-		System.clearProperty( "p2pmss.fabricMetaBase" );
+		System.clearProperty( "endershare.fabricMetaBase" );
 	}
 
 	@Test

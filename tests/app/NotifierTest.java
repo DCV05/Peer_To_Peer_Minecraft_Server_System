@@ -23,7 +23,7 @@ class NotifierTest
 	@BeforeEach
 	void isolateDataDirectory()
 	{
-		System.setProperty( "p2pmss.dataDirectory", temporaryDirectory.resolve( "data" ).toString() );
+		System.setProperty( "endershare.dataDirectory", temporaryDirectory.resolve( "data" ).toString() );
 		Notifier.setBackendForTests( ( title, message ) -> shown.add( title + ": " + message ) );
 	}
 
@@ -31,7 +31,7 @@ class NotifierTest
 	void restore()
 	{
 		Notifier.setBackendForTests( null );
-		System.clearProperty( "p2pmss.dataDirectory" );
+		System.clearProperty( "endershare.dataDirectory" );
 	}
 
 	@Test

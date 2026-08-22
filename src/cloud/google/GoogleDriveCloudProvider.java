@@ -54,7 +54,7 @@ import view.MainFrame;
 
 /**
  * Copias de seguridad del servidor sobre Google Drive. La jerarquia es siempre
- * P2PMSS-Backups/{nombre del servidor}/{zips}, y las carpetas se marcan con
+ * Endershare-Backups/{nombre del servidor}/{zips}, y las carpetas se marcan con
  * appProperties (app + type) para poder encontrarlas por consulta aunque el
  * usuario las mueva o las renombre en su Drive. Un host invitado no es dueno de
  * la carpeta raiz, de ahi que casi toda busqueda se repita con y sin el filtro
@@ -109,7 +109,7 @@ public final class GoogleDriveCloudProvider implements CloudStorageProvider
 			// El navegador vuelve a una pagina propia en vez de al "recibido" por
 			// defecto de la libreria: el usuario tiene que ver que ya puede cerrar
 			LocalServerReceiver receiver = new LocalServerReceiver.Builder().setPort( 8888 )
-					.setLandingPages( "https://p2pmss.vercel.app/OAuth/success", "https://p2pmss.vercel.app/OAuth/failed" ).build();
+					.setLandingPages( "https://endershare.vercel.app/OAuth/success", "https://endershare.vercel.app/OAuth/failed" ).build();
 
 			Credential authorizedCredential = new AuthorizationCodeInstalledApp( flow, receiver ).authorize( "user" );
 			this.credential = authorizedCredential;
@@ -148,7 +148,7 @@ public final class GoogleDriveCloudProvider implements CloudStorageProvider
 
 		try
 		{
-			String rootFolderId = getServerFolderIdWithMetadata( "P2PMSS-Backups", metadata, iAmOwner() );
+			String rootFolderId = getServerFolderIdWithMetadata( "Endershare-Backups", metadata, iAmOwner() );
 			String serverFolderId = getOrCreateServerFolderId( MainFrame.getServerName(), rootFolderId, metadataChildren, iAmOwner(),
 					false );
 			if( serverFolderId == null )
@@ -184,11 +184,11 @@ public final class GoogleDriveCloudProvider implements CloudStorageProvider
 
 	}
 
-	/** Solo el dueno tiene la carpeta del servidor colgando de SU raiz P2PMSS-Backups. */
+	/** Solo el dueno tiene la carpeta del servidor colgando de SU raiz Endershare-Backups. */
 	public boolean iAmOwner()
 	{
 		boolean result = false;
-		String rootFolderId = getServerFolderIdWithMetadata( "P2PMSS-Backups", metadata, true );
+		String rootFolderId = getServerFolderIdWithMetadata( "Endershare-Backups", metadata, true );
 		if( rootFolderId != null )
 			result = getServerFolderId( MainFrame.getServerName(), rootFolderId ) != null;
 		return result;
@@ -206,7 +206,7 @@ public final class GoogleDriveCloudProvider implements CloudStorageProvider
 			if( !ZipUtils.existsDirectory( serverDestinataryFolder ) )
 				ZipUtils.createDirectory( serverDestinataryFolder );
 
-			String parentFolderId = getServerFolderIdWithMetadata( "P2PMSS-Backups", metadata, iAmOwner() );
+			String parentFolderId = getServerFolderIdWithMetadata( "Endershare-Backups", metadata, iAmOwner() );
 			String serverFolderId = getOrCreateServerFolderId( MainFrame.getServerName(), parentFolderId, metadataChildren, iAmOwner(),
 					false );
 			// Si no cuelga de nuestra raiz, la carpeta es de otro dueno y llega
@@ -287,7 +287,7 @@ public final class GoogleDriveCloudProvider implements CloudStorageProvider
 			if( drive == null )
 				break;
 
-			String appFolderId = getServerFolderIdWithMetadata( "P2PMSS-Backups", metadata );
+			String appFolderId = getServerFolderIdWithMetadata( "Endershare-Backups", metadata );
 
 			String serverFolderId = getOrCreateServerFolderId( MainFrame.getServerName(), appFolderId, metadataChildren, iAmOwner(),
 					false );
@@ -536,7 +536,7 @@ public final class GoogleDriveCloudProvider implements CloudStorageProvider
 			if( drive == null )
 				break;
 
-			String parentFolderId = getServerFolderIdWithMetadata( "P2PMSS-Backups", metadata );
+			String parentFolderId = getServerFolderIdWithMetadata( "Endershare-Backups", metadata );
 			String folderId = getServerFolderId( MainFrame.getServerName(), parentFolderId );
 
 			// Sin carpeta propia no somos el dueno: un invitado no puede reinvitar
@@ -578,7 +578,7 @@ public final class GoogleDriveCloudProvider implements CloudStorageProvider
 		boolean result = false;
 		if( drive != null )
 		{
-			String parentFolderId = getServerFolderIdWithMetadata( "P2PMSS-Backups", metadata );
+			String parentFolderId = getServerFolderIdWithMetadata( "Endershare-Backups", metadata );
 			String serverFolder = getOrCreateServerFolderId( MainFrame.getServerName(), parentFolderId, metadataChildren, iAmOwner(),
 					false );
 			if( serverFolder == null )
@@ -596,7 +596,7 @@ public final class GoogleDriveCloudProvider implements CloudStorageProvider
 		if( drive == null )
 			return;
 
-		String parentId = getOrCreateServerFolderIdWithMetadata( "P2PMSS-Backups", metadata );
+		String parentId = getOrCreateServerFolderIdWithMetadata( "Endershare-Backups", metadata );
 		String backupFolderId = getOrCreateServerFolderId( MainFrame.getServerName(), parentId, metadataChildren, true, true );
 
 		// La carpeta se estrena con una copia: una carpeta vacia haria creer al

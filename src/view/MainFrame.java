@@ -350,7 +350,7 @@ public final class MainFrame
 					app.Log.event( "SERVER_LIFECYCLE", "El host lock no pudo liberarse al cerrar; caducara solo", releaseFailure );
 				}
 			}
-		}, "p2pmss-shutdown-cleanup" ) );
+		}, "endershare-shutdown-cleanup" ) );
 	}
 
 	// ---- FASE 3 — Construccion de la ventana y los menus ---------------------
@@ -383,9 +383,9 @@ public final class MainFrame
 
 
 		List<Image> icons = List.of(
-				new ImageIcon( MainFrame.class.getResource( "/icons/P2PMSSIcon-16.png" ) ).getImage(),
-				new ImageIcon( MainFrame.class.getResource( "/icons/P2PMSSIcon-32.png" ) ).getImage(),
-				new ImageIcon( MainFrame.class.getResource( "/icons/P2PMSSIcon-64.png" ) ).getImage() );
+				new ImageIcon( MainFrame.class.getResource( "/icons/EndershareIcon-16.png" ) ).getImage(),
+				new ImageIcon( MainFrame.class.getResource( "/icons/EndershareIcon-32.png" ) ).getImage(),
+				new ImageIcon( MainFrame.class.getResource( "/icons/EndershareIcon-64.png" ) ).getImage() );
 
 		frame.setIconImages( icons );
 
@@ -868,7 +868,7 @@ public final class MainFrame
 					String repo = entry.remoteOnly() ? entry.path() : repoFullNameForPath( entry.path() );
 					if( repo != null && jgit.WorldEvents.publish( repo, "want_to_play" ) )
 						appendDashboardActivity( "Ping sent: you want to play " + entry.name() );
-				}, "p2pmss-want-to-play" ).start();
+				}, "endershare-want-to-play" ).start();
 			}
 			@Override
 			public void cloneInvitedServer()
@@ -1307,7 +1307,7 @@ public final class MainFrame
 				}
 			}
 			startSelfUpdate( release );
-		} ) ), "p2pmss-update-check" );
+		} ) ), "endershare-update-check" );
 		checker.setDaemon( true );
 		checker.start();
 	}
@@ -1344,7 +1344,7 @@ public final class MainFrame
 				appendDashboardActivity( "Update " + release.version() + " downloaded; closing to install" );
 				saveAndClose();
 			} );
-		}, "p2pmss-update-download" );
+		}, "endershare-update-download" );
 		downloader.setDaemon( true );
 		downloader.start();
 	}
@@ -1746,7 +1746,7 @@ public final class MainFrame
 						: "Minecraft launcher not found on this machine";
 			}
 			appendDashboardActivity( summary );
-		}, "p2pmss-play-world" ).start();
+		}, "endershare-play-world" ).start();
 	}
 
 	/** PIDs que el detector de cliente debe ignorar: esta app y su server hosteado. */
@@ -2085,7 +2085,7 @@ public final class MainFrame
 					consoleArea = dashboard.consoleArea();
 					if( !consoleArea.getText().isBlank() )
 						consoleArea.append( "\n" );
-					consoleArea.append( "[p2pmss] Starting " + getServerName() + "…\n" );
+					consoleArea.append( "[endershare] Starting " + getServerName() + "…\n" );
 					serverWriter = ForgeUtils.configureServerWriter( serverProcess, serverWriter );
 					consoleThread = ForgeUtils.getServerOutputs( serverProcess, consoleArea, this::handleServerOutputLine );
 					dashboard.markServerStarted();
@@ -2098,7 +2098,7 @@ public final class MainFrame
 				app.Log.event( "SERVER_LIFECYCLE", "El arranque del servidor de Minecraft fallo", startFailure );
 				setDashboardFailure( "The Minecraft server could not be started. Check Java and the startup script." );
 			}
-		}, "p2pmss-dashboard-start" ).start();
+		}, "endershare-dashboard-start" ).start();
 	}
 
 	private void refreshNetworkAsync()
@@ -2115,7 +2115,7 @@ public final class MainFrame
 		lastHostLockCheckMillis = 0;
 		if( worldStatusScanner != null )
 			worldStatusScanner.refreshNow();
-		new Thread( this::checkServerStatus, "p2pmss-network-scan" ).start();
+		new Thread( this::checkServerStatus, "endershare-network-scan" ).start();
 	}
 
 	/**
@@ -2199,7 +2199,7 @@ public final class MainFrame
 					syncState = "FAILED";
 					setDashboardFailure( "GitHub synchronization failed. Check your connection and try again." );
 				}
-			}, "p2pmss-manual-sync" ).start();
+			}, "endershare-manual-sync" ).start();
 		} while( false );
 	}
 
@@ -2301,7 +2301,7 @@ public final class MainFrame
 				SwingUtilities.invokeLater( () -> JOptionPane.showMessageDialog( frame, result.message(),
 						"World import failed", JOptionPane.ERROR_MESSAGE ) );
 			}
-		}, "p2pmss-world-import" ).start();
+		}, "endershare-world-import" ).start();
 	}
 
 	private void openModsFolderFromDashboard()
@@ -2470,7 +2470,7 @@ public final class MainFrame
 						result.message() + "\n\nThe local world is safe. Use RETRY PRIVATE BACKUP after correcting the problem.",
 						"Private GitHub backup needs attention", JOptionPane.ERROR_MESSAGE ) );
 			}
-		}, "p2pmss-private-backup-setup" ).start();
+		}, "endershare-private-backup-setup" ).start();
 	}
 
 	private void selectGitHubProvider()
@@ -2515,7 +2515,7 @@ public final class MainFrame
 	private final java.util.concurrent.ExecutorService remoteRosterRefreshExecutor = java.util.concurrent.Executors
 			.newSingleThreadExecutor( runnable ->
 			{
-				Thread worker = new Thread( runnable, "p2pmss-remote-roster-refresh" );
+				Thread worker = new Thread( runnable, "endershare-remote-roster-refresh" );
 				worker.setDaemon( true );
 				return worker;
 			} );
@@ -2680,7 +2680,7 @@ public final class MainFrame
 				frame.dispose();
 				System.exit( 0 );
 			} );
-		}, "p2pmss-save-and-close" ).start();
+		}, "endershare-save-and-close" ).start();
 	}
 
 	private volatile java.nio.file.Path pendingInstallerToLaunch = null;
@@ -3070,7 +3070,7 @@ public final class MainFrame
 			} );
 			SwingUtilities.invokeLater( () -> frame.setCursor( Cursor.getDefaultCursor() ) );
 
-		}, "p2pmss-dashboard-stop" ).start();
+		}, "endershare-dashboard-stop" ).start();
 	}
 
 	/**
@@ -3125,7 +3125,7 @@ public final class MainFrame
 		if( repoFullName != null )
 		{
 			stopHostLockHeartbeat();
-			hostLockHeartbeatTimer = new java.util.Timer( "p2pmss-host-lock-heartbeat", true );
+			hostLockHeartbeatTimer = new java.util.Timer( "endershare-host-lock-heartbeat", true );
 			hostLockHeartbeatTimer.scheduleAtFixedRate( new java.util.TimerTask()
 			{
 				private int consecutiveFailures = 0;
@@ -3177,7 +3177,7 @@ public final class MainFrame
 				publishHostDetails();
 				HostLock.heartbeat( repoFullName );
 				jgit.WorldEvents.publish( repoFullName, "host_started" );
-			}, "p2pmss-host-details-publish" ).start();
+			}, "endershare-host-details-publish" ).start();
 		}
 	}
 
@@ -3200,7 +3200,7 @@ public final class MainFrame
 	private void startWorldMapLiveUpdates()
 	{
 		stopWorldMapLiveUpdates();
-		worldMapLiveTimer = new java.util.Timer( "p2pmss-world-map-live", true );
+		worldMapLiveTimer = new java.util.Timer( "endershare-world-map-live", true );
 		worldMapLiveTimer.scheduleAtFixedRate( new java.util.TimerTask()
 		{
 			@Override
@@ -3385,7 +3385,7 @@ public final class MainFrame
 			if( serverIsOn )
 				startPlayitTunnelIfConfigured();
 			SwingUtilities.invokeLater( MainFrame.this::refreshDashboardState );
-		}, "p2pmss-playit-claim" ).start();
+		}, "endershare-playit-claim" ).start();
 	}
 
 }

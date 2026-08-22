@@ -71,7 +71,7 @@ class GitUtilsAutoSaveTest
 	@BeforeEach
 	void configureFakeServer() throws Exception
 	{
-		System.setProperty( "p2pmss.dataDirectory", temporaryDirectory.resolve( "data" ).toString() );
+		System.setProperty( "endershare.dataDirectory", temporaryDirectory.resolve( "data" ).toString() );
 		assertTrue( TokenStore.saveUserData( "hoster", "hoster@example.test", "test-token" ) );
 		capturedCommands = new StringWriter();
 		originalTimeout = GitUtils.saveConfirmationTimeoutSeconds;
@@ -89,7 +89,7 @@ class GitUtilsAutoSaveTest
 		MainFrame.serverWriter = null;
 		MainFrame.serverOpenedDirectory = null;
 		TokenStore.invalidateSession();
-		System.clearProperty( "p2pmss.dataDirectory" );
+		System.clearProperty( "endershare.dataDirectory" );
 	}
 
 	@Test

@@ -33,6 +33,10 @@ public final class HostLock
 	// ---- FASE 1 — Contrato del lease ---------------------------------------
 
 	public static final String LOCK_BRANCH = "host-lock";
+	// El nombre de esta ruta NO se renombra con el resto del proyecto: vive
+	// dentro del repositorio del mundo y la leen los DOS peers. Cambiarla
+	// dejaria ciego al que todavia no haya actualizado, y con el candado
+	// invisible los dos podrian arrancar el mismo mundo a la vez
 	public static final String LOCK_FILE_PATH = "p2pmss/host-lock.json";
 	/** A heartbeat commit refreshes the lease every 5 minutes while Forge runs. */
 	public static final long HEARTBEAT_SECONDS = 300;

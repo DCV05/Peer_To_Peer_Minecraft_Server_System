@@ -104,7 +104,7 @@ jobs:
           VERSION: ${{ steps.tag.outputs.version }}
         run: |
           jpackage --type dmg --name Endershare --app-version "$VERSION" \
-            --icon packaging/P2PMSS.icns \
+            --icon packaging/Endershare.icns \
             --input stage --main-jar Endershare.jar --main-class view.MainFrame --dest dist
           for built in dist/*.dmg; do
             [ "$built" = "dist/Endershare-$VERSION.dmg" ] || mv "$built" "dist/Endershare-$VERSION.dmg"
@@ -121,7 +121,7 @@ jobs:
           # Endershare: NO tocar ninguno de los dos
           jpackage --type exe --name Endershare --app-version "$VERSION" \
             --vendor P2PMSS --win-upgrade-uuid 61CF6467-CAD1-4F24-B033-3BD205D8D7CE \
-            --icon packaging/P2PMSS.ico \
+            --icon packaging/Endershare.ico \
             --input stage --main-jar Endershare.jar --main-class view.MainFrame \
             --win-shortcut --win-menu --win-per-user-install --dest dist
           for built in dist/*.exe; do

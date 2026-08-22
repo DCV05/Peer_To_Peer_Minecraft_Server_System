@@ -43,13 +43,13 @@ class HostLockTest
 	@BeforeEach
 	void startApi() throws Exception
 	{
-		System.setProperty( "p2pmss.dataDirectory", temporaryDirectory.resolve( "data" ).toString() );
+		System.setProperty( "endershare.dataDirectory", temporaryDirectory.resolve( "data" ).toString() );
 		assertTrue( TokenStore.saveUserData( "hoster", "hoster@example.test", "test-token" ) );
 
 		server = HttpServer.create( new InetSocketAddress( "127.0.0.1", 0 ), 0 );
 		server.createContext( "/", this::handleRequest );
 		server.start();
-		System.setProperty( "p2pmss.githubApiBase", "http://127.0.0.1:" + server.getAddress().getPort() );
+		System.setProperty( "endershare.githubApiBase", "http://127.0.0.1:" + server.getAddress().getPort() );
 	}
 
 	@AfterEach
@@ -58,8 +58,8 @@ class HostLockTest
 		if( server != null )
 			server.stop( 0 );
 		TokenStore.invalidateSession();
-		System.clearProperty( "p2pmss.dataDirectory" );
-		System.clearProperty( "p2pmss.githubApiBase" );
+		System.clearProperty( "endershare.dataDirectory" );
+		System.clearProperty( "endershare.githubApiBase" );
 	}
 
 	private void placeLock( String hostNickname, Instant commitDate ) throws Exception
@@ -159,7 +159,7 @@ class HostLockTest
 	@Test
 	void failsClosedWhenGitHubIsUnreachable()
 	{
-		System.setProperty( "p2pmss.githubApiBase", "http://127.0.0.1:1" );
+		System.setProperty( "endershare.githubApiBase", "http://127.0.0.1:1" );
 		HostLock.AcquireResult result = HostLock.acquire( REPO );
 		assertFalse( result.acquired() );
 		assertFalse( result.blockedByPeer() );

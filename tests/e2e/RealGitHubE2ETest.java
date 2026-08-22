@@ -22,8 +22,8 @@ import jgit.TokenStore;
  * verdad. Solo corre cuando el entorno lo pide (workflow manual e2e-real):
  * sin las variables, el test se salta en silencio.
  *
- * <p>Variables: {@code P2PMSS_E2E_REPO} (owner/repo desechable),
- * {@code P2PMSS_E2E_NICK} y {@code P2PMSS_E2E_TOKEN} (PAT con scope repo).</p>
+ * <p>Variables: {@code Endershare_E2E_REPO} (owner/repo desechable),
+ * {@code Endershare_E2E_NICK} y {@code Endershare_E2E_TOKEN} (PAT con scope repo).</p>
  */
 @Tag("e2e-real")
 class RealGitHubE2ETest
@@ -35,20 +35,20 @@ class RealGitHubE2ETest
 	void tearDown()
 	{
 		TokenStore.invalidateSession();
-		System.clearProperty( "p2pmss.dataDirectory" );
+		System.clearProperty( "endershare.dataDirectory" );
 		HostLock.clearPublishedDetails();
 	}
 
 	@Test
 	void lockLifecycleAgainstTheRealGitHubApi() throws Exception
 	{
-		String repo = System.getenv( "P2PMSS_E2E_REPO" );
-		String nickname = System.getenv( "P2PMSS_E2E_NICK" );
-		String token = System.getenv( "P2PMSS_E2E_TOKEN" );
+		String repo = System.getenv( "Endershare_E2E_REPO" );
+		String nickname = System.getenv( "Endershare_E2E_NICK" );
+		String token = System.getenv( "Endershare_E2E_TOKEN" );
 		Assumptions.assumeTrue( repo != null && nickname != null && token != null,
-				"Sin P2PMSS_E2E_REPO/NICK/TOKEN este ensayo no corre" );
+				"Sin Endershare_E2E_REPO/NICK/TOKEN este ensayo no corre" );
 
-		System.setProperty( "p2pmss.dataDirectory", Files.createDirectories( temporaryDirectory.resolve( "data" ) ).toString() );
+		System.setProperty( "endershare.dataDirectory", Files.createDirectories( temporaryDirectory.resolve( "data" ) ).toString() );
 		assertTrue( TokenStore.saveUserData( nickname, nickname + "@example.test", token ) );
 
 		// Estado limpio de partida: si otro ensayo dejo el candado cogido y aun

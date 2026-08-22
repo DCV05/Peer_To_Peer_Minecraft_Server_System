@@ -35,7 +35,7 @@ import javax.swing.JOptionPane;
  */
 public final class TokenStore
 {
-	private static final String DATA_DIRECTORY_PROPERTY = "p2pmss.dataDirectory";
+	private static final String DATA_DIRECTORY_PROPERTY = "endershare.dataDirectory";
 
 	// ---- FASE 1 — Sesion persistida ----------------------------------------
 

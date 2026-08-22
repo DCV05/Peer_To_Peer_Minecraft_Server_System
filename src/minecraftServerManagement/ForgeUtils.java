@@ -514,7 +514,7 @@ public final class ForgeUtils
 								app.Log.event( "FORGE", "Host services could not be started after the server was ready",
 										hostServicesFailure );
 							}
-						}, "p2pmss-host-services" ).start();
+						}, "endershare-host-services" ).start();
 					}
 					// La respuesta al sondeo de jugadores (un "list" cada pocos segundos)
 					// alimenta al tracker pero no se pinta: solo ensucia la consola

@@ -71,8 +71,8 @@ class MinecraftServerE2ETest
 				serverProcess.destroyForcibly();
 		}
 		TokenStore.invalidateSession();
-		System.clearProperty( "p2pmss.dataDirectory" );
-		System.clearProperty( "p2pmss.githubApiBase" );
+		System.clearProperty( "endershare.dataDirectory" );
+		System.clearProperty( "endershare.githubApiBase" );
 		HostLock.clearPublishedDetails();
 		MainFrame.serverOpenedDirectory = null;
 		if( github != null )
@@ -84,8 +84,8 @@ class MinecraftServerE2ETest
 	{
 		// ---- Identidad y GitHub falso --------------------------------------
 		github = MockGitHub.start();
-		System.setProperty( "p2pmss.githubApiBase", github.baseUrl() );
-		System.setProperty( "p2pmss.dataDirectory", temporaryDirectory.resolve( "data" ).toString() );
+		System.setProperty( "endershare.githubApiBase", github.baseUrl() );
+		System.setProperty( "endershare.dataDirectory", temporaryDirectory.resolve( "data" ).toString() );
 		assertTrue( TokenStore.saveUserData( "hostA", "hostA@example.test", "token-hostA" ) );
 		String worldRepo = "dcv/e2e-world";
 		github.registerRepository( worldRepo );
@@ -107,7 +107,7 @@ class MinecraftServerE2ETest
 				simulation-distance=4
 				spawn-protection=0
 				max-players=4
-				motd=P2PMSS E2E
+				motd=Endershare E2E
 				""".formatted( port ) );
 
 		// ---- Enlazar el backup y coger el candado, como el flujo real ------

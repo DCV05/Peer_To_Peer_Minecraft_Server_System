@@ -33,7 +33,7 @@ class GitUtilsIntegrationTest
 	@BeforeEach
 	void configureSession()
 	{
-		System.setProperty( "p2pmss.dataDirectory", temporaryDirectory.resolve( "data" ).toString() );
+		System.setProperty( "endershare.dataDirectory", temporaryDirectory.resolve( "data" ).toString() );
 		assertTrue( TokenStore.saveUserData( "hoster", "hoster@example.test", "local-token" ) );
 	}
 
@@ -41,8 +41,8 @@ class GitUtilsIntegrationTest
 	void clearConfiguration()
 	{
 		TokenStore.invalidateSession();
-		System.clearProperty( "p2pmss.dataDirectory" );
-		System.clearProperty( "p2pmss.gitCommitBatchBytes" );
+		System.clearProperty( "endershare.dataDirectory" );
+		System.clearProperty( "endershare.gitCommitBatchBytes" );
 		MainFrame.serverOpenedDirectory = null;
 	}
 
@@ -221,7 +221,7 @@ class GitUtilsIntegrationTest
 	@Test
 	void uploadsLargeInitialTreesAsMultipleVerifiedCommits() throws Exception
 	{
-		System.setProperty( "p2pmss.gitCommitBatchBytes", "24" );
+		System.setProperty( "endershare.gitCommitBatchBytes", "24" );
 		Path remote = temporaryDirectory.resolve( "batched-remote.git" );
 		try (Git ignored = Git.init().setBare( true ).setDirectory( remote.toFile() ).call())
 		{
@@ -332,7 +332,7 @@ class GitUtilsIntegrationTest
 		String snapshotBranch = GitUtils.snapshotLocalChangesAndTakeRemote( hostB );
 
 		assertNotNull( snapshotBranch );
-		assertTrue( snapshotBranch.startsWith( "p2pmss-local-snapshot-" ) );
+		assertTrue( snapshotBranch.startsWith( "endershare-local-snapshot-" ) );
 		// La rama de trabajo queda en el mundo confirmado v2, con el arbol limpio
 		assertEquals( "world-v2\n", Files.readString( hostB.resolve( "world.txt" ) ) );
 		assertFalse( Files.exists( hostB.resolve( "leftover.txt" ) ) );

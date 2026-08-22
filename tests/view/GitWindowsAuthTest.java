@@ -25,7 +25,7 @@ class GitWindowsAuthTest
 		server = HttpServer.create( new InetSocketAddress( "127.0.0.1", 0 ), 0 );
 		server.createContext( "/user", this::handleUser );
 		server.start();
-		System.setProperty( "p2pmss.githubApiBase", "http://127.0.0.1:" + server.getAddress().getPort() );
+		System.setProperty( "endershare.githubApiBase", "http://127.0.0.1:" + server.getAddress().getPort() );
 	}
 
 	@AfterEach
@@ -33,7 +33,7 @@ class GitWindowsAuthTest
 	{
 		if( server != null )
 			server.stop( 0 );
-		System.clearProperty( "p2pmss.githubApiBase" );
+		System.clearProperty( "endershare.githubApiBase" );
 	}
 
 	@Test

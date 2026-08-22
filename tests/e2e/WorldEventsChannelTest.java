@@ -34,8 +34,8 @@ class WorldEventsChannelTest
 	void tearDown()
 	{
 		TokenStore.invalidateSession();
-		System.clearProperty( "p2pmss.dataDirectory" );
-		System.clearProperty( "p2pmss.githubApiBase" );
+		System.clearProperty( "endershare.dataDirectory" );
+		System.clearProperty( "endershare.githubApiBase" );
 	}
 
 	@Test
@@ -43,8 +43,8 @@ class WorldEventsChannelTest
 	{
 		try (MockGitHub github = MockGitHub.start())
 		{
-			System.setProperty( "p2pmss.githubApiBase", github.baseUrl() );
-			System.setProperty( "p2pmss.dataDirectory",
+			System.setProperty( "endershare.githubApiBase", github.baseUrl() );
+			System.setProperty( "endershare.dataDirectory",
 					Files.createDirectories( temporaryDirectory.resolve( "data" ) ).toString() );
 			assertTrue( TokenStore.saveUserData( "hoster", "hoster@example.test", "local-token" ) );
 			String repo = "team/events-flow";
@@ -75,8 +75,8 @@ class WorldEventsChannelTest
 	{
 		try (MockGitHub github = MockGitHub.start())
 		{
-			System.setProperty( "p2pmss.githubApiBase", github.baseUrl() );
-			System.setProperty( "p2pmss.dataDirectory",
+			System.setProperty( "endershare.githubApiBase", github.baseUrl() );
+			System.setProperty( "endershare.dataDirectory",
 					Files.createDirectories( temporaryDirectory.resolve( "data" ) ).toString() );
 			assertTrue( TokenStore.saveUserData( "hoster", "hoster@example.test", "local-token" ) );
 			String repo = "team/events-prune";

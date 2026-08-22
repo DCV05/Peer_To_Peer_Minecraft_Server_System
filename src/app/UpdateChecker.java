@@ -16,8 +16,8 @@ import java.util.Properties;
 /**
  * Checks the GitHub releases of the app and reports when a newer version
  * than the running one is published. The repository to watch and the current
- * version are baked into the jar at build time (see the p2pmss.releasesRepo
- * property in pom.xml and src/resources/p2pmss-update.properties), so every
+ * version are baked into the jar at build time (see the endershare.releasesRepo
+ * property in pom.xml and src/resources/endershare-update.properties), so every
  * fork points at its own releases just by compiling. Network failures are
  * treated as "no update available" so the startup flow keeps working offline.
  */
@@ -30,10 +30,10 @@ public final class UpdateChecker
 	public static final String STABLE_CHANNEL = "stable";
 	/** Canal de pruebas: solo ve las publicaciones marcadas como preliminares. */
 	public static final String DEV_CHANNEL = "dev";
-	private static final String BUILD_PROPERTIES_RESOURCE = "/p2pmss-update.properties";
-	private static final String GITHUB_API_PROPERTY = "p2pmss.githubApiBase";
-	private static final String RELEASES_REPO_PROPERTY = "p2pmss.releasesRepo";
-	private static final String CHANNEL_PROPERTY = "p2pmss.channel";
+	private static final String BUILD_PROPERTIES_RESOURCE = "/endershare-update.properties";
+	private static final String GITHUB_API_PROPERTY = "endershare.githubApiBase";
+	private static final String RELEASES_REPO_PROPERTY = "endershare.releasesRepo";
+	private static final String CHANNEL_PROPERTY = "endershare.channel";
 	private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds( 20 );
 	private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 	private static volatile Properties buildProperties = null;

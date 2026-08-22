@@ -22,7 +22,7 @@ class GitBackupPreflightTest
 	@AfterEach
 	void clearBatchOverride()
 	{
-		System.clearProperty( "p2pmss.gitCommitBatchBytes" );
+		System.clearProperty( "endershare.gitCommitBatchBytes" );
 	}
 
 	@Test
@@ -110,7 +110,7 @@ class GitBackupPreflightTest
 	@Test
 	void dividesSelectedFilesIntoBoundedCommitBatches()
 	{
-		System.setProperty( "p2pmss.gitCommitBatchBytes", "10" );
+		System.setProperty( "endershare.gitCommitBatchBytes", "10" );
 		List<GitBackupPreflight.FileEntry> files = List.of(
 				new GitBackupPreflight.FileEntry( Path.of( "a" ), 6 ),
 				new GitBackupPreflight.FileEntry( Path.of( "b" ), 4 ),
@@ -140,6 +140,6 @@ class GitBackupPreflightTest
 		assertTrue( GitUtils.ensureBackupIgnoreFile( temporaryDirectory ) );
 		String second = Files.readString( ignore );
 		assertEquals( first, second );
-		assertEquals( 1, second.split( "BEGIN P2PMSS", -1 ).length - 1 );
+		assertEquals( 1, second.split( "BEGIN Endershare", -1 ).length - 1 );
 	}
 }

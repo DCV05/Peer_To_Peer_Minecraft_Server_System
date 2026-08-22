@@ -101,7 +101,7 @@ class WorldImportServiceTest
 		assertEquals( "old-level", Files.readString( server.resolve( "world/level.dat" ) ) );
 		try (var paths = Files.list( server ))
 		{
-			assertFalse( paths.anyMatch( path -> path.getFileName().toString().startsWith( ".p2pmss-import-" ) ) );
+			assertFalse( paths.anyMatch( path -> path.getFileName().toString().startsWith( ".endershare-import-" ) ) );
 		}
 	}
 

@@ -26,6 +26,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public final class WorldEvents
 {
+	// El nombre de esta ruta NO se renombra con el resto del proyecto: vive
+	// dentro del repositorio del mundo y la leen los DOS peers. Cambiarla
+	// dejaria ciego al que todavia no haya actualizado, y con el candado
+	// invisible los dos podrian arrancar el mismo mundo a la vez
 	public static final String EVENTS_DIRECTORY = "p2pmss/events";
 	static final long MAX_EVENT_AGE_MILLIS = 60 * 60 * 1000L;
 

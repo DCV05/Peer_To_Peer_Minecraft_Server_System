@@ -25,7 +25,7 @@ public final class MinecraftLauncher
 
 	// ---- FASE 1 — Perfil en launcher_profiles.json -------------------------
 
-	static final String PROFILE_ID = "p2pmss-world";
+	static final String PROFILE_ID = "endershare-world";
 	private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
 	private MinecraftLauncher()

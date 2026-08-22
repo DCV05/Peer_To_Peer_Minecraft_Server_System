@@ -39,13 +39,13 @@ class GitHubApiTest
 	@BeforeEach
 	void startApi() throws Exception
 	{
-		System.setProperty( "p2pmss.dataDirectory", temporaryDirectory.resolve( "data" ).toString() );
+		System.setProperty( "endershare.dataDirectory", temporaryDirectory.resolve( "data" ).toString() );
 		assertTrue( TokenStore.saveUserData( "hoster", "hoster@example.test", "test-token" ) );
 
 		server = HttpServer.create( new InetSocketAddress( "127.0.0.1", 0 ), 0 );
 		server.createContext( "/", this::handleRequest );
 		server.start();
-		System.setProperty( "p2pmss.githubApiBase", "http://127.0.0.1:" + server.getAddress().getPort() );
+		System.setProperty( "endershare.githubApiBase", "http://127.0.0.1:" + server.getAddress().getPort() );
 	}
 
 	@AfterEach
@@ -54,9 +54,9 @@ class GitHubApiTest
 		if( server != null )
 			server.stop( 0 );
 		TokenStore.invalidateSession();
-		System.clearProperty( "p2pmss.githubApiBase" );
-		System.clearProperty( "p2pmss.dataDirectory" );
-		System.clearProperty( "p2pmss.gitCommitBatchBytes" );
+		System.clearProperty( "endershare.githubApiBase" );
+		System.clearProperty( "endershare.dataDirectory" );
+		System.clearProperty( "endershare.gitCommitBatchBytes" );
 	}
 
 	@Test
@@ -134,7 +134,7 @@ class GitHubApiTest
 	@Test
 	void createsPrivateRemoteAndUploadsEveryInitialBatchEndToEnd() throws Exception
 	{
-		System.setProperty( "p2pmss.gitCommitBatchBytes", "24" );
+		System.setProperty( "endershare.gitCommitBatchBytes", "24" );
 		Path remote = temporaryDirectory.resolve( "api-created-remote.git" );
 		try (Git ignored = Git.init().setBare( true ).setDirectory( remote.toFile() ).call())
 		{

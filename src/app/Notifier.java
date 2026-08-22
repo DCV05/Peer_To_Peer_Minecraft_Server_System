@@ -110,7 +110,7 @@ public final class Notifier
 				if( icon == null )
 				{
 					icon = new TrayIcon( Toolkit.getDefaultToolkit()
-							.createImage( Notifier.class.getResource( "/icons/P2PMSSIcon-16.png" ) ), "Endershare" );
+							.createImage( Notifier.class.getResource( "/icons/EndershareIcon-16.png" ) ), "Endershare" );
 					icon.setImageAutoSize( true );
 					SystemTray.getSystemTray().add( icon );
 					trayIcon = icon;

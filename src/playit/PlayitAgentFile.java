@@ -17,6 +17,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 public final class PlayitAgentFile
 {
 
+	// El nombre de esta ruta NO se renombra con el resto del proyecto: vive
+	// dentro del repositorio del mundo y la leen los DOS peers. Cambiarla
+	// dejaria ciego al que todavia no haya actualizado, y con el candado
+	// invisible los dos podrian arrancar el mismo mundo a la vez
 	public static final String RELATIVE_PATH = "p2pmss/playit-agent.json";
 
 	private static final ObjectMapper JSON = new ObjectMapper()

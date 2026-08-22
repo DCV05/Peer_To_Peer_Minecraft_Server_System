@@ -30,13 +30,13 @@ class SelfUpdaterTest
 	@BeforeEach
 	void isolateDataDirectory()
 	{
-		System.setProperty( "p2pmss.dataDirectory", temporaryDirectory.resolve( "data" ).toString() );
+		System.setProperty( "endershare.dataDirectory", temporaryDirectory.resolve( "data" ).toString() );
 	}
 
 	@AfterEach
 	void tearDown()
 	{
-		System.clearProperty( "p2pmss.dataDirectory" );
+		System.clearProperty( "endershare.dataDirectory" );
 		if( server != null )
 			server.stop( 0 );
 	}
@@ -62,13 +62,13 @@ class SelfUpdaterTest
 		byte[] payload = "fake-installer-bytes".getBytes( StandardCharsets.UTF_8 );
 		String url = serveInstaller( payload, 200 );
 
-		Path downloaded = SelfUpdater.downloadInstaller( url, "P2PMSS-9.9.9.exe" );
+		Path downloaded = SelfUpdater.downloadInstaller( url, "Endershare-9.9.9.exe" );
 
 		assertTrue( Files.isRegularFile( downloaded ) );
-		assertEquals( "P2PMSS-9.9.9.exe", downloaded.getFileName().toString() );
+		assertEquals( "Endershare-9.9.9.exe", downloaded.getFileName().toString() );
 		assertEquals( "fake-installer-bytes", Files.readString( downloaded ) );
 		// La descarga es atomica: no puede quedar un .part huerfano
-		assertFalse( Files.exists( SelfUpdater.updatesDirectory().resolve( "P2PMSS-9.9.9.exe.part" ) ) );
+		assertFalse( Files.exists( SelfUpdater.updatesDirectory().resolve( "Endershare-9.9.9.exe.part" ) ) );
 	}
 
 	@Test
@@ -76,15 +76,15 @@ class SelfUpdaterTest
 	{
 		String url = serveInstaller( "not found".getBytes( StandardCharsets.UTF_8 ), 404 );
 
-		assertThrows( IOException.class, () -> SelfUpdater.downloadInstaller( url, "P2PMSS-9.9.9.exe" ) );
-		assertFalse( Files.exists( SelfUpdater.updatesDirectory().resolve( "P2PMSS-9.9.9.exe" ) ) );
-		assertFalse( Files.exists( SelfUpdater.updatesDirectory().resolve( "P2PMSS-9.9.9.exe.part" ) ) );
+		assertThrows( IOException.class, () -> SelfUpdater.downloadInstaller( url, "Endershare-9.9.9.exe" ) );
+		assertFalse( Files.exists( SelfUpdater.updatesDirectory().resolve( "Endershare-9.9.9.exe" ) ) );
+		assertFalse( Files.exists( SelfUpdater.updatesDirectory().resolve( "Endershare-9.9.9.exe.part" ) ) );
 	}
 
 	@Test
 	void missingUrlThrowsInsteadOfDownloadingNothing()
 	{
-		assertThrows( IOException.class, () -> SelfUpdater.downloadInstaller( null, "P2PMSS-9.9.9.jar" ) );
+		assertThrows( IOException.class, () -> SelfUpdater.downloadInstaller( null, "Endershare-9.9.9.jar" ) );
 	}
 
 	@Test
@@ -105,10 +105,10 @@ class SelfUpdaterTest
 	@Test
 	void macInstallScriptReplacesTheAppAndFallsBackToOpeningTheDmg() throws Exception
 	{
-		System.setProperty( "p2pmss.dataDirectory", temporaryDirectory.toString() );
+		System.setProperty( "endershare.dataDirectory", temporaryDirectory.toString() );
 		try
 		{
-			java.nio.file.Path dmg = temporaryDirectory.resolve( "P2PMSS-9.9.9.dmg" );
+			java.nio.file.Path dmg = temporaryDirectory.resolve( "Endershare-9.9.9.dmg" );
 			java.nio.file.Files.writeString( dmg, "not a real dmg" );
 
 			java.nio.file.Path script = SelfUpdater.writeMacInstallScript( dmg );
@@ -124,7 +124,7 @@ class SelfUpdaterTest
 		}
 		finally
 		{
-			System.clearProperty( "p2pmss.dataDirectory" );
+			System.clearProperty( "endershare.dataDirectory" );
 		}
 	}
 }

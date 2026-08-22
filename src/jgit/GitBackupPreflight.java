@@ -35,7 +35,7 @@ public final class GitBackupPreflight
 	public static final long MAX_GITHUB_FILE_BYTES = 100L * MEBIBYTE;
 	public static final long COMMIT_BATCH_BYTES = 256L * MEBIBYTE;
 	public static final long MAX_RECOMMENDED_REPOSITORY_BYTES = 10L * 1024L * MEBIBYTE;
-	private static final String BATCH_SIZE_PROPERTY = "p2pmss.gitCommitBatchBytes";
+	private static final String BATCH_SIZE_PROPERTY = "endershare.gitCommitBatchBytes";
 
 	/** A regular file selected for backup, relative to the server root. */
 	public record FileEntry( Path relativePath, long size )
@@ -244,7 +244,7 @@ public final class GitBackupPreflight
 				|| "world-import-backups".equals( first )
 				|| "bluemap".equals( first )
 				|| ".fabric".equals( first )
-				|| first.startsWith( ".p2pmss-import-" )
+				|| first.startsWith( ".endershare-import-" )
 				|| ".DS_Store".equals( fileName )
 				|| "session.lock".equals( fileName )
 				// RAM por-maquina: cada peer tiene la suya y compartirla via backup

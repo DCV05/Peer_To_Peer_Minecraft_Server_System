@@ -21,13 +21,13 @@ class WorldSubscriptionsTest
 	@BeforeEach
 	void pointStorageAtTemporaryDirectory()
 	{
-		System.setProperty( "p2pmss.dataDirectory", temporaryDirectory.toString() );
+		System.setProperty( "endershare.dataDirectory", temporaryDirectory.toString() );
 	}
 
 	@AfterEach
 	void clearStorageOverride()
 	{
-		System.clearProperty( "p2pmss.dataDirectory" );
+		System.clearProperty( "endershare.dataDirectory" );
 	}
 
 	@Test
