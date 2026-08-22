@@ -1066,6 +1066,15 @@ public final class MinecraftDashboard extends JPanel
 	 */
 	public void showMapState( boolean enabled, boolean built, boolean building, String address )
 	{
+		showMapState( enabled, built, building, false, address );
+	}
+
+	/**
+	 * @param watching pasada terminada y vigilando: el mapa esta al dia y solo
+	 *        redibuja lo que cambia
+	 */
+	public void showMapState( boolean enabled, boolean built, boolean building, boolean watching, String address )
+	{
 		boolean served = address != null && !address.isBlank();
 		mapEnabledCheck.setSelected( enabled );
 		if( !enabled )
@@ -1088,6 +1097,15 @@ public final class MinecraftDashboard extends JPanel
 			mapStateValue.setForeground( TEXT );
 			mapDetail.setText( served ? "You can already open it and watch it fill in · " + address
 					: "Reading the world files…" );
+		}
+		else if( watching )
+		{
+			// El estado en el que interesa quedarse: todo dibujado y al dia solo
+			// con lo que cambia. Decir "construyendo" aqui seria mentir
+			mapStateValue.setText( "LIVE" );
+			mapStateValue.setForeground( GREEN );
+			mapDetail.setText( "Up to date, redrawing only what changes"
+					+ (served ? " · " + address : "") );
 		}
 		else if( built )
 		{

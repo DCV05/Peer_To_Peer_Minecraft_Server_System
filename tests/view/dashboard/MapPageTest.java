@@ -104,6 +104,20 @@ class MapPageTest
 	}
 
 	@Test
+	void onceTheFullPassEndsItSaysItIsLiveAndNotStillBuilding() throws Exception
+	{
+		MinecraftDashboard dashboard = createDashboard();
+		onEdt( () -> dashboard.showMapState( true, true, false, true, "http://127.0.0.1:8123/" ) );
+
+		assertEquals( "LIVE", labelText( dashboard, "mapStateValue" ),
+				"Se quedaria diciendo que construye para siempre aunque ya solo vigile" );
+		assertTrue( labelText( dashboard, "mapDetail" ).contains( "only what changes" ) );
+		assertTrue( button( dashboard, "openMapButton" ).isEnabled() );
+		assertTrue( button( dashboard, "buildMapButton" ).isEnabled(),
+				"Vigilando se puede rehacer el mapa si hiciera falta" );
+	}
+
+	@Test
 	void aBuiltMapOffersOpeningItAndRebuilding() throws Exception
 	{
 		MinecraftDashboard dashboard = createDashboard();

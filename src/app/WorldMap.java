@@ -69,6 +69,23 @@ public final class WorldMap
 	private static final AtomicReference<Process> runningProcess = new AtomicReference<>();
 	private static final AtomicReference<String> runningUrl = new AtomicReference<>();
 	private static volatile Path runningWorld;
+	/** Cierto cuando la pasada completa termino y el proceso solo vigila cambios. */
+	private static volatile boolean watchingOnly = false;
+	/** Aviso a la interfaz de que el mapa cambio de estado, para refrescarla. */
+	private static volatile Runnable stateListener = null;
+
+	/** La interfaz se apunta aqui para enterarse de cuando termina la pasada. */
+	public static void setStateListener( Runnable listener )
+	{
+		stateListener = listener;
+	}
+
+	private static void announceStateChange()
+	{
+		Runnable listener = stateListener;
+		if( listener != null )
+			listener.run();
+	}
 
 	private WorldMap()
 	{
@@ -215,10 +232,27 @@ public final class WorldMap
 		return result;
 	}
 
-	public static boolean isRenderingFor( Path worldRepository )
+	/** Hay un proceso de mapa vivo para ese mundo, dibujando o vigilando. */
+	public static boolean isRunningFor( Path worldRepository )
 	{
 		Process process = runningProcess.get();
 		return process != null && process.isAlive() && worldRepository.equals( runningWorld );
+	}
+
+	/** Esta dibujando ahora mismo (la pasada aun no ha terminado). */
+	public static boolean isRenderingFor( Path worldRepository )
+	{
+		return isRunningFor( worldRepository ) && !watchingOnly;
+	}
+
+	/**
+	 * Termino la pasada y ahora solo vigila: el mundo entero esta dibujado y se
+	 * redibuja unicamente lo que cambie. Es el estado en el que interesa
+	 * quedarse, y en pantalla no puede confundirse con "construyendo".
+	 */
+	public static boolean isWatchingFor( Path worldRepository )
+	{
+		return isRunningFor( worldRepository ) && watchingOnly;
 	}
 
 	/** Direccion del mapa mientras el proceso este vivo; vacio si no lo esta. */
@@ -283,6 +317,7 @@ public final class WorldMap
 		runningProcess.set( process );
 		runningUrl.set( url );
 		runningWorld = worldRepository;
+		watchingOnly = false;
 		TransferProgress.publish( "Building map", "Starting renderer", -1 );
 		followProgress( process );
 		return url;
@@ -293,6 +328,7 @@ public final class WorldMap
 		Process process = runningProcess.getAndSet( null );
 		runningUrl.set( null );
 		runningWorld = null;
+		watchingOnly = false;
 		if( process == null || !process.isAlive() )
 			return;
 		process.destroy();
@@ -358,9 +394,23 @@ public final class WorldMap
 					WorldMapProgress.parse( current ).ifPresent( step ->
 					{
 						if( step.finished() )
+						{
+							// Fin de la pasada: de aqui en adelante el proceso solo
+							// vigila, y la pantalla no puede seguir diciendo "construyendo"
+							watchingOnly = true;
 							TransferProgress.done();
+							announceStateChange();
+						}
 						else
+						{
+							if( watchingOnly )
+							{
+								// Algo ha cambiado en el mundo y se esta redibujando esa zona
+								watchingOnly = false;
+								announceStateChange();
+							}
 							TransferProgress.publish( "Building map", step.detail(), step.percent() );
+						}
 					} );
 				}
 			}

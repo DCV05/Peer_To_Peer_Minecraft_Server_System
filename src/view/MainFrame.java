@@ -207,6 +207,9 @@ public final class MainFrame
 			if( dashboard != null )
 				dashboard.showTransferProgress( snapshot.title(), snapshot.detail(), snapshot.percent(), snapshot.active() );
 		} ) );
+		// El mapa avisa cuando pasa de dibujar a vigilar (y al reves): sin esto la
+		// pantalla se quedaria en "construyendo" para siempre
+		app.WorldMap.setStateListener( () -> SwingUtilities.invokeLater( this::refreshWorldMapState ) );
 		worldStatusScanner.setEventsReader( jgit.WorldEvents::fetchNew );
 		worldStatusScanner.setEventListener( this::onWorldEvent );
 		worldStatusScanner.start();
@@ -1385,7 +1388,8 @@ public final class MainFrame
 		}
 		Path repository = opened.toPath();
 		dashboard.showMapState( app.WorldMap.isEnabledFor( repository ), app.WorldMap.hasBuiltMap( repository ),
-				app.WorldMap.isRenderingFor( repository ), app.WorldMap.currentUrl().orElse( null ) );
+				app.WorldMap.isRenderingFor( repository ), app.WorldMap.isWatchingFor( repository ),
+				app.WorldMap.currentUrl().orElse( null ) );
 	}
 
 	/**
