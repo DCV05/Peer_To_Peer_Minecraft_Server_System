@@ -355,6 +355,19 @@ public final class WorldMap
 	public static String startRendering( Path worldRepository, Path worldDirectory, boolean fullDetail,
 			boolean gameRunningHere ) throws IOException
 	{
+		return startRendering( worldRepository, worldDirectory, fullDetail, gameRunningHere, false );
+	}
+
+	/**
+	 * @param redrawEverything rehacer el mapa entero en vez de solo lo que haya
+	 *        cambiado en el mundo. Hace falta cuando lo que cambia es COMO se
+	 *        dibuja (calidad, ajustes de una dimension): el renderizador mira los
+	 *        ficheros del mundo, no la configuracion, asi que sin esto no
+	 *        redibujaria nada y el boton de rehacer no haria nada.
+	 */
+	public static String startRendering( Path worldRepository, Path worldDirectory, boolean fullDetail,
+			boolean gameRunningHere, boolean redrawEverything ) throws IOException
+	{
 		stopRendering();
 
 		Path mapDirectory = directoryFor( worldRepository );
@@ -377,7 +390,7 @@ public final class WorldMap
 		command.add( javaExecutable() );
 		command.add( "-jar" );
 		command.add( renderer.toAbsolutePath().toString() );
-		command.add( "-ruw" );
+		command.add( redrawEverything ? "-ruwf" : "-ruw" );
 
 		ProcessBuilder builder = new ProcessBuilder( command );
 		builder.directory( mapDirectory.toFile() );

@@ -1437,7 +1437,11 @@ public final class MainFrame
 			@Override
 			protected String doInBackground() throws Exception
 			{
-				return app.WorldMap.startRendering( repository, world.get(), fullDetail, serverIsOn );
+				// Rehacer sobre un mapa que ya existe significa que ha cambiado COMO
+				// se dibuja, y eso el renderizador no lo detecta solo
+				boolean redrawEverything = app.WorldMap.hasBuiltMap( repository );
+				return app.WorldMap.startRendering( repository, world.get(), fullDetail, serverIsOn,
+						redrawEverything );
 			}
 
 			@Override
