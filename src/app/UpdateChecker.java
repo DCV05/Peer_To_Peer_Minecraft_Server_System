@@ -228,7 +228,6 @@ public final class UpdateChecker
 		return java.util.List.of( ".jar" );
 	}
 
-	/** Strips the leading "v" and any "-suffix" so "v1.7.1-p2p" compares as "1.7.1". */
 	/**
 	 * De la lista de publicaciones, la preliminar con version mas alta.
 	 *
@@ -259,6 +258,7 @@ public final class UpdateChecker
 		return best;
 	}
 
+	/** Strips the leading "v" and any "-suffix" so "v1.7.1-p2p" compares as "1.7.1". */
 	static String normalizeVersion( String tag )
 	{
 		if( tag == null )

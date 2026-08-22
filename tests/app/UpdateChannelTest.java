@@ -18,6 +18,11 @@ import com.sun.net.httpserver.HttpServer;
 /**
  * Los dos canales tienen que ser estancos.
  *
+ * <p>Los ficheros de ejemplo llevan instalador de las TRES plataformas a
+ * proposito: el update checker elige el asset segun el sistema donde corre, y
+ * un ejemplo con solo dmg y exe pasaba en el portatil y fallaba en el CI, que
+ * es Linux y busca el jar.</p>
+ *
  * <p>Si una instalacion estable se traga una compilacion de pruebas, alguien
  * que solo queria jugar acaba con una version a medio hacer y sin forma obvia
  * de volver atras. Y al reves: una instalacion de pruebas que salte a la
@@ -58,7 +63,8 @@ class UpdateChannelTest
 				  "tag_name": "v99.0.0",
 				  "html_url": "https://example.test/release",
 				  "assets": [ { "name": "Endershare-99.0.0.dmg", "browser_download_url": "https://example.test/a.dmg" },
-				              { "name": "Endershare-99.0.0.exe", "browser_download_url": "https://example.test/a.exe" } ]
+				              { "name": "Endershare-99.0.0.exe", "browser_download_url": "https://example.test/a.exe" },
+				              { "name": "Endershare-99.0.0.jar", "browser_download_url": "https://example.test/a.jar" } ]
 				}
 				""" );
 
@@ -79,11 +85,13 @@ class UpdateChannelTest
 				  { "tag_name": "v99.9.9", "prerelease": false, "draft": false,
 				    "html_url": "https://example.test/stable",
 				    "assets": [ { "name": "Endershare-99.9.9.dmg", "browser_download_url": "https://example.test/stable.dmg" },
-				                { "name": "Endershare-99.9.9.exe", "browser_download_url": "https://example.test/stable.exe" } ] },
+				                { "name": "Endershare-99.9.9.exe", "browser_download_url": "https://example.test/stable.exe" },
+				                { "name": "Endershare-99.9.9.jar", "browser_download_url": "https://example.test/stable.jar" } ] },
 				  { "tag_name": "v99.0.1", "prerelease": true, "draft": false,
 				    "html_url": "https://example.test/dev",
 				    "assets": [ { "name": "Endershare-99.0.1.dmg", "browser_download_url": "https://example.test/dev.dmg" },
-				                { "name": "Endershare-99.0.1.exe", "browser_download_url": "https://example.test/dev.exe" } ] }
+				                { "name": "Endershare-99.0.1.exe", "browser_download_url": "https://example.test/dev.exe" },
+				                { "name": "Endershare-99.0.1.jar", "browser_download_url": "https://example.test/dev.jar" } ] }
 				]
 				""" );
 
@@ -102,7 +110,8 @@ class UpdateChannelTest
 		System.setProperty( "p2pmss.channel", "dev" );
 		serve( new AtomicReference<>(), """
 				[ { "tag_name": "v99.9.9", "prerelease": false, "draft": false, "html_url": "https://example.test/s",
-				    "assets": [ { "name": "Endershare-99.9.9.dmg", "browser_download_url": "https://example.test/s.dmg" } ] } ]
+				    "assets": [ { "name": "Endershare-99.9.9.dmg", "browser_download_url": "https://example.test/s.dmg" },
+				    { "name": "Endershare-99.9.9.jar", "browser_download_url": "https://example.test/s.jar" } ] } ]
 				""" );
 
 		assertTrue( UpdateChecker.findNewerRelease().isEmpty() );
