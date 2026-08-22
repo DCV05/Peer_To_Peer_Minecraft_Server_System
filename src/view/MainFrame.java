@@ -1856,7 +1856,70 @@ public final class MainFrame
 		openServerOptions( contentPane );
 		showDashboardPage( MinecraftDashboard.Page.OVERVIEW );
 		appendDashboardActivity( LoaderKind.detect( candidate.toPath() ).displayName() + " server opened: " + candidate.getName() );
+		stopBlockActivityWatcher();
 		resumeWorldMapWatch();
+		refreshBlockActivityWatcher();
+	}
+
+	/** Vigilante de bloques del mundo abierto; null si no hay ninguno en marcha. */
+	private app.BlockActivityWatcher blockActivityWatcher = null;
+
+	/**
+	 * Arranca (o para) el seguimiento de bloques del mundo abierto.
+	 *
+	 * <p>Va atado al mapa: sin mapa encendido no hay donde pintar los
+	 * marcadores, asi que no tiene sentido estar mirando la base del mod.</p>
+	 */
+	private void refreshBlockActivityWatcher()
+	{
+		File opened = serverOpenedDirectory;
+		Path repository = opened == null ? null : opened.toPath();
+		boolean wanted = repository != null && app.WorldMap.isEnabledFor( repository );
+
+		if( !wanted )
+		{
+			stopBlockActivityWatcher();
+			return;
+		}
+		if( blockActivityWatcher != null && blockActivityWatcher.isRunning() )
+			return;
+		java.util.Optional<Path> world = app.WorldMap.locateWorld( repository );
+		if( world.isEmpty() )
+			return;
+
+		blockActivityWatcher = new app.BlockActivityWatcher( repository, world.get(), this::onBlockActivity );
+		if( !blockActivityWatcher.detectorInstalled() )
+		{
+			// Sin el mod no hay nada que leer. No es un error: es que ese mundo aun
+			// no lleva el detector de bloques
+			blockActivityWatcher = null;
+			return;
+		}
+		blockActivityWatcher.start();
+		appendDashboardActivity( "Watching block activity on this world" );
+	}
+
+	private void stopBlockActivityWatcher()
+	{
+		if( blockActivityWatcher != null )
+		{
+			blockActivityWatcher.stop();
+			blockActivityWatcher = null;
+		}
+	}
+
+	/** Llega desde el hilo del vigilante: a la interfaz solo se entra por el EDT. */
+	private void onBlockActivity( java.util.List<app.BlockActivity> activity )
+	{
+		if( activity.isEmpty() )
+			return;
+		// Con una racha de minado no se llena la actividad de mil lineas iguales:
+		// se enseñan las ultimas y un resumen del resto
+		int shown = Math.min( 3, activity.size() );
+		for( int index = activity.size() - shown; index < activity.size(); index++ )
+			appendDashboardActivity( activity.get( index ).describe() );
+		if( activity.size() > shown )
+			appendDashboardActivity( "…and " + (activity.size() - shown) + " more block changes" );
 	}
 
 	/**
@@ -1880,6 +1943,7 @@ public final class MainFrame
 		}
 		if( !enabled && app.WorldMap.isRenderingFor( repository ) )
 			app.WorldMap.stopRendering();
+		refreshBlockActivityWatcher();
 		refreshWorldMapState();
 		appendDashboardActivity( enabled ? "3D map enabled for this server" : "3D map disabled for this server" );
 	}

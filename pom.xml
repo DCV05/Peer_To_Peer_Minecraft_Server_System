@@ -46,6 +46,14 @@
 	  <version>6.8.0.202311291450-r</version>
 	</dependency>
 	<dependency>
+	  <!-- Para leer la base de Ledger, el mod que registra que bloque pone o
+	       rompe cada jugador. Se abre SIEMPRE en solo lectura: quien escribe
+	       ahi es el servidor de Minecraft -->
+	  <groupId>org.xerial</groupId>
+	  <artifactId>sqlite-jdbc</artifactId>
+	  <version>3.46.0.0</version>
+	</dependency>
+	<dependency>
 	    <groupId>com.formdev</groupId>
 	    <artifactId>flatlaf</artifactId>
 	    <version>3.5</version>
