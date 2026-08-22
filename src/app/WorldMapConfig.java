@@ -53,7 +53,21 @@ public final class WorldMapConfig
 	/** Mitad de los procesadores: renderizar no puede dejar el equipo inservible. */
 	public static int defaultThreadCount()
 	{
+		return threadCountFor( false );
+	}
+
+	/**
+	 * Cuantos hilos usar para renderizar.
+	 *
+	 * <p>Con una partida en marcha en este mismo equipo se baja a un par de
+	 * hilos: el juego va primero, y un mapa que tarda el doble pero no da tirones
+	 * es mejor que uno rapido que hace injugable la partida.</p>
+	 */
+	public static int threadCountFor( boolean gameRunningHere )
+	{
 		int available = Runtime.getRuntime().availableProcessors();
+		if( gameRunningHere )
+			return Math.max( 1, Math.min( 2, available / 4 ) );
 		return Math.max( 1, Math.min( MAX_RENDER_THREADS, available / 2 ) );
 	}
 

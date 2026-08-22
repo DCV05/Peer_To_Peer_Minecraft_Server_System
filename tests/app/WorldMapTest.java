@@ -101,6 +101,36 @@ class WorldMapTest
 	}
 
 	@Test
+	void theMapComesOffForEveryWorld()
+	{
+		assertFalse( WorldMap.isEnabledFor( temporary.resolve( "farmland_mc" ) ),
+				"Encendido de fabrica pondria a renderizar a quien no lo ha pedido" );
+	}
+
+	@Test
+	void turningItOnAffectsOnlyThatWorld() throws IOException
+	{
+		Path mine = temporary.resolve( "farmland_mc" );
+		Path other = temporary.resolve( "otro_mundo" );
+
+		WorldMap.setEnabledFor( mine, true );
+
+		assertTrue( WorldMap.isEnabledFor( mine ) );
+		assertFalse( WorldMap.isEnabledFor( other ), "Se ha encendido el mapa de un mundo que nadie pidio" );
+	}
+
+	@Test
+	void turningItOffAgainLeavesItOff() throws IOException
+	{
+		Path repository = temporary.resolve( "farmland_mc" );
+		WorldMap.setEnabledFor( repository, true );
+
+		WorldMap.setEnabledFor( repository, false );
+
+		assertFalse( WorldMap.isEnabledFor( repository ) );
+	}
+
+	@Test
 	void aWorldWithoutAMapYetReportsMissing()
 	{
 		Path repository = temporary.resolve( "farmland_mc" );

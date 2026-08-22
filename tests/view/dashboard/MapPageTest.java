@@ -35,10 +35,51 @@ class MapPageTest
 	}
 
 	@Test
+	void whileTheMapIsOffNothingCanBeLaunched() throws Exception
+	{
+		MinecraftDashboard dashboard = createDashboard();
+		onEdt( () -> dashboard.showMapState( false, false, false, null ) );
+
+		assertEquals( "OFF", labelText( dashboard, "mapStateValue" ) );
+		assertFalse( button( dashboard, "buildMapButton" ).isEnabled(),
+				"Apagado no puede gastarse ni un ciclo de procesador" );
+		assertFalse( button( dashboard, "openMapButton" ).isEnabled() );
+		assertFalse( checkBox( dashboard, "mapEnabledCheck" ).isSelected() );
+	}
+
+	@Test
+	void theMapIsOffUntilSomebodyTurnsItOnForThatServer() throws Exception
+	{
+		MinecraftDashboard dashboard = createDashboard();
+
+		assertFalse( checkBox( dashboard, "mapEnabledCheck" ).isSelected(),
+				"Un mapa encendido de fabrica pondria a renderizar a quien no lo ha pedido" );
+	}
+
+	@Test
+	void turningItOnIsReportedForThatServerOnly() throws Exception
+	{
+		AtomicReference<Boolean> requested = new AtomicReference<>();
+		MinecraftDashboard dashboard = createDashboard( new MinecraftDashboard.Actions()
+		{
+			@Override
+			public void setWorldMapEnabled( boolean enabled )
+			{
+				requested.set( enabled );
+			}
+		} );
+
+		JCheckBox toggle = checkBox( dashboard, "mapEnabledCheck" );
+		onEdt( toggle::doClick );
+
+		assertEquals( Boolean.TRUE, requested.get() );
+	}
+
+	@Test
 	void withoutAMapYouCannotOpenAnythingButYouCanBuildIt() throws Exception
 	{
 		MinecraftDashboard dashboard = createDashboard();
-		onEdt( () -> dashboard.showMapState( false, false, null ) );
+		onEdt( () -> dashboard.showMapState( true, false, false, null ) );
 
 		assertEquals( "NOT BUILT YET", labelText( dashboard, "mapStateValue" ) );
 		assertFalse( button( dashboard, "openMapButton" ).isEnabled() );
@@ -51,7 +92,7 @@ class MapPageTest
 	void whileBuildingYouCannotLaunchASecondRender() throws Exception
 	{
 		MinecraftDashboard dashboard = createDashboard();
-		onEdt( () -> dashboard.showMapState( false, true, "http://127.0.0.1:8123/" ) );
+		onEdt( () -> dashboard.showMapState( true, false, true, "http://127.0.0.1:8123/" ) );
 
 		assertEquals( "BUILDING", labelText( dashboard, "mapStateValue" ) );
 		assertFalse( button( dashboard, "buildMapButton" ).isEnabled(),
@@ -66,7 +107,7 @@ class MapPageTest
 	void aBuiltMapOffersOpeningItAndRebuilding() throws Exception
 	{
 		MinecraftDashboard dashboard = createDashboard();
-		onEdt( () -> dashboard.showMapState( true, false, null ) );
+		onEdt( () -> dashboard.showMapState( true, true, false, null ) );
 
 		assertEquals( "READY", labelText( dashboard, "mapStateValue" ) );
 		assertTrue( button( dashboard, "openMapButton" ).isEnabled() );
@@ -92,6 +133,7 @@ class MapPageTest
 		AbstractButton build = button( dashboard, "buildMapButton" );
 		onEdt( () ->
 		{
+			dashboard.showMapState( true, false, false, null );
 			quality.setSelected( false );
 			build.doClick();
 		} );

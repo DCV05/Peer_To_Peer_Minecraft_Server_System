@@ -92,6 +92,17 @@ class WorldMapConfigTest
 	}
 
 	@Test
+	void whileSomebodyIsPlayingHereTheRenderStepsAside()
+	{
+		int playing = WorldMapConfig.threadCountFor( true );
+		int idle = WorldMapConfig.threadCountFor( false );
+
+		assertTrue( playing >= 1 );
+		assertTrue( playing <= 2, "Renderizar a toda maquina durante la partida da tirones al juego" );
+		assertTrue( playing <= idle );
+	}
+
+	@Test
 	void theMapPointsAtTheRightFolderForEachDimension() throws IOException
 	{
 		Path world = temporary.resolve( "world" );

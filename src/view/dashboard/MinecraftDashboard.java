@@ -299,6 +299,9 @@ public final class MinecraftDashboard extends JPanel
 		default void stopWorldMap()
 		{
 		}
+		default void setWorldMapEnabled( boolean enabled )
+		{
+		}
 	}
 
 	// ---- FASE 2 — Estado interno y componentes ------------------------------
@@ -375,6 +378,7 @@ public final class MinecraftDashboard extends JPanel
 	private final JButton openMapButton = new JButton( "OPEN MAP" );
 	private final JButton stopMapButton = new JButton( "STOP" );
 	private final JCheckBox fullDetailCheck = new JCheckBox( "Full detail (block by block)", true );
+	private final JCheckBox mapEnabledCheck = new JCheckBox( "Enable the 3D map for this server", false );
 
 	private final JTextArea consoleArea = new JTextArea();
 	private final JTextArea consolePreview = new JTextArea();
@@ -969,7 +973,11 @@ public final class MinecraftDashboard extends JPanel
 		buildMapButton.addActionListener( event -> this.actions.buildWorldMap( fullDetailCheck.isSelected() ) );
 		openMapButton.addActionListener( event -> this.actions.openWorldMap() );
 		stopMapButton.addActionListener( event -> this.actions.stopWorldMap() );
+		// Arranca como si estuviera apagado, que es el estado por defecto: hasta
+		// que alguien encienda el mapa de este server no hay nada que pulsar
 		openMapButton.setEnabled( false );
+		buildMapButton.setEnabled( false );
+		fullDetailCheck.setEnabled( false );
 		stopMapButton.setVisible( false );
 		actions.add( stopMapButton );
 		actions.add( openMapButton );
@@ -978,6 +986,27 @@ public final class MinecraftDashboard extends JPanel
 		status.setAlignmentX( Component.LEFT_ALIGNMENT );
 		status.setMaximumSize( new Dimension( Integer.MAX_VALUE, 112 ) );
 		page.add( status );
+		page.add( Box.createVerticalStrut( 12 ) );
+
+		JPanel enable = sectionPanel();
+		enable.setLayout( new BoxLayout( enable, BoxLayout.Y_AXIS ) );
+		enable.add( DashboardTheme.eyebrow( "MAP FOR THIS SERVER" ) );
+		enable.add( Box.createVerticalStrut( 8 ) );
+		mapEnabledCheck.setOpaque( false );
+		mapEnabledCheck.setForeground( TEXT );
+		mapEnabledCheck.setAlignmentX( Component.LEFT_ALIGNMENT );
+		mapEnabledCheck.addActionListener( event -> this.actions.setWorldMapEnabled( mapEnabledCheck.isSelected() ) );
+		enable.add( mapEnabledCheck );
+		enable.add( Box.createVerticalStrut( 6 ) );
+		JLabel enableHint = DashboardTheme.label(
+				"Off by default. While it is off nothing is rendered and no disk is used. "
+						+ "Turn it on only for the worlds you want to explore.",
+				TEXT_MUTED, 11, Font.PLAIN );
+		enableHint.setAlignmentX( Component.LEFT_ALIGNMENT );
+		enable.add( enableHint );
+		enable.setAlignmentX( Component.LEFT_ALIGNMENT );
+		enable.setMaximumSize( new Dimension( Integer.MAX_VALUE, 108 ) );
+		page.add( enable );
 		page.add( Box.createVerticalStrut( 12 ) );
 
 		JPanel quality = sectionPanel();
@@ -1030,13 +1059,29 @@ public final class MinecraftDashboard extends JPanel
 	/**
 	 * Refresca la pagina del mapa.
 	 *
+	 * @param enabled si el mapa esta activado para este server
 	 * @param built si ya hay un mapa generado en disco
 	 * @param building si se esta generando ahora mismo
 	 * @param address direccion donde se sirve, o null si no se esta sirviendo
 	 */
-	public void showMapState( boolean built, boolean building, String address )
+	public void showMapState( boolean enabled, boolean built, boolean building, String address )
 	{
 		boolean served = address != null && !address.isBlank();
+		mapEnabledCheck.setSelected( enabled );
+		if( !enabled )
+		{
+			mapStateValue.setText( "OFF" );
+			mapStateValue.setForeground( TEXT_MUTED );
+			mapDetail.setText( "The map is off for this server. Nothing is being rendered." );
+			buildMapButton.setEnabled( false );
+			openMapButton.setEnabled( false );
+			stopMapButton.setVisible( false );
+			fullDetailCheck.setEnabled( false );
+			worldMapStatus.setText( "The 3D map is off for this server." );
+			worldMapStatus.setForeground( TEXT_MUTED );
+			viewMapButton.setEnabled( false );
+			return;
+		}
 		if( building )
 		{
 			mapStateValue.setText( "BUILDING" );

@@ -60,6 +60,10 @@ public final class WorldMap
 			+ RENDERER_VERSION + "/BlueMap-" + RENDERER_VERSION + "-cli.jar";
 	/** Por debajo de esto la descarga vino cortada o es una pagina de error. */
 	private static final long MINIMUM_RENDERER_BYTES = 1_000_000L;
+	/** Marca de que el mapa de esa carpeta se genero con detalle de bloque. */
+	private static final String FULL_DETAIL_MARK = "full-detail";
+	/** Marca de que el mapa esta activado para ese mundo. Sin ella, apagado. */
+	private static final String ENABLED_MARK = "enabled";
 	private static final Duration DOWNLOAD_TIMEOUT = Duration.ofMinutes( 5 );
 
 	private static final AtomicReference<Process> runningProcess = new AtomicReference<>();
@@ -148,6 +152,50 @@ public final class WorldMap
 		return state;
 	}
 
+	/**
+	 * Si el mapa esta activado para ese mundo. <b>Viene apagado</b>: renderizar
+	 * cuesta tiempo y disco, y quien no quiera mapa no tiene por que pagarlo.
+	 * Se enciende por servidor, no para toda la aplicacion, porque no todos los
+	 * mundos merecen el gasto.
+	 */
+	public static boolean isEnabledFor( Path worldRepository )
+	{
+		return Files.exists( directoryFor( worldRepository ).resolve( ENABLED_MARK ) );
+	}
+
+	public static void setEnabledFor( Path worldRepository, boolean enabled ) throws IOException
+	{
+		Path mark = directoryFor( worldRepository ).resolve( ENABLED_MARK );
+		if( enabled )
+		{
+			Files.createDirectories( mark.getParent() );
+			Files.writeString( mark, "The 3D map is enabled for this world.\n" );
+		}
+		else
+		{
+			Files.deleteIfExists( mark );
+		}
+	}
+
+	/**
+	 * Con que calidad se genero el mapa que hay en disco. Hace falta para poder
+	 * reanudar la vigilancia sin cambiar de calidad a media construccion: mezclar
+	 * las dos deja zonas con detalle y zonas sin el, y nadie sabria cuales.
+	 */
+	public static boolean wasBuiltWithFullDetail( Path worldRepository )
+	{
+		return Files.exists( directoryFor( worldRepository ).resolve( FULL_DETAIL_MARK ) );
+	}
+
+	private static void rememberQuality( Path mapDirectory, boolean fullDetail ) throws IOException
+	{
+		Path mark = mapDirectory.resolve( FULL_DETAIL_MARK );
+		if( fullDetail )
+			Files.writeString( mark, "The map in this folder was built block by block.\n" );
+		else
+			Files.deleteIfExists( mark );
+	}
+
 	/** Cierto si ya hay mapa generado en disco, se este renderizando o no. */
 	public static boolean hasBuiltMap( Path worldRepository )
 	{
@@ -192,6 +240,16 @@ public final class WorldMap
 	public static String startRendering( Path worldRepository, Path worldDirectory, boolean fullDetail )
 			throws IOException
 	{
+		return startRendering( worldRepository, worldDirectory, fullDetail, false );
+	}
+
+	/**
+	 * @param gameRunningHere true si en este equipo hay una partida en marcha, para
+	 *        renderizar con menos hilos y no estropearla
+	 */
+	public static String startRendering( Path worldRepository, Path worldDirectory, boolean fullDetail,
+			boolean gameRunningHere ) throws IOException
+	{
 		stopRendering();
 
 		Path mapDirectory = directoryFor( worldRepository );
@@ -200,9 +258,12 @@ public final class WorldMap
 
 		int port = freePort();
 		List<String> dimensions = WorldMapConfig.write( mapDirectory, worldDirectory,
-				new WorldMapConfig.Options( fullDetail, WorldMapConfig.defaultThreadCount(), port ) );
+				new WorldMapConfig.Options( fullDetail, WorldMapConfig.threadCountFor( gameRunningHere ), port ) );
 		if( dimensions.isEmpty() )
 			throw new IOException( "That world has no region files to render yet." );
+		rememberQuality( mapDirectory, fullDetail );
+		// Construir un mapa es decir que lo quieres: no hay que activarlo aparte
+		setEnabledFor( worldRepository, true );
 
 		List<String> command = new ArrayList<>();
 		// -r renderiza, -u se queda vigilando los ficheros de region para

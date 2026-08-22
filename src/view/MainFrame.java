@@ -988,6 +988,11 @@ public final class MainFrame
 				app.WorldMap.stopRendering();
 				refreshWorldMapState();
 			}
+			@Override
+			public void setWorldMapEnabled( boolean enabled )
+			{
+				changeWorldMapEnabled( enabled );
+			}
 		} );
 	}
 
@@ -1375,12 +1380,12 @@ public final class MainFrame
 		File opened = serverOpenedDirectory;
 		if( opened == null )
 		{
-			dashboard.showMapState( false, false, null );
+			dashboard.showMapState( false, false, false, null );
 			return;
 		}
 		Path repository = opened.toPath();
-		dashboard.showMapState( app.WorldMap.hasBuiltMap( repository ), app.WorldMap.isRenderingFor( repository ),
-				app.WorldMap.currentUrl().orElse( null ) );
+		dashboard.showMapState( app.WorldMap.isEnabledFor( repository ), app.WorldMap.hasBuiltMap( repository ),
+				app.WorldMap.isRenderingFor( repository ), app.WorldMap.currentUrl().orElse( null ) );
 	}
 
 	/**
@@ -1426,7 +1431,7 @@ public final class MainFrame
 			@Override
 			protected String doInBackground() throws Exception
 			{
-				return app.WorldMap.startRendering( repository, world.get(), fullDetail );
+				return app.WorldMap.startRendering( repository, world.get(), fullDetail, serverIsOn );
 			}
 
 			@Override
@@ -1847,6 +1852,89 @@ public final class MainFrame
 		openServerOptions( contentPane );
 		showDashboardPage( MinecraftDashboard.Page.OVERVIEW );
 		appendDashboardActivity( LoaderKind.detect( candidate.toPath() ).displayName() + " server opened: " + candidate.getName() );
+		resumeWorldMapWatch();
+	}
+
+	/**
+	 * Enciende o apaga el mapa de este server. Al apagarlo se para el render en
+	 * marcha: dejarlo trabajando para un mapa que ya nadie quiere ver seria
+	 * gastar procesador por nada.
+	 */
+	private void changeWorldMapEnabled( boolean enabled )
+	{
+		File opened = serverOpenedDirectory;
+		if( opened == null )
+			return;
+		Path repository = opened.toPath();
+		try
+		{
+			app.WorldMap.setEnabledFor( repository, enabled );
+		}
+		catch( IOException notSaved )
+		{
+			app.Log.event( "WORLD_MAP", "No se pudo guardar si el mapa esta activado", notSaved );
+		}
+		if( !enabled && app.WorldMap.isRenderingFor( repository ) )
+			app.WorldMap.stopRendering();
+		refreshWorldMapState();
+		appendDashboardActivity( enabled ? "3D map enabled for this server" : "3D map disabled for this server" );
+	}
+
+	/**
+	 * Vuelve a poner en marcha el mapa de un mundo que ya lo tiene generado, en
+	 * modo vigilancia: no rehace nada, se queda mirando los ficheros de region y
+	 * redibuja solo lo que cambie. Asi el mapa esta al dia sin que nadie pulse
+	 * nada, que es la gracia del tiempo real.
+	 */
+	private void resumeWorldMapWatch()
+	{
+		File opened = serverOpenedDirectory;
+		if( opened == null )
+			return;
+		Path repository = opened.toPath();
+		// Apagado por defecto: si nadie ha encendido el mapa de este server, no se
+		// renderiza nada ni se gasta un byte
+		if( !app.WorldMap.isEnabledFor( repository ) || !app.WorldMap.hasBuiltMap( repository )
+				|| app.WorldMap.isRenderingFor( repository ) )
+		{
+			refreshWorldMapState();
+			return;
+		}
+		java.util.Optional<Path> world = app.WorldMap.locateWorld( repository );
+		if( world.isEmpty() )
+			return;
+		// La calidad la manda el mapa que ya hay, no la casilla de la pantalla:
+		// mezclar calidades dejaria unas zonas con detalle y otras sin el
+		boolean fullDetail = app.WorldMap.wasBuiltWithFullDetail( repository );
+		new SwingWorker<Void, Void>()
+		{
+			@Override
+			protected Void doInBackground() throws Exception
+			{
+				app.WorldMap.startRendering( repository, world.get(), fullDetail, serverIsOn );
+				return null;
+			}
+
+			@Override
+			protected void done()
+			{
+				// Un mapa que no arranca no puede interrumpir a nadie con un dialogo:
+				// se queda apagado y el usuario lo enciende desde la pagina si quiere
+				try
+				{
+					get();
+				}
+				catch( InterruptedException interrupted )
+				{
+					Thread.currentThread().interrupt();
+				}
+				catch( java.util.concurrent.ExecutionException failure )
+				{
+					app.Log.event( "WORLD_MAP", "No se pudo reanudar la vigilancia del mapa", failure );
+				}
+				refreshWorldMapState();
+			}
+		}.execute();
 	}
 
 	private void rememberRecentServer( File serverDirectory )
@@ -3074,6 +3162,7 @@ public final class MainFrame
 		{
 			GitUtils.activeAutoSave();
 		}
+		startWorldMapLiveUpdates();
 		startPlayitTunnelIfConfigured();
 		if( repoFullName != null )
 		{
@@ -3085,6 +3174,53 @@ public final class MainFrame
 				HostLock.heartbeat( repoFullName );
 				jgit.WorldEvents.publish( repoFullName, "host_started" );
 			}, "p2pmss-host-details-publish" ).start();
+		}
+	}
+
+	/** Cada cuanto se le pide al mundo que baje a disco lo que lleva en memoria. */
+	static final int MAP_LIVE_SAVE_SECONDS = 60;
+	private java.util.Timer worldMapLiveTimer = null;
+
+	/**
+	 * Hace que el mapa se vea vivo mientras se juega.
+	 *
+	 * <p>El renderizador vigila los ficheros de region, pero Minecraft no los
+	 * escribe al momento: se los guarda en memoria y los baja a disco cada varios
+	 * minutos. Sin esto, lo que construyes tarda un buen rato en aparecer en el
+	 * mapa aunque todo lo demas funcione. Pidiendo un guardado cada minuto, el
+	 * mapa va como mucho un minuto por detras de la realidad.</p>
+	 *
+	 * <p>Solo se pide mientras haya un mapa vigilando: a quien no usa el mapa no
+	 * se le cobra ni un guardado de mas.</p>
+	 */
+	private void startWorldMapLiveUpdates()
+	{
+		stopWorldMapLiveUpdates();
+		worldMapLiveTimer = new java.util.Timer( "p2pmss-world-map-live", true );
+		worldMapLiveTimer.scheduleAtFixedRate( new java.util.TimerTask()
+		{
+			@Override
+			public void run()
+			{
+				File opened = serverOpenedDirectory;
+				if( !serverIsOn || serverProcess == null || !serverProcess.isAlive() || opened == null )
+				{
+					stopWorldMapLiveUpdates();
+					return;
+				}
+				if( !app.WorldMap.isRenderingFor( opened.toPath() ) )
+					return;
+				ForgeUtils.sendCommand( "save-all", serverProcess, serverWriter );
+			}
+		}, MAP_LIVE_SAVE_SECONDS * 1000L, MAP_LIVE_SAVE_SECONDS * 1000L );
+	}
+
+	private void stopWorldMapLiveUpdates()
+	{
+		if( worldMapLiveTimer != null )
+		{
+			worldMapLiveTimer.cancel();
+			worldMapLiveTimer = null;
 		}
 	}
 
