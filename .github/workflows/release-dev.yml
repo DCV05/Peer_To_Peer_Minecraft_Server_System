@@ -1,0 +1,156 @@
+# Compila los instaladores de PRUEBAS en cada empujon a dev y los publica como
+# release preliminar.
+#
+# Dos cosas que no hay que romper:
+#
+#  - Se publica como PRERELEASE. El canal estable de la aplicacion pide
+#    /releases/latest, que por definicion de GitHub nunca devuelve una
+#    preliminar: asi una instalacion estable no puede tragarse una compilacion
+#    de pruebas ni por accidente.
+#  - El instalador se llama "Endershare Dev" y en Windows lleva su PROPIO
+#    upgrade-uuid. Con el nombre y el uuid de la estable, instalar la de
+#    pruebas REEMPLAZARIA la instalacion buena de quien la use.
+name: Dev installers
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # Gate: sin suite verde no se publica nada, igual que en las releases buenas
+  tests:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Suite completa (display virtual para los tests de Swing)
+        shell: bash
+        run: xvfb-run -a mvn -B test
+
+      - name: Calcular version de pruebas
+        id: version
+        shell: bash
+        run: |
+          # Cuarto segmento = numero de ejecucion, para que cada compilacion sea
+          # mas nueva que la anterior sin tocar el pom a mano. Todo numerico
+          # porque el comparador de versiones de la app solo entiende numeros
+          POM_VERSION=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)
+          echo "version=${POM_VERSION}.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Crear la publicacion preliminar
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.tests.outputs.version }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          gh release create "v$VERSION" \
+            --prerelease \
+            --target dev \
+            --title "Dev $VERSION" \
+            --notes "Compilacion de pruebas de la rama dev ($COMMIT).
+
+          Se instala aparte de la version estable y solo se actualiza con otras compilaciones de pruebas."
+
+  installers:
+    needs: [tests, publish]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            kind: jar
+          - os: macos-latest
+            kind: dmg
+          - os: windows-latest
+            kind: exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Fijar la version de pruebas
+        shell: bash
+        env:
+          VERSION: ${{ needs.tests.outputs.version }}
+        run: mvn -B -q versions:set -DnewVersion="$VERSION" -DgenerateBackupPoms=false
+
+      - name: Compilar jar sombreado marcado como canal dev
+        shell: bash
+        run: mvn -B -q package -DskipTests -Dp2pmss.channel=dev
+
+      - name: Preparar staging
+        shell: bash
+        env:
+          VERSION: ${{ needs.tests.outputs.version }}
+        run: |
+          mkdir -p stage dist
+          cp "target/Endershare-$VERSION.jar" stage/Endershare.jar
+
+      - name: Instalador DMG (macOS)
+        if: matrix.kind == 'dmg'
+        shell: bash
+        env:
+          VERSION: ${{ needs.tests.outputs.version }}
+        run: |
+          jpackage --type dmg --name "Endershare Dev" --app-version "$VERSION" \
+            --icon packaging/P2PMSS.icns \
+            --input stage --main-jar Endershare.jar --main-class view.MainFrame --dest dist
+          for built in dist/*.dmg; do
+            [ "$built" = "dist/Endershare-Dev-$VERSION.dmg" ] || mv "$built" "dist/Endershare-Dev-$VERSION.dmg"
+          done
+
+      - name: Instalador EXE (Windows)
+        if: matrix.kind == 'exe'
+        shell: bash
+        env:
+          VERSION: ${{ needs.tests.outputs.version }}
+        run: |
+          # upgrade-uuid PROPIO del canal de pruebas: con el de la estable, esta
+          # instalacion reemplazaria la buena. Fijo, para que cada compilacion de
+          # pruebas si reemplace a la anterior de pruebas
+          jpackage --type exe --name "Endershare Dev" --app-version "$VERSION" \
+            --vendor P2PMSS --win-upgrade-uuid 7F3C1E92-4A56-4C1D-9E77-2B8D5A0F6C31 \
+            --icon packaging/P2PMSS.ico \
+            --input stage --main-jar Endershare.jar --main-class view.MainFrame \
+            --win-shortcut --win-menu --win-per-user-install --dest dist
+          for built in dist/*.exe; do
+            [ "$built" = "dist/Endershare-Dev-$VERSION.exe" ] || mv "$built" "dist/Endershare-Dev-$VERSION.exe"
+          done
+
+      - name: Jar portable (cualquier sistema)
+        if: matrix.kind == 'jar'
+        shell: bash
+        env:
+          VERSION: ${{ needs.tests.outputs.version }}
+        run: cp stage/Endershare.jar "dist/Endershare-Dev-$VERSION.jar"
+
+      - name: Adjuntar asset a la publicacion
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.tests.outputs.version }}
+        run: gh release upload "v$VERSION" dist/Endershare-Dev-* --clobber

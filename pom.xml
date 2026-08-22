@@ -8,6 +8,10 @@
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     <!-- Repo de GitHub cuyas releases consulta el update checker; cada fork pone el suyo al compilar -->
     <p2pmss.releasesRepo>DCV05/Peer_To_Peer_Minecraft_Server_System</p2pmss.releasesRepo>
+    <!-- Canal de actualizaciones de esta compilacion: stable (main) o dev.
+         Cada instalacion solo ve las releases de SU canal, para que una prueba
+         de dev no acabe instalada en el ordenador de alguien que quiere estable -->
+    <p2pmss.channel>stable</p2pmss.channel>
     <!-- Los E2E con server de Minecraft REAL (tag e2e-mc) no corren en el mvn test
          rapido: se activan con el perfil e2e-mc (job propio del CI) -->
     <p2pmss.excludedTestGroups>e2e-mc,e2e-real</p2pmss.excludedTestGroups>

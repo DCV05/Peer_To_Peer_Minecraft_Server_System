@@ -26,9 +26,14 @@ public final class UpdateChecker
 
 	static final String DEFAULT_RELEASES_REPO = "DCV05/Peer_To_Peer_Minecraft_Server_System";
 	static final String DEFAULT_VERSION = "0.0.0";
+	/** Canal de las compilaciones publicas: solo ve releases definitivas. */
+	public static final String STABLE_CHANNEL = "stable";
+	/** Canal de pruebas: solo ve las publicaciones marcadas como preliminares. */
+	public static final String DEV_CHANNEL = "dev";
 	private static final String BUILD_PROPERTIES_RESOURCE = "/p2pmss-update.properties";
 	private static final String GITHUB_API_PROPERTY = "p2pmss.githubApiBase";
 	private static final String RELEASES_REPO_PROPERTY = "p2pmss.releasesRepo";
+	private static final String CHANNEL_PROPERTY = "p2pmss.channel";
 	private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds( 20 );
 	private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 	private static volatile Properties buildProperties = null;
@@ -89,6 +94,27 @@ public final class UpdateChecker
 	}
 
 	/**
+	 * Canal de esta instalacion: {@code stable} o {@code dev}.
+	 *
+	 * <p>Los canales son estancos a proposito. Una instalacion estable no debe
+	 * tragarse nunca una compilacion de pruebas, y una de pruebas no debe volver
+	 * atras a la estable: cada una se actualiza solo con las suyas.</p>
+	 */
+	public static String currentChannel()
+	{
+		String overridden = System.getProperty( CHANNEL_PROPERTY );
+		if( overridden != null && !overridden.isBlank() )
+			return overridden.trim();
+		String baked = bakedProperty( "app.channel" );
+		return DEV_CHANNEL.equalsIgnoreCase( baked ) ? DEV_CHANNEL : STABLE_CHANNEL;
+	}
+
+	static boolean isDevChannel()
+	{
+		return DEV_CHANNEL.equals( currentChannel() );
+	}
+
+	/**
 	 * Returns the latest published release only when it is strictly newer than
 	 * {@link #currentVersion()}. Un solo punto de salida: las validaciones van en
 	 * cascada y cada una corta con break; cualquier fallo de red o de formato
@@ -102,8 +128,12 @@ public final class UpdateChecker
 			do
 			{
 				HttpClient client = HttpClient.newBuilder().connectTimeout( REQUEST_TIMEOUT ).build();
+				// El canal estable pide /latest, que GitHub define como la ultima
+				// release NO preliminar: por construccion no puede ver una de dev.
+				// El canal dev pide la lista y se queda con las preliminares.
+				String endpoint = isDevChannel() ? "/releases?per_page=30" : "/releases/latest";
 				HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-						.uri( URI.create( apiBase() + "/repos/" + releasesRepo() + "/releases/latest" ) )
+						.uri( URI.create( apiBase() + "/repos/" + releasesRepo() + endpoint ) )
 						.timeout( REQUEST_TIMEOUT )
 						.header( "Accept", "application/vnd.github+json" )
 						.GET();
@@ -119,7 +149,10 @@ public final class UpdateChecker
 				if( response.statusCode() != 200 )
 					break;
 
-				JsonNode release = JSON_MAPPER.readTree( response.body() );
+				JsonNode payload = JSON_MAPPER.readTree( response.body() );
+				JsonNode release = isDevChannel() ? newestPreRelease( payload ) : payload;
+				if( release == null )
+					break;
 				String version = normalizeVersion( release.path( "tag_name" ).asText( "" ) );
 				if( version.isEmpty() || !isNewer( version, normalizeVersion( currentVersion() ) ) )
 					break;
@@ -196,6 +229,36 @@ public final class UpdateChecker
 	}
 
 	/** Strips the leading "v" and any "-suffix" so "v1.7.1-p2p" compares as "1.7.1". */
+	/**
+	 * De la lista de publicaciones, la preliminar con version mas alta.
+	 *
+	 * <p>Se filtran las definitivas y los borradores: una instalacion de pruebas
+	 * solo se actualiza con compilaciones de pruebas. Se elige por version y no
+	 * por orden de la lista porque GitHub la ordena por fecha de creacion, y una
+	 * republicacion puede dejar delante una version mas vieja.</p>
+	 */
+	static JsonNode newestPreRelease( JsonNode releases )
+	{
+		if( releases == null || !releases.isArray() )
+			return null;
+		JsonNode best = null;
+		String bestVersion = "";
+		for( JsonNode release : releases )
+		{
+			if( !release.path( "prerelease" ).asBoolean( false ) || release.path( "draft" ).asBoolean( false ) )
+				continue;
+			String version = normalizeVersion( release.path( "tag_name" ).asText( "" ) );
+			if( version.isEmpty() )
+				continue;
+			if( best == null || isNewer( version, bestVersion ) )
+			{
+				best = release;
+				bestVersion = version;
+			}
+		}
+		return best;
+	}
+
 	static String normalizeVersion( String tag )
 	{
 		if( tag == null )
