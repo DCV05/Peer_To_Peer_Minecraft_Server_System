@@ -75,7 +75,7 @@ public final class MinecraftDashboard extends JPanel
 	{
 		// SERVERS va primero: el tablero multi-server es la pagina principal y
 		// OVERVIEW es el detalle del server que se tiene abierto
-		SERVERS("Servers"), OVERVIEW("Overview"), BACKUPS("Backups"), NETWORK("Network"), CONSOLE("Console"), SETTINGS("Settings");
+		SERVERS("Servers"), OVERVIEW("Overview"), MAP("Map"), BACKUPS("Backups"), NETWORK("Network"), CONSOLE("Console"), SETTINGS("Settings");
 
 		private final String title;
 
@@ -293,6 +293,12 @@ public final class MinecraftDashboard extends JPanel
 		default void openWorldMap()
 		{
 		}
+		default void buildWorldMap( boolean fullDetail )
+		{
+		}
+		default void stopWorldMap()
+		{
+		}
 	}
 
 	// ---- FASE 2 — Estado interno y componentes ------------------------------
@@ -314,7 +320,7 @@ public final class MinecraftDashboard extends JPanel
 	private JPanel onboardingPage;
 
 	/** Paginas dedicadas al server en el que se ha entrado, en orden de sidebar. */
-	private static final List<Page> SERVER_PAGES = List.of( Page.OVERVIEW, Page.BACKUPS, Page.NETWORK, Page.CONSOLE, Page.SETTINGS );
+	private static final List<Page> SERVER_PAGES = List.of( Page.OVERVIEW, Page.MAP, Page.BACKUPS, Page.NETWORK, Page.CONSOLE, Page.SETTINGS );
 	private final JLabel serverNavHeader = DashboardTheme.eyebrow( "NO SERVER" );
 	private final Map<String, MetricCard> metrics = new java.util.HashMap<>();
 	private final Map<Phase, JLabel> lifecycleSteps = new EnumMap<>( Phase.class );
@@ -358,8 +364,17 @@ public final class MinecraftDashboard extends JPanel
 	private final JButton copyPublicUrlButton = new JButton( "COPY URL" );
 	private volatile String publicUrlAddress = null;
 	private final JButton viewMapButton = new JButton( "VIEW MAP" );
-	private final JLabel worldMapStatus = DashboardTheme.label( "Install the BlueMap mod on this server to get a live 3D map.", TEXT_MUTED,
+	private final JLabel worldMapStatus = DashboardTheme.label( "Build a 3D map of this world to explore it in your browser.", TEXT_MUTED,
 			11, Font.PLAIN );
+
+	/** Pagina MAP: mapa 3D construido por la aplicacion desde la copia local del mundo. */
+	private final JLabel mapStateValue = DashboardTheme.label( "NOT BUILT YET", TEXT, 15, Font.BOLD );
+	private final JLabel mapDetail = DashboardTheme.label( "The map is built from your own copy of the world.", TEXT_MUTED, 11,
+			Font.PLAIN );
+	private final JButton buildMapButton = new JButton( "BUILD MAP" );
+	private final JButton openMapButton = new JButton( "OPEN MAP" );
+	private final JButton stopMapButton = new JButton( "STOP" );
+	private final JCheckBox fullDetailCheck = new JCheckBox( "Full detail (block by block)", true );
 
 	private final JTextArea consoleArea = new JTextArea();
 	private final JTextArea consolePreview = new JTextArea();
@@ -556,31 +571,6 @@ public final class MinecraftDashboard extends JPanel
 		copyPublicUrlButton.setVisible( addressReady );
 	}
 
-	/**
-	 * Seccion de BlueMap en el overview. El boton solo se activa con el servidor
-	 * online: el visor 3D lo sirve el propio mod, y con el mundo parado la pestaña
-	 * que se abriria daria un error de conexion.
-	 */
-	public void showWorldMap( boolean installed, boolean serverOnline )
-	{
-		if( !installed )
-		{
-			worldMapStatus.setText( "Install the BlueMap mod on this server to get a live 3D map." );
-			worldMapStatus.setForeground( TEXT_MUTED );
-		}
-		else if( !serverOnline )
-		{
-			worldMapStatus.setText( "BlueMap ready — start the server to browse the live 3D map." );
-			worldMapStatus.setForeground( TEXT_MUTED );
-		}
-		else
-		{
-			worldMapStatus.setText( "Live 3D map with real-time player positions." );
-			worldMapStatus.setForeground( GREEN );
-		}
-		viewMapButton.setEnabled( installed && serverOnline );
-	}
-
 	private void copyPublicUrlToClipboard()
 	{
 		String address = publicUrlAddress;
@@ -720,6 +710,7 @@ public final class MinecraftDashboard extends JPanel
 		pages.setBackground( APP_BACKGROUND );
 		pages.add( wrapPage( buildOverviewPage() ), Page.OVERVIEW.name() );
 		pages.add( wrapPage( buildServersPage() ), Page.SERVERS.name() );
+		pages.add( wrapPage( buildMapPage() ), Page.MAP.name() );
 		pages.add( wrapPage( buildBackupsPage() ), Page.BACKUPS.name() );
 		pages.add( wrapPage( buildNetworkPage() ), Page.NETWORK.name() );
 		pages.add( buildConsolePage(), Page.CONSOLE.name() );
@@ -943,6 +934,138 @@ public final class MinecraftDashboard extends JPanel
 		page.add( serversList );
 		page.add( Box.createVerticalGlue() );
 		return page;
+	}
+
+	/**
+	 * Pagina del mapa 3D. El mapa lo construye esta aplicacion desde la copia
+	 * local del mundo, no el servidor: asi el que esta jugando no paga el coste
+	 * de renderizar, y el resultado no viaja por GitHub en cada respaldo.
+	 */
+	private JPanel buildMapPage()
+	{
+		JPanel page = pagePanel();
+		page.add( sectionHeading( "WORLD MAP",
+				"Explore the whole world in 3D from your browser, built on this computer." ) );
+
+		JPanel status = sectionPanel();
+		status.setLayout( new BorderLayout( 16, 0 ) );
+		JPanel copy = new JPanel();
+		copy.setOpaque( false );
+		copy.setLayout( new BoxLayout( copy, BoxLayout.Y_AXIS ) );
+		copy.add( DashboardTheme.eyebrow( "MAP STATE" ) );
+		copy.add( Box.createVerticalStrut( 9 ) );
+		mapStateValue.setAlignmentX( Component.LEFT_ALIGNMENT );
+		copy.add( mapStateValue );
+		copy.add( Box.createVerticalStrut( 5 ) );
+		mapDetail.setAlignmentX( Component.LEFT_ALIGNMENT );
+		copy.add( mapDetail );
+		status.add( copy, BorderLayout.CENTER );
+
+		JPanel actions = new JPanel( new FlowLayout( FlowLayout.RIGHT, 8, 0 ) );
+		actions.setOpaque( false );
+		DashboardTheme.styleButton( buildMapButton, DashboardTheme.ButtonKind.PRIMARY );
+		DashboardTheme.styleButton( openMapButton, DashboardTheme.ButtonKind.SECONDARY );
+		DashboardTheme.styleButton( stopMapButton, DashboardTheme.ButtonKind.DANGER );
+		buildMapButton.addActionListener( event -> this.actions.buildWorldMap( fullDetailCheck.isSelected() ) );
+		openMapButton.addActionListener( event -> this.actions.openWorldMap() );
+		stopMapButton.addActionListener( event -> this.actions.stopWorldMap() );
+		openMapButton.setEnabled( false );
+		stopMapButton.setVisible( false );
+		actions.add( stopMapButton );
+		actions.add( openMapButton );
+		actions.add( buildMapButton );
+		status.add( actions, BorderLayout.EAST );
+		status.setAlignmentX( Component.LEFT_ALIGNMENT );
+		status.setMaximumSize( new Dimension( Integer.MAX_VALUE, 112 ) );
+		page.add( status );
+		page.add( Box.createVerticalStrut( 12 ) );
+
+		JPanel quality = sectionPanel();
+		quality.setLayout( new BoxLayout( quality, BoxLayout.Y_AXIS ) );
+		quality.add( DashboardTheme.eyebrow( "QUALITY" ) );
+		quality.add( Box.createVerticalStrut( 8 ) );
+		fullDetailCheck.setOpaque( false );
+		fullDetailCheck.setForeground( TEXT );
+		fullDetailCheck.setAlignmentX( Component.LEFT_ALIGNMENT );
+		quality.add( fullDetailCheck );
+		quality.add( Box.createVerticalStrut( 6 ) );
+		// Las cifras son las medidas sobre un mundo real, para que la eleccion
+		// se haga sabiendo lo que cuesta y no a ciegas
+		JLabel qualityHint = DashboardTheme.label(
+				"Full detail lets you zoom to single blocks and takes around 10 GB for a large world. "
+						+ "Without it the map still shows terrain and buildings in 3D and takes about 100 MB.",
+				TEXT_MUTED, 11, Font.PLAIN );
+		qualityHint.setAlignmentX( Component.LEFT_ALIGNMENT );
+		quality.add( qualityHint );
+		quality.setAlignmentX( Component.LEFT_ALIGNMENT );
+		quality.setMaximumSize( new Dimension( Integer.MAX_VALUE, 118 ) );
+		page.add( quality );
+		page.add( Box.createVerticalStrut( 12 ) );
+
+		JPanel explanation = sectionPanel();
+		explanation.setLayout( new BoxLayout( explanation, BoxLayout.Y_AXIS ) );
+		explanation.add( DashboardTheme.eyebrow( "HOW IT WORKS" ) );
+		explanation.add( Box.createVerticalStrut( 8 ) );
+		for( String line : List.of( "The map is built here, from your own copy of the world.",
+				"Whoever is hosting pays nothing for it, and it never travels through GitHub.",
+				"Once built it keeps watching the world and only redraws what changed." ) )
+		{
+			JLabel item = DashboardTheme.label( "· " + line, TEXT_MUTED, 11, Font.PLAIN );
+			item.setAlignmentX( Component.LEFT_ALIGNMENT );
+			explanation.add( item );
+			explanation.add( Box.createVerticalStrut( 4 ) );
+		}
+		explanation.setAlignmentX( Component.LEFT_ALIGNMENT );
+		explanation.setMaximumSize( new Dimension( Integer.MAX_VALUE, 118 ) );
+		page.add( explanation );
+		return page;
+	}
+
+	/** Calidad elegida en la pagina del mapa. */
+	public boolean wantsFullDetailMap()
+	{
+		return fullDetailCheck.isSelected();
+	}
+
+	/**
+	 * Refresca la pagina del mapa.
+	 *
+	 * @param built si ya hay un mapa generado en disco
+	 * @param building si se esta generando ahora mismo
+	 * @param address direccion donde se sirve, o null si no se esta sirviendo
+	 */
+	public void showMapState( boolean built, boolean building, String address )
+	{
+		boolean served = address != null && !address.isBlank();
+		if( building )
+		{
+			mapStateValue.setText( "BUILDING" );
+			mapStateValue.setForeground( TEXT );
+			mapDetail.setText( served ? "You can already open it and watch it fill in · " + address
+					: "Reading the world files…" );
+		}
+		else if( built )
+		{
+			mapStateValue.setText( "READY" );
+			mapStateValue.setForeground( GREEN );
+			mapDetail.setText( served ? "Served at " + address : "Built and stored on this computer. Open it to start serving." );
+		}
+		else
+		{
+			mapStateValue.setText( "NOT BUILT YET" );
+			mapStateValue.setForeground( TEXT_MUTED );
+			mapDetail.setText( "The map is built from your own copy of the world." );
+		}
+		buildMapButton.setText( built ? "REBUILD MAP" : "BUILD MAP" );
+		buildMapButton.setEnabled( !building );
+		openMapButton.setEnabled( built || served );
+		stopMapButton.setVisible( building || served );
+		fullDetailCheck.setEnabled( !building );
+
+		worldMapStatus.setText( built ? "3D map ready — open it to explore the world."
+				: "Build a 3D map of this world to explore it in your browser." );
+		worldMapStatus.setForeground( built ? GREEN : TEXT_MUTED );
+		viewMapButton.setEnabled( built || served );
 	}
 
 	private JPanel buildBackupsPage()

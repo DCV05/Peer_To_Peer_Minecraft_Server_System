@@ -975,7 +975,18 @@ public final class MainFrame
 			@Override
 			public void openWorldMap()
 			{
-				ForgeUtils.openURL( "http://localhost:8100" );
+				openWorldMapInBrowser();
+			}
+			@Override
+			public void buildWorldMap( boolean fullDetail )
+			{
+				startWorldMapBuild( fullDetail );
+			}
+			@Override
+			public void stopWorldMap()
+			{
+				app.WorldMap.stopRendering();
+				refreshWorldMapState();
 			}
 		} );
 	}
@@ -1227,7 +1238,7 @@ public final class MainFrame
 			publicUrlAddress = remoteHostTunnelAddress;
 		}
 		dashboard.showPublicUrl( publicUrlEnabled, publicUrlAddress );
-		dashboard.showWorldMap( loaded && blueMapInstalled( serverOpenedDirectory.toPath() ), serverIsOn );
+		refreshWorldMapState();
 		turnOnOffBtn = dashboard.primaryActionButton();
 		consoleArea = dashboard.consoleArea();
 	}
@@ -1359,24 +1370,86 @@ public final class MainFrame
 	 * Cierto cuando hay un jar de BlueMap en la carpeta mods del servidor. Salida
 	 * unica con variable result en vez de do-while: el break pertenece al for.
 	 */
-	private static boolean blueMapInstalled( Path serverDirectory )
+	private void refreshWorldMapState()
 	{
-		boolean result = false;
-		File[] mods = serverDirectory.resolve( "mods" ).toFile().listFiles();
-		// listFiles() devuelve null si mods no existe o no se puede leer
-		if( mods != null )
+		File opened = serverOpenedDirectory;
+		if( opened == null )
 		{
-			for( File mod : mods )
-			{
-				String name = mod.getName().toLowerCase();
-				if( name.startsWith( "bluemap" ) && name.endsWith( ".jar" ) )
-				{
-					result = true;
-					break;
-				}
-			}
+			dashboard.showMapState( false, false, null );
+			return;
 		}
-		return result;
+		Path repository = opened.toPath();
+		dashboard.showMapState( app.WorldMap.hasBuiltMap( repository ), app.WorldMap.isRenderingFor( repository ),
+				app.WorldMap.currentUrl().orElse( null ) );
+	}
+
+	/**
+	 * Abre el mapa. Si el visor no se esta sirviendo hay que levantarlo primero:
+	 * el proceso sirve la web nada mas arrancar, asi que se abre igual aunque
+	 * todavia le queden regiones por dibujar.
+	 */
+	private void openWorldMapInBrowser()
+	{
+		java.util.Optional<String> served = app.WorldMap.currentUrl();
+		if( served.isPresent() )
+			ForgeUtils.openURL( served.get() );
+		else
+			startWorldMapBuild( dashboard.wantsFullDetailMap() );
+	}
+
+	/**
+	 * Construye el mapa 3D desde la copia local del mundo. Nunca toca el
+	 * servidor de nadie ni escribe dentro del repositorio.
+	 */
+	private void startWorldMapBuild( boolean fullDetail )
+	{
+		File opened = serverOpenedDirectory;
+		if( opened == null )
+		{
+			JOptionPane.showMessageDialog( frame, "Open a server first and then build its map.", "World map",
+					JOptionPane.INFORMATION_MESSAGE );
+			return;
+		}
+		Path repository = opened.toPath();
+		java.util.Optional<Path> world = app.WorldMap.locateWorld( repository );
+		if( world.isEmpty() )
+		{
+			JOptionPane.showMessageDialog( frame,
+					"That server has no world files yet. Start it once so Minecraft creates the world, then build the map.",
+					"World map", JOptionPane.INFORMATION_MESSAGE );
+			return;
+		}
+
+		refreshWorldMapState();
+		new SwingWorker<String, Void>()
+		{
+			@Override
+			protected String doInBackground() throws Exception
+			{
+				return app.WorldMap.startRendering( repository, world.get(), fullDetail );
+			}
+
+			@Override
+			protected void done()
+			{
+				try
+				{
+					ForgeUtils.openURL( get() );
+				}
+				catch( InterruptedException interrupted )
+				{
+					Thread.currentThread().interrupt();
+				}
+				catch( java.util.concurrent.ExecutionException failure )
+				{
+					// SwingWorker envuelve la excepcion real: al usuario le sirve la de dentro
+					Throwable cause = failure.getCause() == null ? failure : failure.getCause();
+					JOptionPane.showMessageDialog( frame, "The map could not be built.\n\n" + cause.getMessage(),
+							"World map", JOptionPane.ERROR_MESSAGE );
+				}
+				refreshWorldMapState();
+			}
+		}.execute();
 	}
 
 	private volatile List<MinecraftDashboard.ServerEntry> recentServersCache = null;

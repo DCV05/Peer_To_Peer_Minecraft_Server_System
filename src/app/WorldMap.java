@@ -1,0 +1,341 @@
+package app;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.ServerSocket;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
+
+/**
+ * Mapa 3D del mundo, navegable desde el navegador.
+ *
+ * <p>El renderizador es BlueMap (licencia MIT), que ya esta escrito en Java. En
+ * vez de meterlo en el classpath de la aplicacion, se descarga su jar la primera
+ * vez que hace falta y se ejecuta como <b>proceso aparte</b>. Tres razones:
+ * el instalador no engorda con 4 MB que casi nadie va a usar, un render que se
+ * atragante no puede llevarse la aplicacion por delante, y el proceso se puede
+ * lanzar con prioridad baja para que renderizar no estorbe.</p>
+ *
+ * <p>La comunicacion es por su salida de texto, que {@link WorldMapProgress}
+ * traduce a la barra de progreso de siempre.</p>
+ *
+ * <p><b>Nunca escribe dentro del repositorio del mundo</b>: el mapa vive en la
+ * carpeta de datos de la aplicacion. Son 10 GB de ficheros regenerables y no
+ * tienen nada que hacer viajando por GitHub en cada respaldo.</p>
+ */
+public final class WorldMap
+{
+	/** En que punto esta el mapa de un mundo. */
+	public enum State
+	{
+		/** No se ha generado nunca. */
+		MISSING,
+		/** Generandose ahora mismo. */
+		RENDERING,
+		/** Generado y listo para abrir. */
+		READY
+	}
+
+	/**
+	 * Version del renderizador. La 3.13 cubre mundos hasta Minecraft 1.19.4,
+	 * que es lo que corren los mundos de esta aplicacion. Para mundos mas
+	 * nuevos hay que subirla (las versiones 5.x cubren las recientes).
+	 */
+	static final String RENDERER_VERSION = "3.13";
+	private static final String RENDERER_URL = "https://github.com/BlueMap-Minecraft/BlueMap/releases/download/v"
+			+ RENDERER_VERSION + "/BlueMap-" + RENDERER_VERSION + "-cli.jar";
+	/** Por debajo de esto la descarga vino cortada o es una pagina de error. */
+	private static final long MINIMUM_RENDERER_BYTES = 1_000_000L;
+	private static final Duration DOWNLOAD_TIMEOUT = Duration.ofMinutes( 5 );
+
+	private static final AtomicReference<Process> runningProcess = new AtomicReference<>();
+	private static final AtomicReference<String> runningUrl = new AtomicReference<>();
+	private static volatile Path runningWorld;
+
+	private WorldMap()
+	{
+	}
+
+	/** Carpeta donde vive el mapa de un mundo, fuera del repositorio. */
+	public static Path directoryFor( Path worldRepository )
+	{
+		return AppPaths.data().resolve( "maps" ).resolve( identifierFor( worldRepository ) );
+	}
+
+	/** Identificador estable y valido como nombre de carpeta en los tres sistemas. */
+	static String identifierFor( Path worldRepository )
+	{
+		Path name = worldRepository.toAbsolutePath().getFileName();
+		String base = name == null ? "world" : name.toString();
+		String sanitised = base.toLowerCase( Locale.ROOT ).replaceAll( "[^a-z0-9._-]", "-" );
+		return sanitised.isBlank() ? "world" : sanitised;
+	}
+
+	/**
+	 * Encuentra la carpeta del mundo dentro de la del servidor. El nombre lo
+	 * decide {@code level-name} en server.properties; si no esta, Minecraft usa
+	 * "world". Se comprueba que tenga ficheros de region: una carpeta con el
+	 * nombre correcto pero vacia no sirve para renderizar nada.
+	 */
+	public static Optional<Path> locateWorld( Path serverDirectory )
+	{
+		List<String> candidates = new ArrayList<>();
+		Path properties = serverDirectory.resolve( "server.properties" );
+		if( Files.isRegularFile( properties ) )
+		{
+			try
+			{
+				for( String line : Files.readAllLines( properties, StandardCharsets.UTF_8 ) )
+				{
+					String trimmed = line.trim();
+					if( trimmed.startsWith( "level-name=" ) )
+					{
+						String name = trimmed.substring( "level-name=".length() ).trim();
+						if( !name.isEmpty() )
+							candidates.add( name );
+						break;
+					}
+				}
+			}
+			catch( IOException unreadable )
+			{
+				Log.event( "WORLD_MAP", "No se pudo leer " + properties, unreadable );
+			}
+		}
+		candidates.add( "world" );
+
+		Optional<Path> found = Optional.empty();
+		for( String candidate : candidates )
+		{
+			Path directory = serverDirectory.resolve( candidate );
+			if( Files.isDirectory( directory.resolve( "region" ) ) )
+			{
+				found = Optional.of( directory );
+				break;
+			}
+		}
+		return found;
+	}
+
+	public static State stateFor( Path worldRepository )
+	{
+		State state = State.MISSING;
+		do
+		{
+			if( isRenderingFor( worldRepository ) )
+			{
+				state = State.RENDERING;
+				break;
+			}
+			if( hasBuiltMap( worldRepository ) )
+				state = State.READY;
+		}
+		while( false );
+		return state;
+	}
+
+	/** Cierto si ya hay mapa generado en disco, se este renderizando o no. */
+	public static boolean hasBuiltMap( Path worldRepository )
+	{
+		boolean result = false;
+		Path tiles = directoryFor( worldRepository ).resolve( "web" ).resolve( "maps" );
+		if( Files.isDirectory( tiles ) )
+		{
+			try (Stream<Path> children = Files.list( tiles ))
+			{
+				result = children.findAny().isPresent();
+			}
+			catch( IOException unreadable )
+			{
+				Log.event( "WORLD_MAP", "No se pudo mirar " + tiles, unreadable );
+			}
+		}
+		return result;
+	}
+
+	public static boolean isRenderingFor( Path worldRepository )
+	{
+		Process process = runningProcess.get();
+		return process != null && process.isAlive() && worldRepository.equals( runningWorld );
+	}
+
+	/** Direccion del mapa mientras el proceso este vivo; vacio si no lo esta. */
+	public static Optional<String> currentUrl()
+	{
+		Process process = runningProcess.get();
+		return process != null && process.isAlive() ? Optional.ofNullable( runningUrl.get() ) : Optional.empty();
+	}
+
+	/**
+	 * Genera (o actualiza) el mapa y lo deja servido. Vuelve en cuanto el
+	 * proceso arranca: el progreso se publica en {@link TransferProgress}.
+	 *
+	 * @param worldRepository carpeta del repositorio del mundo
+	 * @param worldDirectory carpeta del mundo dentro de el (la que tiene level.dat)
+	 * @param fullDetail true para calidad maxima; false para la version ligera
+	 * @return la direccion donde se sirve el mapa
+	 */
+	public static String startRendering( Path worldRepository, Path worldDirectory, boolean fullDetail )
+			throws IOException
+	{
+		stopRendering();
+
+		Path mapDirectory = directoryFor( worldRepository );
+		Files.createDirectories( mapDirectory );
+		Path renderer = ensureRenderer();
+
+		int port = freePort();
+		List<String> dimensions = WorldMapConfig.write( mapDirectory, worldDirectory,
+				new WorldMapConfig.Options( fullDetail, WorldMapConfig.defaultThreadCount(), port ) );
+		if( dimensions.isEmpty() )
+			throw new IOException( "That world has no region files to render yet." );
+
+		List<String> command = new ArrayList<>();
+		// -r renderiza, -u se queda vigilando los ficheros de region para
+		// actualizar solo lo que cambie, -w sirve el visor
+		lowPriorityPrefix().ifPresent( command::addAll );
+		command.add( javaExecutable() );
+		command.add( "-jar" );
+		command.add( renderer.toAbsolutePath().toString() );
+		command.add( "-ruw" );
+
+		ProcessBuilder builder = new ProcessBuilder( command );
+		builder.directory( mapDirectory.toFile() );
+		builder.redirectErrorStream( true );
+		Process process = builder.start();
+
+		String url = "http://127.0.0.1:" + port + "/";
+		runningProcess.set( process );
+		runningUrl.set( url );
+		runningWorld = worldRepository;
+		TransferProgress.publish( "Building map", "Starting renderer", -1 );
+		followProgress( process );
+		return url;
+	}
+
+	public static void stopRendering()
+	{
+		Process process = runningProcess.getAndSet( null );
+		runningUrl.set( null );
+		runningWorld = null;
+		if( process == null || !process.isAlive() )
+			return;
+		process.destroy();
+		try
+		{
+			if( !process.waitFor( 5, java.util.concurrent.TimeUnit.SECONDS ) )
+				process.destroyForcibly();
+		}
+		catch( InterruptedException interrupted )
+		{
+			Thread.currentThread().interrupt();
+			process.destroyForcibly();
+		}
+		TransferProgress.done();
+	}
+
+	/** Descarga el renderizador si aun no esta; devuelve donde ha quedado. */
+	static Path ensureRenderer() throws IOException
+	{
+		Path jar = AppPaths.data().resolve( "maps" ).resolve( "bluemap-" + RENDERER_VERSION + "-cli.jar" );
+		if( Files.isRegularFile( jar ) && Files.size( jar ) >= MINIMUM_RENDERER_BYTES )
+			return jar;
+
+		Files.createDirectories( jar.getParent() );
+		Path partial = jar.resolveSibling( jar.getFileName() + ".part" );
+		TransferProgress.publish( "Building map", "Downloading renderer", -1 );
+		try (HttpClient client = HttpClient.newBuilder().followRedirects( HttpClient.Redirect.ALWAYS )
+				.connectTimeout( Duration.ofSeconds( 30 ) ).build())
+		{
+			HttpRequest request = HttpRequest.newBuilder( URI.create( RENDERER_URL ) ).timeout( DOWNLOAD_TIMEOUT )
+					.GET().build();
+			HttpResponse<Path> response = client.send( request, HttpResponse.BodyHandlers.ofFile( partial ) );
+			if( response.statusCode() != 200 )
+				throw new IOException( "The renderer could not be downloaded (HTTP " + response.statusCode() + ")." );
+		}
+		catch( InterruptedException interrupted )
+		{
+			Thread.currentThread().interrupt();
+			throw new IOException( "The renderer download was interrupted." );
+		}
+
+		if( Files.size( partial ) < MINIMUM_RENDERER_BYTES )
+		{
+			Files.deleteIfExists( partial );
+			throw new IOException( "The renderer download came back incomplete." );
+		}
+		Files.move( partial, jar, StandardCopyOption.REPLACE_EXISTING );
+		return jar;
+	}
+
+	/** Hilo suelto que traduce la salida del renderizador a la barra de progreso. */
+	private static void followProgress( Process process )
+	{
+		Thread reader = new Thread( () ->
+		{
+			try (BufferedReader lines = new BufferedReader(
+					new InputStreamReader( process.getInputStream(), StandardCharsets.UTF_8 ) ))
+			{
+				String line;
+				while( (line = lines.readLine()) != null )
+				{
+					final String current = line;
+					WorldMapProgress.parse( current ).ifPresent( step ->
+					{
+						if( step.finished() )
+							TransferProgress.done();
+						else
+							TransferProgress.publish( "Building map", step.detail(), step.percent() );
+					} );
+				}
+			}
+			catch( IOException closed )
+			{
+				// El proceso ha terminado o lo hemos parado nosotros: nada que hacer
+			}
+			finally
+			{
+				TransferProgress.done();
+			}
+		}, "world-map-progress" );
+		reader.setDaemon( true );
+		reader.start();
+	}
+
+	private static String javaExecutable()
+	{
+		Path java = Path.of( System.getProperty( "java.home" ), "bin",
+				System.getProperty( "os.name", "" ).toLowerCase( Locale.ROOT ).contains( "win" ) ? "java.exe"
+						: "java" );
+		return Files.isExecutable( java ) ? java.toAbsolutePath().toString() : "java";
+	}
+
+	/** En mac y Linux se baja la prioridad con nice; en Windows no existe. */
+	private static Optional<List<String>> lowPriorityPrefix()
+	{
+		Path nice = Path.of( "/usr/bin/nice" );
+		return Files.isExecutable( nice ) ? Optional.of( List.of( nice.toString(), "-n", "10" ) ) : Optional.empty();
+	}
+
+	private static int freePort() throws IOException
+	{
+		try (ServerSocket socket = new ServerSocket( 0 ))
+		{
+			return socket.getLocalPort();
+		}
+	}
+}
