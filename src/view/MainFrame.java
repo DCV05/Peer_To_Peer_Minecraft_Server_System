@@ -1863,12 +1863,70 @@ public final class MainFrame
 		showDashboardPage( MinecraftDashboard.Page.OVERVIEW );
 		appendDashboardActivity( LoaderKind.detect( candidate.toPath() ).displayName() + " server opened: " + candidate.getName() );
 		stopBlockActivityWatcher();
+		stopLivePlayersWatcher();
 		resumeWorldMapWatch();
 		refreshBlockActivityWatcher();
+		refreshLivePlayersWatcher();
 	}
 
 	/** Vigilante de bloques del mundo abierto; null si no hay ninguno en marcha. */
 	private app.BlockActivityWatcher blockActivityWatcher = null;
+	/** Vigilante de posiciones de jugador; null si no hay ninguno en marcha. */
+	private app.LivePlayersWatcher livePlayersWatcher = null;
+
+	/**
+	 * Arranca (o para) las posiciones en vivo sobre el mapa.
+	 *
+	 * <p>Va atado al mapa y al servidor: sin mapa no hay donde pintarlas, y con
+	 * el servidor parado no hay quien las publique.</p>
+	 */
+	private void refreshLivePlayersWatcher()
+	{
+		File opened = serverOpenedDirectory;
+		Path repository = opened == null ? null : opened.toPath();
+		boolean wanted = repository != null && serverIsOn && app.WorldMap.isEnabledFor( repository );
+
+		if( !wanted )
+		{
+			stopLivePlayersWatcher();
+			return;
+		}
+		if( livePlayersWatcher != null && livePlayersWatcher.isRunning() )
+			return;
+		java.util.Optional<Path> world = app.WorldMap.locateWorld( repository );
+		if( world.isEmpty() )
+			return;
+
+		try
+		{
+			// El guion viaja con el mundo: al instalarlo aqui llega solo a las
+			// demas maquinas en el siguiente respaldo
+			if( app.LivePlayers.installScript( world.get() ) )
+				appendDashboardActivity( "Player tracking script added to this world" );
+		}
+		catch( IOException notInstalled )
+		{
+			app.Log.event( "LIVE_PLAYERS", "No se pudo instalar el guion de posiciones", notInstalled );
+			return;
+		}
+
+		// El guion lo carga Carpet, no nosotros: se le pide por la consola
+		ForgeUtils.sendCommand( "script load " + app.LivePlayers.SCRIPT_NAME, serverProcess, serverWriter );
+		livePlayersWatcher = new app.LivePlayersWatcher( repository, world.get(), players ->
+		{
+		} );
+		livePlayersWatcher.start();
+	}
+
+	private void stopLivePlayersWatcher()
+	{
+		if( livePlayersWatcher == null )
+			return;
+		if( serverIsOn && serverProcess != null && serverProcess.isAlive() )
+			ForgeUtils.sendCommand( "script unload " + app.LivePlayers.SCRIPT_NAME, serverProcess, serverWriter );
+		livePlayersWatcher.stop();
+		livePlayersWatcher = null;
+	}
 
 	/**
 	 * Arranca (o para) el seguimiento de bloques del mundo abierto.
@@ -1950,6 +2008,7 @@ public final class MainFrame
 		if( !enabled && app.WorldMap.isRenderingFor( repository ) )
 			app.WorldMap.stopRendering();
 		refreshBlockActivityWatcher();
+		refreshLivePlayersWatcher();
 		refreshWorldMapState();
 		appendDashboardActivity( enabled ? "3D map enabled for this server" : "3D map disabled for this server" );
 	}
@@ -3237,6 +3296,7 @@ public final class MainFrame
 			GitUtils.activeAutoSave();
 		}
 		startWorldMapLiveUpdates();
+		refreshLivePlayersWatcher();
 		startPlayitTunnelIfConfigured();
 		if( repoFullName != null )
 		{
