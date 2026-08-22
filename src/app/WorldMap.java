@@ -64,6 +64,10 @@ public final class WorldMap
 	private static final String FULL_DETAIL_MARK = "full-detail";
 	/** Marca de que el mapa esta activado para ese mundo. Sin ella, apagado. */
 	private static final String ENABLED_MARK = "enabled";
+	/** Altura de la camara al abrir: por encima del terreno en las tres dimensiones. */
+	private static final int VIEWER_HEIGHT = 200;
+	/** Distancia de la camara: lo bastante lejos para ver la zona de una pieza. */
+	private static final int VIEWER_DISTANCE = 1200;
 	private static final Duration DOWNLOAD_TIMEOUT = Duration.ofMinutes( 5 );
 
 	private static final AtomicReference<Process> runningProcess = new AtomicReference<>();
@@ -263,6 +267,73 @@ public final class WorldMap
 	}
 
 	/**
+	 * Direccion para abrir el visor en un sitio donde de verdad se vea algo.
+	 *
+	 * <p>Sin esto el visor abre siempre el overworld y a altura cero: mientras se
+	 * dibuja el mundo, el overworld puede estar todavia vacio, y una camara a la
+	 * altura del suelo (o bajo la lava, en el Nether) parece un mapa roto. Se
+	 * elige un mapa que ya tenga contenido y una altura desde la que se ve el
+	 * terreno.</p>
+	 */
+	public static Optional<String> viewerUrlFor( Path worldRepository )
+	{
+		Optional<String> base = currentUrl();
+		if( base.isEmpty() )
+			return base;
+		Path maps = directoryFor( worldRepository ).resolve( "web" ).resolve( "maps" );
+		String map = firstMapWithContent( maps ).orElse( "overworld" );
+		// Altura de sobrevuelo y distancia amplia: se ve el terreno de una pieza
+		return Optional.of( base.get() + "#" + map + ":0:" + VIEWER_HEIGHT + ":0:" + VIEWER_DISTANCE
+				+ ":0:0:0:0:perspective" );
+	}
+
+	/** El primer mapa con tiles dibujados, en el orden en que se enseñan. */
+	static Optional<String> firstMapWithContent( Path maps )
+	{
+		if( !Files.isDirectory( maps ) )
+			return Optional.empty();
+		// Se prefiere el overworld: es lo que la gente espera ver al abrir
+		List<String> preferred = List.of( "overworld", "nether", "end" );
+		List<String> candidates = new ArrayList<>( preferred );
+		try (Stream<Path> children = Files.list( maps ))
+		{
+			for( Path child : children.toList() )
+			{
+				String name = child.getFileName().toString();
+				if( !candidates.contains( name ) )
+					candidates.add( name );
+			}
+		}
+		catch( IOException unreadable )
+		{
+			Log.event( "WORLD_MAP", "No se pudieron listar los mapas en " + maps, unreadable );
+		}
+		for( String candidate : candidates )
+		{
+			if( hasTiles( maps.resolve( candidate ) ) )
+				return Optional.of( candidate );
+		}
+		return Optional.empty();
+	}
+
+	/** Un mapa "tiene contenido" cuando su capa mas general ya trae algo dibujado. */
+	private static boolean hasTiles( Path map )
+	{
+		Path tiles = map.resolve( "tiles" );
+		if( !Files.isDirectory( tiles ) )
+			return false;
+		try (Stream<Path> levels = Files.walk( tiles, 4 ))
+		{
+			return levels.anyMatch( path -> path.getFileName().toString().endsWith( ".json.gz" )
+					|| path.getFileName().toString().endsWith( ".png" ) );
+		}
+		catch( IOException unreadable )
+		{
+			return false;
+		}
+	}
+
+	/**
 	 * Genera (o actualiza) el mapa y lo deja servido. Vuelve en cuanto el
 	 * proceso arranca: el progreso se publica en {@link TransferProgress}.
 	 *
@@ -319,7 +390,7 @@ public final class WorldMap
 		runningWorld = worldRepository;
 		watchingOnly = false;
 		TransferProgress.publish( "Building map", "Starting renderer", -1 );
-		followProgress( process );
+		followProgress( process, mapDirectory );
 		return url;
 	}
 
@@ -379,18 +450,37 @@ public final class WorldMap
 		return jar;
 	}
 
-	/** Hilo suelto que traduce la salida del renderizador a la barra de progreso. */
-	private static void followProgress( Process process )
+	/**
+	 * Hilo suelto que traduce la salida del renderizador a la barra de progreso,
+	 * y de paso la deja escrita.
+	 *
+	 * <p>El registro no es un lujo: cuando el mapa sale raro, lo que dijo el
+	 * renderizador es la unica pista, y sin guardarlo se pierde en cuanto se
+	 * cierra el proceso.</p>
+	 */
+	private static void followProgress( Process process, Path mapDirectory )
 	{
 		Thread reader = new Thread( () ->
 		{
+			Path logFile = mapDirectory.resolve( "render.log" );
 			try (BufferedReader lines = new BufferedReader(
-					new InputStreamReader( process.getInputStream(), StandardCharsets.UTF_8 ) ))
+					new InputStreamReader( process.getInputStream(), StandardCharsets.UTF_8 ) );
+					java.io.BufferedWriter log = Files.newBufferedWriter( logFile ))
 			{
 				String line;
 				while( (line = lines.readLine()) != null )
 				{
 					final String current = line;
+					try
+					{
+						log.write( current );
+						log.newLine();
+						log.flush();
+					}
+					catch( IOException notLogged )
+					{
+						// Sin registro se sigue: la barra de progreso importa mas
+					}
 					WorldMapProgress.parse( current ).ifPresent( step ->
 					{
 						if( step.finished() )

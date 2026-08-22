@@ -1399,7 +1399,9 @@ public final class MainFrame
 	 */
 	private void openWorldMapInBrowser()
 	{
-		java.util.Optional<String> served = app.WorldMap.currentUrl();
+		File opened = serverOpenedDirectory;
+		java.util.Optional<String> served = opened == null ? app.WorldMap.currentUrl()
+				: app.WorldMap.viewerUrlFor( opened.toPath() );
 		if( served.isPresent() )
 			ForgeUtils.openURL( served.get() );
 		else

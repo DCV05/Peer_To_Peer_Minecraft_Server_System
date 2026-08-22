@@ -131,6 +131,41 @@ class WorldMapTest
 	}
 
 	@Test
+	void theViewerOpensOnAMapThatAlreadyHasSomethingToShow() throws IOException
+	{
+		Path maps = temporary.resolve( "maps" );
+		// El overworld existe pero esta vacio todavia; el Nether ya tiene dibujo
+		Files.createDirectories( maps.resolve( "overworld" ).resolve( "tiles" ) );
+		Files.createDirectories( maps.resolve( "nether" ).resolve( "tiles" ).resolve( "0" ) );
+		Files.writeString( maps.resolve( "nether/tiles/0/x0z0.png" ), "" );
+
+		assertEquals( "nether", WorldMap.firstMapWithContent( maps ).orElseThrow(),
+				"Se abriria un mapa vacio y pareceria que el visor esta roto" );
+	}
+
+	@Test
+	void theOverworldWinsWhenBothHaveContent() throws IOException
+	{
+		Path maps = temporary.resolve( "maps" );
+		for( String name : new String[] { "overworld", "nether" } )
+		{
+			Files.createDirectories( maps.resolve( name ).resolve( "tiles" ).resolve( "0" ) );
+			Files.writeString( maps.resolve( name ).resolve( "tiles/0/x0z0.png" ), "" );
+		}
+
+		assertEquals( "overworld", WorldMap.firstMapWithContent( maps ).orElseThrow(),
+				"Al abrir se espera ver el mundo normal, no el Nether" );
+	}
+
+	@Test
+	void withNothingRenderedThereIsNoMapToOpen() throws IOException
+	{
+		Path maps = Files.createDirectories( temporary.resolve( "maps" ) );
+
+		assertTrue( WorldMap.firstMapWithContent( maps ).isEmpty() );
+	}
+
+	@Test
 	void aWorldWithoutAMapYetReportsMissing()
 	{
 		Path repository = temporary.resolve( "farmland_mc" );

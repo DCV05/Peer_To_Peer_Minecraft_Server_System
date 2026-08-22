@@ -103,6 +103,46 @@ class WorldMapConfigTest
 	}
 
 	@Test
+	void theNetherIsNotWipedOutByTheOverworldCaveSetting() throws IOException
+	{
+		Path world = temporary.resolve( "world" );
+		Files.createDirectories( world.resolve( "region" ) );
+		Files.createDirectories( world.resolve( "DIM-1" ).resolve( "region" ) );
+
+		WorldMapConfig.write( temporary, world, WorldMapConfig.Options.standard( 8123 ) );
+
+		String nether = Files.readString( temporary.resolve( "config/maps/nether.conf" ) );
+		// El Nether ENTERO es una cueva: con el valor del overworld (55) se borra
+		// casi todo el mapa y queda practicamente vacio
+		assertTrue( nether.contains( "remove-caves-below-y: -10000" ), nether );
+		// Y sin cortar el techo solo se ve la plancha de piedra base de arriba
+		assertTrue( nether.contains( "max-y: 90" ), nether );
+	}
+
+	@Test
+	void eachDimensionIsLitAndColouredAsItShould() throws IOException
+	{
+		Path world = temporary.resolve( "world" );
+		Files.createDirectories( world.resolve( "region" ) );
+		Files.createDirectories( world.resolve( "DIM-1" ).resolve( "region" ) );
+		Files.createDirectories( world.resolve( "DIM1" ).resolve( "region" ) );
+
+		WorldMapConfig.write( temporary, world, WorldMapConfig.Options.standard( 8123 ) );
+
+		String overworld = Files.readString( temporary.resolve( "config/maps/overworld.conf" ) );
+		String nether = Files.readString( temporary.resolve( "config/maps/nether.conf" ) );
+		String end = Files.readString( temporary.resolve( "config/maps/end.conf" ) );
+
+		assertTrue( overworld.contains( "sky-color: \"#7dabff\"" ) );
+		assertTrue( nether.contains( "sky-color: \"#290000\"" ), "El Nether saldria con cielo azul" );
+		assertTrue( end.contains( "sky-color: \"#080010\"" ) );
+		// Sin cielo propio, la luz tiene que venir del ambiente o se ve todo negro
+		assertTrue( nether.contains( "world-sky-light: 0" ) && nether.contains( "ambient-light: 0.6" ), nether );
+		assertTrue( end.contains( "world-sky-light: 0" ) && end.contains( "ambient-light: 0.6" ), end );
+		assertFalse( overworld.contains( "max-y:" ), "El overworld no se corta por arriba" );
+	}
+
+	@Test
 	void theMapPointsAtTheRightFolderForEachDimension() throws IOException
 	{
 		Path world = temporary.resolve( "world" );

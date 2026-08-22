@@ -34,15 +34,30 @@ public final class WorldMapConfig
 		}
 	}
 
-	/** Una dimension del mundo: su carpeta y como se llama en el visor. */
-	private record Dimension( String id, String displayName, String relativePath, int sorting )
+	/**
+	 * Una dimension del mundo y como hay que dibujarla.
+	 *
+	 * <p>Cada dimension necesita ajustes propios, y equivocarlos no da ningun
+	 * error: sale un mapa vacio o negro. Los valores son los que usa BlueMap por
+	 * defecto para cada una.</p>
+	 *
+	 * @param removeCavesBelowY altura por debajo de la cual se tapan las cuevas.
+	 *        En el Nether hay que desactivarlo (-10000): el Nether ENTERO es una
+	 *        cueva, y con el valor del overworld se borra casi todo el mapa.
+	 * @param maxY techo del render, o null para no cortar. El Nether tiene una
+	 *        plancha de piedra base arriba: sin cortarla solo se ve eso.
+	 * @param skyLight luz de cielo. Nether y End no tienen cielo, y con el valor
+	 *        del overworld se ven mal iluminados.
+	 */
+	private record Dimension( String id, String displayName, String relativePath, int sorting, String skyColor,
+			double ambientLight, int skyLight, int removeCavesBelowY, Integer maxY )
 	{
 	}
 
 	private static final List<Dimension> DIMENSIONS = List.of(
-			new Dimension( "overworld", "Overworld", "", 0 ),
-			new Dimension( "nether", "Nether", "DIM-1", 1 ),
-			new Dimension( "end", "End", "DIM1", 2 ) );
+			new Dimension( "overworld", "Overworld", "", 0, "#7dabff", 0.1, 15, 55, null ),
+			new Dimension( "nether", "Nether", "DIM-1", 1, "#290000", 0.6, 0, -10000, 90 ),
+			new Dimension( "end", "End", "DIM1", 2, "#080010", 0.6, 0, -10000, null ) );
 
 	private static final int MAX_RENDER_THREADS = 6;
 
@@ -167,14 +182,15 @@ public final class WorldMapConfig
 
 	private static String map( Dimension dimension, Path dimensionDirectory, Options options )
 	{
+		String ceiling = dimension.maxY() == null ? "" : "max-y: " + dimension.maxY() + "\n";
 		return """
 				name: "%s"
 				world: "%s"
 				sorting: %d
-				sky-color: "#7dabff"
-				ambient-light: 0.1
-				world-sky-light: 15
-				remove-caves-below-y: 55
+				sky-color: "%s"
+				ambient-light: %s
+				world-sky-light: %d
+				remove-caves-below-y: %d
 				cave-detection-ocean-floor: -5
 				cave-detection-uses-block-light: false
 				min-inhabited-time: 0
@@ -182,11 +198,16 @@ public final class WorldMapConfig
 				save-hires-layer: %s
 				storage: "file"
 				ignore-missing-light-data: false
-				marker-sets: {
+				%smarker-sets: {
 				}
 				""".formatted( dimension.displayName(),
 				dimensionDirectory.toAbsolutePath().toString().replace( "\\", "\\\\" ),
 				dimension.sorting(),
-				options.fullDetail() );
+				dimension.skyColor(),
+				dimension.ambientLight(),
+				dimension.skyLight(),
+				dimension.removeCavesBelowY(),
+				options.fullDetail(),
+				ceiling );
 	}
 }
