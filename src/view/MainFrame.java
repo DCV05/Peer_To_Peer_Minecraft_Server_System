@@ -1403,7 +1403,26 @@ public final class MainFrame
 		java.util.Optional<String> served = opened == null ? app.WorldMap.currentUrl()
 				: app.WorldMap.viewerUrlFor( opened.toPath() );
 		if( served.isPresent() )
+		{
+			// Otra vez aqui a proposito: al construir el mapa el guion se deja antes
+			// de que el renderizador desempaquete el visor, y no hay garantia de que
+			// lo respete. Mirar la primera linea de un fichero no cuesta nada, y esta
+			// es la ultima ocasion antes de que alguien lo mire de verdad
+			if( opened != null )
+			{
+				try
+				{
+					app.WorldMapViewer.install( app.WorldMap.directoryFor( opened.toPath() ) );
+				}
+				catch( java.io.IOException notInstalled )
+				{
+					// Sin guion se ven chinchetas planas, que es lo de siempre: no es
+					// motivo para no abrir el mapa
+					app.Log.event( "MAP_VIEWER", "No se pudo dejar el guion del muñeco 3D", notInstalled );
+				}
+			}
 			ForgeUtils.openURL( served.get() );
+		}
 		else
 			startWorldMapBuild( dashboard.wantsFullDetailMap() );
 	}
