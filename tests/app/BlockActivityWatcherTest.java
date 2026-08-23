@@ -99,6 +99,26 @@ class BlockActivityWatcherTest
 	}
 
 	@Test
+	void theMarkersAreNotRepaintedWhileNothingHappens() throws Exception
+	{
+		BlockActivityWatcher watcher = new BlockActivityWatcher( repository, world, activity ->
+		{
+		} );
+		recordBlockChange( 1, "block-break", 120, 64, -340 );
+		watcher.tick();
+		java.nio.file.attribute.FileTime before = java.nio.file.attribute.FileTime.fromMillis( 1_600_000_000_000L );
+		Files.setLastModifiedTime( markerFile(), before );
+
+		watcher.tick();
+		watcher.tick();
+
+		// La ventana visible dura una hora: sin esto se repinta entera cada cinco
+		// segundos durante una hora despues del ultimo bloque tocado
+		assertEquals( before, Files.getLastModifiedTime( markerFile() ),
+				"Se esta repintando el mapa sin que haya pasado nada" );
+	}
+
+	@Test
 	void whatWasAlreadyReadIsNotSentTwice() throws Exception
 	{
 		List<BlockActivity> notified = new ArrayList<>();

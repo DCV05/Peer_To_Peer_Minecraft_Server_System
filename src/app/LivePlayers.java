@@ -35,8 +35,6 @@ public final class LivePlayers
 	private static final String SCRIPT_OUTPUT = "scripts/" + SCRIPT_NAME + ".data/players.json";
 
 	private static final ObjectMapper JSON = new ObjectMapper();
-	/** Lo ultimo que dejamos escrito en cada fichero, para no repetir el trabajo. */
-	private static final java.util.Map<Path, String> lastWritten = new java.util.concurrent.ConcurrentHashMap<>();
 
 	/** Un jugador tal y como lo publica el guion. */
 	public record Snapshot( String uuid, String name, double x, double y, double z, double yaw, double pitch,
@@ -166,28 +164,7 @@ public final class LivePlayers
 			ensureHead( map, player.uuid() );
 		}
 
-		Path file = map.resolve( "live" ).resolve( "players.json" );
-		String json = root.toString();
-		// Quieto y con el fichero como lo dejamos: mirar cuanto ocupa sale mucho mas
-		// barato que reescribirlo, y con nadie conectado eso es lo normal durante
-		// horas. Basta con el tamaño: el unico que pisa esto es el renderizador, que
-		// escribe siempre "{}"
-		if( !alreadyWritten( file, json ) )
-			writeAtomically( file, json );
-	}
-
-	private static boolean alreadyWritten( Path file, String json )
-	{
-		if( !json.equals( lastWritten.get( file ) ) )
-			return false;
-		try
-		{
-			return Files.size( file ) == json.getBytes( StandardCharsets.UTF_8 ).length;
-		}
-		catch( IOException gone )
-		{
-			return false;
-		}
+		LiveFile.write( map.resolve( "live" ).resolve( "players.json" ), root.toString(), "LIVE_PLAYERS" );
 	}
 
 	/**
@@ -205,23 +182,6 @@ public final class LivePlayers
 		Path mapDirectory = map.getParent().getParent().getParent();
 		Path generic = mapDirectory.resolve( "web" ).resolve( "assets" ).resolve( "steve.png" );
 		PlayerSkins.ensureFace( mapDirectory, map.getFileName().toString(), uuid, generic );
-	}
-
-	private static void writeAtomically( Path file, String content )
-	{
-		try
-		{
-			Files.createDirectories( file.getParent() );
-			Path temporary = file.resolveSibling( file.getFileName() + ".tmp" );
-			Files.writeString( temporary, content, StandardCharsets.UTF_8 );
-			Files.move( temporary, file, StandardCopyOption.REPLACE_EXISTING );
-			lastWritten.put( file, content );
-		}
-		catch( IOException notWritten )
-		{
-			lastWritten.remove( file );
-			Log.event( "LIVE_PLAYERS", "No se pudo escribir " + file, notWritten );
-		}
 	}
 
 	/** Nombre del mapa del visor para una dimension, en minusculas. */

@@ -1,10 +1,8 @@
 package app;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -102,29 +100,21 @@ public final class WorldMapMarkers
 
 	private static void writeMarkerFile( Path file, List<BlockActivity> activity )
 	{
-		try
+		ObjectNode root = JSON.createObjectNode();
+		if( !activity.isEmpty() )
 		{
-			Files.createDirectories( file.getParent() );
-			ObjectNode root = JSON.createObjectNode();
-			if( !activity.isEmpty() )
-			{
-				ObjectNode set = root.putObject( MARKER_SET_ID );
-				set.put( "label", "Recent activity" );
-				set.put( "toggleable", true );
-				set.put( "defaultHidden", false );
-				set.put( "sorting", 0 );
-				ObjectNode markers = set.putObject( "markers" );
-				for( BlockActivity single : activity )
-					markers.set( "activity-" + single.id(), markerFor( single ) );
-			}
-			Path temporary = file.resolveSibling( file.getFileName() + ".tmp" );
-			Files.writeString( temporary, JSON.writeValueAsString( root ), StandardCharsets.UTF_8 );
-			Files.move( temporary, file, StandardCopyOption.REPLACE_EXISTING );
+			ObjectNode set = root.putObject( MARKER_SET_ID );
+			set.put( "label", "Recent activity" );
+			set.put( "toggleable", true );
+			set.put( "defaultHidden", false );
+			set.put( "sorting", 0 );
+			ObjectNode markers = set.putObject( "markers" );
+			for( BlockActivity single : activity )
+				markers.set( "activity-" + single.id(), markerFor( single ) );
 		}
-		catch( IOException notWritten )
-		{
-			Log.event( "MAP_MARKERS", "No se pudo escribir " + file, notWritten );
-		}
+		// Se mira antes si hace falta: el vigilante pasa cada cinco segundos y sigue
+		// repintando la ventana entera una hora despues del ultimo bloque tocado
+		LiveFile.write( file, root.toString(), "MAP_MARKERS" );
 	}
 
 	private static ObjectNode markerFor( BlockActivity activity )
