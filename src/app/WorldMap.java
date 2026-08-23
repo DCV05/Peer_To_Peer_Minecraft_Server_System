@@ -382,6 +382,8 @@ public final class WorldMap
 		rememberQuality( mapDirectory, fullDetail );
 		// Construir un mapa es decir que lo quieres: no hay que activarlo aparte
 		setEnabledFor( worldRepository, true );
+		// El muñeco 3D de los jugadores lo pone un guion nuestro dentro del visor
+		WorldMapViewer.install( mapDirectory );
 
 		List<String> command = new ArrayList<>();
 		// -r renderiza, -u se queda vigilando los ficheros de region para

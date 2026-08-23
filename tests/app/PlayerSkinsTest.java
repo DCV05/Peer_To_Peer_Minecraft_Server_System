@@ -22,8 +22,8 @@ import org.junit.jupiter.api.io.TempDir;
  *
  * <p>Nada de esto sale a internet: se prueba el recorte —que es donde un error de
  * un pixel te pone la nuca en vez de la cara— y que sin conexion siempre queda
- * una cara puesta, porque si falta el fichero el visor no dibuja el muñeco y no
- * avisa de nada.</p>
+ * una cara puesta, para no dejar un 404 por jugador cada vez que alguien abre el
+ * mapa.</p>
  */
 class PlayerSkinsTest
 {
@@ -133,7 +133,7 @@ class PlayerSkinsTest
 		assertTrue( PlayerSkins.ensureFace( mapDirectory, "overworld", "abc-123", generic ) );
 
 		Path face = mapDirectory.resolve( "web/maps/overworld/assets/playerheads/abc-123.png" );
-		assertEquals( "generica", Files.readString( face ), "Sin cara el visor no dibuja el muñeco" );
+		assertEquals( "generica", Files.readString( face ), "Se quedaria un 404 por jugador en cada visita" );
 	}
 
 	@Test

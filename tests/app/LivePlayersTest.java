@@ -94,7 +94,7 @@ class LivePlayersTest
 	}
 
 	@Test
-	void everyPlayerGetsAFaceOrTheViewerDrawsNothing() throws Exception
+	void everyPlayerGetsAFacePutInPlace() throws Exception
 	{
 		Path map = mapWith( "overworld" );
 		// La cara generica la trae el propio visor
@@ -104,7 +104,7 @@ class LivePlayersTest
 		LivePlayers.write( map, List.of( at( "abc-123", "minecraft:overworld" ) ) );
 
 		assertTrue( Files.isRegularFile( map.resolve( "web/maps/overworld/assets/playerheads/abc-123.png" ) ),
-				"Sin cara, el visor no dibuja el muñeco y no avisa de nada" );
+				"Sin cara puesta, el visor pide un fichero que no existe en cada visita" );
 	}
 
 	@Test

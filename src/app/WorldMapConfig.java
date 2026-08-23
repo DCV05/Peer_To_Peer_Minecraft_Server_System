@@ -156,7 +156,10 @@ public final class WorldMapConfig
 				lowres-slider-max: 7000
 				lowres-slider-default: 7000
 				lowres-slider-min: 500
-				""";
+				scripts: [
+				    "%s"
+				]
+				""".formatted( WorldMapViewer.SCRIPT_PATH );
 	}
 
 	private static String webserver( Options options )

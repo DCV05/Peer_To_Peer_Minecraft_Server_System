@@ -167,10 +167,10 @@ public final class LivePlayers
 	}
 
 	/**
-	 * El visor pide la cara de cada jugador por su identificador y, si no la
-	 * encuentra, no dibuja nada. Se intenta la real de Mojang una sola vez por
-	 * jugador y, si no se puede, la generica que ya trae el visor: es preferible
-	 * un muñeco anonimo a que no aparezca nadie.
+	 * El visor pide la cara de cada jugador por su identificador. Se intenta la
+	 * real de Mojang una sola vez por jugador y, si no se puede, se deja puesta la
+	 * generica: el visor tiene su propio apaño para cuando falta el fichero, pero
+	 * dejarlo fallar es un 404 por jugador cada vez que alguien abre el mapa.
 	 */
 	static void ensureHead( Path map, String uuid )
 	{

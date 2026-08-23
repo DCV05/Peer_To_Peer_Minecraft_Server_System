@@ -28,15 +28,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 /**
  * La cara de cada jugador para el mapa.
  *
- * <p>El visor pide la cara por identificador y, si no la encuentra, no dibuja
- * nada. Quien las descarga normalmente es el mod dentro del servidor; como aqui
- * el renderizador va por fuera, se bajan de Mojang y se recorta la cara.</p>
+ * <p>Quien las descarga normalmente es el mod dentro del servidor; como aqui el
+ * renderizador va por fuera, se bajan de Mojang. De cada jugador se guardan dos
+ * cosas: la cara recortada, para la chincheta del visor, y la skin entera, que
+ * es lo que necesita el muñeco 3D.</p>
  *
  * <p>Se descarga <b>una sola vez por jugador</b> y se guarda en la carpeta de la
  * aplicacion, asi que sirve para todos los mapas y sobrevive a que se rehaga el
  * mapa entero. Mientras llega —y si no hay internet, o la cuenta no tiene skin—
- * se pone la generica que ya trae el visor: es preferible un muñeco anonimo a
- * que no aparezca nadie.</p>
+ * se pone la cara generica y el jugador sale como chincheta plana.</p>
  *
  * <p>La descarga <b>nunca</b> ocurre en el hilo que publica las posiciones: ese
  * va una vez por segundo y un servidor de Mojang lento lo dejaria clavado.</p>
@@ -75,10 +75,27 @@ public final class PlayerSkins
 		return AppPaths.data().resolve( "skins" ).resolve( uuid.replace( "-", "" ) + ".png" );
 	}
 
+	/** La skin entera, que es lo que necesita el muñeco 3D del visor. */
+	static Path bodyCacheFileFor( String uuid )
+	{
+		return AppPaths.data().resolve( "skins" ).resolve( uuid.replace( "-", "" ) + "-body.png" );
+	}
+
 	static Path faceFileIn( Path mapDirectory, String mapName, String uuid )
 	{
+		return assetFileIn( mapDirectory, mapName, "playerheads", uuid );
+	}
+
+	/** El guion del muñeco 3D busca la skin entera aqui. */
+	static Path bodyFileIn( Path mapDirectory, String mapName, String uuid )
+	{
+		return assetFileIn( mapDirectory, mapName, "playerskins", uuid );
+	}
+
+	private static Path assetFileIn( Path mapDirectory, String mapName, String folder, String uuid )
+	{
 		return mapDirectory.resolve( "web" ).resolve( "maps" ).resolve( mapName ).resolve( "assets" )
-				.resolve( "playerheads" ).resolve( uuid + ".png" );
+				.resolve( folder ).resolve( uuid + ".png" );
 	}
 
 	/**
@@ -106,7 +123,13 @@ public final class PlayerSkins
 		// vuelve a molestar a Mojang: basta con copiarla
 		Path cached = cacheFileFor( uuid );
 		if( Files.isRegularFile( cached ) )
+		{
+			// La skin entera puede faltar aunque la cara este: los mapas hechos antes
+			// de que existiera el muñeco 3D solo tienen la cara
+			if( !copyOnto( bodyCacheFileFor( uuid ), bodyFileIn( mapDirectory, mapName, uuid ) ) )
+				queueDownload( mapDirectory, uuid );
 			return copyOnto( cached, target );
+		}
 
 		queueDownload( mapDirectory, uuid );
 		return copyOnto( genericFace, target );
@@ -120,7 +143,7 @@ public final class PlayerSkins
 	{
 		for( String uuid : uuids )
 		{
-			if( !Files.isRegularFile( cacheFileFor( uuid ) ) )
+			if( !Files.isRegularFile( cacheFileFor( uuid ) ) || !Files.isRegularFile( bodyCacheFileFor( uuid ) ) )
 				queueDownload( mapDirectory, uuid );
 		}
 	}
@@ -155,25 +178,19 @@ public final class PlayerSkins
 		executor().execute( () -> downloadAndPublish( mapDirectory, uuid ) );
 	}
 
-	/** Baja la cara, la guarda y la reparte por todos los mapas que ya existan. */
+	/**
+	 * Baja la skin una vez y deja las dos cosas que hacen falta: la cara para la
+	 * chincheta del visor y la skin entera para el muñeco 3D.
+	 */
 	private static void downloadAndPublish( Path mapDirectory, String uuid )
 	{
-		Optional<BufferedImage> face = downloadFace( uuid );
-		if( face.isEmpty() )
+		Optional<BufferedImage> skin = downloadSkin( uuid );
+		if( skin.isEmpty() )
 			return;
-		Path cached = cacheFileFor( uuid );
-		try
-		{
-			Files.createDirectories( cached.getParent() );
-			Path temporary = cached.resolveSibling( cached.getFileName() + ".tmp" );
-			ImageIO.write( face.get(), "png", temporary.toFile() );
-			Files.move( temporary, cached, StandardCopyOption.REPLACE_EXISTING );
-		}
-		catch( IOException notWritten )
-		{
-			Log.event( "SKINS", "No se pudo guardar la cara de " + uuid, notWritten );
+		Path cachedFace = cacheFileFor( uuid );
+		Path cachedBody = bodyCacheFileFor( uuid );
+		if( !save( cropFace( skin.get() ), cachedFace ) || !save( skin.get(), cachedBody ) )
 			return;
-		}
 
 		Path maps = mapDirectory.resolve( "web" ).resolve( "maps" );
 		if( !Files.isDirectory( maps ) )
@@ -182,13 +199,33 @@ public final class PlayerSkins
 		{
 			for( Path map : children.toList() )
 			{
-				if( Files.isDirectory( map ) )
-					copyOnto( cached, faceFileIn( mapDirectory, map.getFileName().toString(), uuid ) );
+				if( !Files.isDirectory( map ) )
+					continue;
+				String mapName = map.getFileName().toString();
+				copyOnto( cachedFace, faceFileIn( mapDirectory, mapName, uuid ) );
+				copyOnto( cachedBody, bodyFileIn( mapDirectory, mapName, uuid ) );
 			}
 		}
 		catch( IOException unreadable )
 		{
 			Log.event( "SKINS", "No se pudieron repartir las caras en " + maps, unreadable );
+		}
+	}
+
+	private static boolean save( BufferedImage image, Path target )
+	{
+		try
+		{
+			Files.createDirectories( target.getParent() );
+			Path temporary = target.resolveSibling( target.getFileName() + ".tmp" );
+			ImageIO.write( image, "png", temporary.toFile() );
+			Files.move( temporary, target, StandardCopyOption.REPLACE_EXISTING );
+			return true;
+		}
+		catch( IOException notWritten )
+		{
+			Log.event( "SKINS", "No se pudo guardar " + target, notWritten );
+			return false;
 		}
 	}
 
@@ -235,8 +272,8 @@ public final class PlayerSkins
 		}
 	}
 
-	/** Baja la skin de Mojang y recorta la cara. Vacio si no se puede. */
-	static Optional<BufferedImage> downloadFace( String uuid )
+	/** Baja la skin de Mojang, entera. Vacio si no se puede. */
+	static Optional<BufferedImage> downloadSkin( String uuid )
 	{
 		try
 		{
@@ -250,8 +287,7 @@ public final class PlayerSkins
 						HttpResponse.BodyHandlers.ofByteArray() );
 				if( response.statusCode() != 200 )
 					return Optional.empty();
-				BufferedImage skin = ImageIO.read( new ByteArrayInputStream( response.body() ) );
-				return skin == null ? Optional.empty() : Optional.of( cropFace( skin ) );
+				return Optional.ofNullable( ImageIO.read( new ByteArrayInputStream( response.body() ) ) );
 			}
 		}
 		catch( IOException | RuntimeException unavailable )
