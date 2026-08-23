@@ -315,13 +315,26 @@ public final class MainFrame
 	 * sistema: sin esto el proceso hijo de Forge sigue vivo huerfano y el host lock
 	 * de GitHub se queda cogido hasta que caduca el lease (incidente real).
 	 *
+	 * <p>El renderizador del mapa tambien es un proceso aparte y tambien se queda
+	 * huerfano: paso de verdad, un renderizador de una sesion cerrada siguio cinco
+	 * horas comiendo un nucleo y peleandose con el nuevo por la misma carpeta.</p>
+	 *
 	 * SIGKILL y un corte de corriente se saltan igualmente este gancho; para esos
-	 * casos la unica red de seguridad es la caducidad del lease.
+	 * casos la red de seguridad es la caducidad del lease y, para el mapa, la nota
+	 * con el numero de proceso que se limpia al arrancar.
 	 */
 	private void installShutdownCleanup()
 	{
 		Runtime.getRuntime().addShutdownHook( new Thread( () ->
 		{
+			try
+			{
+				app.WorldMap.stopRendering();
+			}
+			catch( RuntimeException rendererFailure )
+			{
+				app.Log.event( "WORLD_MAP", "El renderizador no pudo pararse al cerrar", rendererFailure );
+			}
 			Process orphan = serverProcess;
 			if( orphan != null && orphan.isAlive() )
 			{

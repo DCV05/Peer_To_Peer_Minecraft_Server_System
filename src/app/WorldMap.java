@@ -372,6 +372,9 @@ public final class WorldMap
 
 		Path mapDirectory = directoryFor( worldRepository );
 		Files.createDirectories( mapDirectory );
+		// Antes de nada, el que dejara colgado una sesion anterior: dos dibujando el
+		// mismo mapa se pisan y el trabajo no termina nunca
+		killOrphanRenderer( mapDirectory );
 		Path renderer = ensureRenderer();
 
 		int port = freePort();
@@ -400,6 +403,7 @@ public final class WorldMap
 		Process process = builder.start();
 
 		String url = "http://127.0.0.1:" + port + "/";
+		rememberPid( mapDirectory, process.pid() );
 		runningProcess.set( process );
 		runningUrl.set( url );
 		runningWorld = worldRepository;
@@ -412,9 +416,12 @@ public final class WorldMap
 	public static void stopRendering()
 	{
 		Process process = runningProcess.getAndSet( null );
+		Path was = runningWorld;
 		runningUrl.set( null );
 		runningWorld = null;
 		watchingOnly = false;
+		if( was != null )
+			forgetPid( directoryFor( was ) );
 		if( process == null || !process.isAlive() )
 			return;
 		process.destroy();
@@ -429,6 +436,91 @@ public final class WorldMap
 			process.destroyForcibly();
 		}
 		TransferProgress.done();
+	}
+
+	// ---- renderizadores huerfanos -------------------------------------------
+
+	/** Donde se apunta que proceso esta dibujando este mapa. */
+	static Path pidFileIn( Path mapDirectory )
+	{
+		return mapDirectory.resolve( "renderer.pid" );
+	}
+
+	private static void rememberPid( Path mapDirectory, long pid )
+	{
+		try
+		{
+			Files.writeString( pidFileIn( mapDirectory ), Long.toString( pid ) );
+		}
+		catch( IOException notWritten )
+		{
+			// Sin esta nota solo se pierde la limpieza de huerfanos, no el mapa
+			Log.event( "WORLD_MAP", "No se pudo apuntar el renderizador de " + mapDirectory, notWritten );
+		}
+	}
+
+	private static void forgetPid( Path mapDirectory )
+	{
+		try
+		{
+			Files.deleteIfExists( pidFileIn( mapDirectory ) );
+		}
+		catch( IOException notDeleted )
+		{
+			Log.event( "WORLD_MAP", "No se pudo borrar " + pidFileIn( mapDirectory ), notDeleted );
+		}
+	}
+
+	/**
+	 * Mata el renderizador que dejo colgado una sesion anterior de la aplicacion.
+	 *
+	 * <p>Hace falta porque el renderizador es un proceso aparte: si la aplicacion
+	 * se cierra mal —o se cerro antes de que existiera la limpieza al salir— el
+	 * suyo sigue vivo, sigue comiendo un nucleo y sigue escribiendo en la misma
+	 * carpeta. Dos dibujando el mismo mapa se pisan y el trabajo se eterniza.</p>
+	 *
+	 * <p>Se mata por el numero apuntado, y solo despues de comprobar que ese
+	 * numero sigue siendo del renderizador: los numeros de proceso se reciclan y
+	 * seria muy facil cargarse algo de otro.</p>
+	 *
+	 * @return true si habia uno colgado y se ha matado
+	 */
+	static boolean killOrphanRenderer( Path mapDirectory )
+	{
+		Path note = pidFileIn( mapDirectory );
+		if( !Files.isRegularFile( note ) )
+			return false;
+
+		boolean killed = false;
+		try
+		{
+			long pid = Long.parseLong( Files.readString( note ).trim() );
+			java.util.Optional<ProcessHandle> handle = ProcessHandle.of( pid );
+			if( handle.isPresent() && handle.get().isAlive() && isRenderer( handle.get() ) )
+			{
+				Log.event( "WORLD_MAP", "Se mata el renderizador huerfano " + pid + " de " + mapDirectory );
+				handle.get().destroy();
+				killed = handle.get().onExit().orTimeout( 10, java.util.concurrent.TimeUnit.SECONDS )
+						.handle( ( exited, failed ) -> true ).join();
+				if( handle.get().isAlive() )
+					handle.get().destroyForcibly();
+			}
+		}
+		catch( IOException | RuntimeException unusable )
+		{
+			// Nota ilegible o proceso que ya no esta: no hay nada que limpiar
+		}
+		forgetPid( mapDirectory );
+		return killed;
+	}
+
+	/** Que ese numero de proceso siga siendo nuestro renderizador y no otra cosa. */
+	private static boolean isRenderer( ProcessHandle handle )
+	{
+		String command = handle.info().commandLine().orElse( "" );
+		if( command.isBlank() )
+			command = handle.info().command().orElse( "" );
+		return command.contains( "bluemap-" ) || command.contains( "bluemap.jar" );
 	}
 
 	/** Descarga el renderizador si aun no esta; devuelve donde ha quedado. */
