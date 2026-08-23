@@ -2718,6 +2718,10 @@ public final class MainFrame
 			refreshDashboardState();
 		if( line != null && line.contains( "Done" ) )
 			requestPlayerList();
+		// El servidor avisa por consola cuando termina de guardar. Hace falta
+		// saberlo para no pedirle otro guardado mientras sigue con el anterior
+		if( line != null && line.contains( "Saved the game" ) )
+			worldSaveInProgress = false;
 	}
 
 	private void requestPlayerList()
@@ -3343,18 +3347,33 @@ public final class MainFrame
 		}
 	}
 
-	/** Cada cuanto se le pide al mundo que baje a disco lo que lleva en memoria. */
-	static final int MAP_LIVE_SAVE_SECONDS = 60;
+	/**
+	 * Cada cuanto se le pide al mundo que baje a disco lo que lleva en memoria.
+	 *
+	 * <p>Era un minuto y <b>tiraba el servidor</b>. En un mundo grande y con el
+	 * disco ocupado, un guardado tarda 45 segundos; pidiendo otro al minuto, el
+	 * servidor se pasaba la vida guardando hasta que su propio vigilante lo daba
+	 * por colgado y lo mataba (mata a los 60 segundos de tick). Cinco minutos es
+	 * el ritmo al que Minecraft guarda por su cuenta.</p>
+	 */
+	static final int MAP_LIVE_SAVE_SECONDS = 300;
+	/** Tope de espera por un guardado que no contesta, para no quedarse mudo. */
+	static final int MAP_LIVE_SAVE_TIMEOUT_SECONDS = 900;
 	private java.util.Timer worldMapLiveTimer = null;
+	private volatile boolean worldSaveInProgress = false;
+	private volatile long worldSaveAskedAt = 0;
 
 	/**
 	 * Hace que el mapa se vea vivo mientras se juega.
 	 *
 	 * <p>El renderizador vigila los ficheros de region, pero Minecraft no los
 	 * escribe al momento: se los guarda en memoria y los baja a disco cada varios
-	 * minutos. Sin esto, lo que construyes tarda un buen rato en aparecer en el
-	 * mapa aunque todo lo demas funcione. Pidiendo un guardado cada minuto, el
-	 * mapa va como mucho un minuto por detras de la realidad.</p>
+	 * minutos. Sin esto, lo que construyes tarda un rato en aparecer en el mapa
+	 * aunque todo lo demas funcione.</p>
+	 *
+	 * <p><b>Nunca se pide un guardado si el anterior sigue en marcha.</b> Esa fue
+	 * la causa de una caida real del servidor: guardados encadenados hasta que el
+	 * vigilante de Minecraft lo dio por colgado.</p>
 	 *
 	 * <p>Solo se pide mientras haya un mapa vigilando: a quien no usa el mapa no
 	 * se le cobra ni un guardado de mas.</p>
@@ -3376,13 +3395,40 @@ public final class MainFrame
 				}
 				if( !app.WorldMap.isRenderingFor( opened.toPath() ) )
 					return;
+				if( !mayAskForAnotherSave() )
+					return;
+				worldSaveInProgress = true;
+				worldSaveAskedAt = System.currentTimeMillis();
 				ForgeUtils.sendCommand( "save-all", serverProcess, serverWriter );
 			}
 		}, MAP_LIVE_SAVE_SECONDS * 1000L, MAP_LIVE_SAVE_SECONDS * 1000L );
 	}
 
+	/**
+	 * Si el guardado anterior sigue en marcha, no se pide otro.
+	 *
+	 * <p>El tope de espera existe por si el aviso de "guardado" se pierde —una
+	 * consola que se corta, una version que lo escribe distinto—: sin el, un solo
+	 * aviso perdido dejaria el mapa congelado para siempre.</p>
+	 */
+	static boolean mayAskForAnotherSave( boolean saveInProgress, long askedAt, long now )
+	{
+		if( !saveInProgress )
+			return true;
+		return now - askedAt > MAP_LIVE_SAVE_TIMEOUT_SECONDS * 1000L;
+	}
+
+	private boolean mayAskForAnotherSave()
+	{
+		boolean may = mayAskForAnotherSave( worldSaveInProgress, worldSaveAskedAt, System.currentTimeMillis() );
+		if( may && worldSaveInProgress )
+			app.Log.event( "WORLD_MAP", "El guardado anterior no contesto; se pide otro" );
+		return may;
+	}
+
 	private void stopWorldMapLiveUpdates()
 	{
+		worldSaveInProgress = false;
 		if( worldMapLiveTimer != null )
 		{
 			worldMapLiveTimer.cancel();
