@@ -101,6 +101,24 @@ class LivePlayersWatcherTest
 	}
 
 	@Test
+	void withNothingNewTheFileIsNotRewritten() throws Exception
+	{
+		LivePlayersWatcher watcher = new LivePlayersWatcher( repository, world, players ->
+		{
+		} );
+		watcher.tick();
+		java.nio.file.attribute.FileTime before = java.nio.file.attribute.FileTime.fromMillis( 1_600_000_000_000L );
+		Files.setLastModifiedTime( playersFile(), before );
+
+		watcher.tick();
+		watcher.tick();
+
+		// Con nadie conectado esto son horas escribiendo lo mismo cada segundo
+		assertEquals( before, Files.getLastModifiedTime( playersFile() ),
+				"Se esta reescribiendo el fichero sin que haya cambiado nada" );
+	}
+
+	@Test
 	void stoppingLeavesTheMapWithoutPlayers() throws Exception
 	{
 		publish( """
