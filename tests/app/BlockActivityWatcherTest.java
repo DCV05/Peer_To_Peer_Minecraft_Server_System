@@ -80,6 +80,25 @@ class BlockActivityWatcherTest
 	}
 
 	@Test
+	void theMarkersComeBackAfterTheRendererWipesThem() throws Exception
+	{
+		BlockActivityWatcher watcher = new BlockActivityWatcher( repository, world, activity ->
+		{
+		} );
+		recordBlockChange( 1, "block-break", 120, 64, -340 );
+		watcher.tick();
+		assertEquals( 1, markersOnTheMap().size() );
+
+		// El renderizador guarda su estado cada dos minutos y al hacerlo pisa este
+		// fichero con los suyos, que estan vacios
+		Files.writeString( markerFile(), "{}" );
+		watcher.tick();
+
+		assertEquals( 1, markersOnTheMap().size(),
+				"La actividad desapareceria del mapa cada dos minutos sin motivo aparente" );
+	}
+
+	@Test
 	void whatWasAlreadyReadIsNotSentTwice() throws Exception
 	{
 		List<BlockActivity> notified = new ArrayList<>();

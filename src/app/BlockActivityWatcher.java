@@ -80,21 +80,27 @@ public final class BlockActivityWatcher
 		return scheduler != null;
 	}
 
-	/** Una pasada: leer lo nuevo, guardarlo, pintarlo y avisar. Visible para los tests. */
+	/**
+	 * Una pasada: leer lo nuevo, guardarlo, pintarlo y avisar. Visible para los
+	 * tests.
+	 *
+	 * <p>Los marcadores se reescriben aunque no haya novedades. El renderizador
+	 * guarda su estado cada dos minutos y al hacerlo pisa el fichero de
+	 * marcadores con los suyos, que estan vacios: sin reescribir, la actividad
+	 * desapareceria del mapa cada dos minutos sin motivo aparente.</p>
+	 */
 	void tick()
 	{
 		try
 		{
 			List<BlockActivity> incoming = LedgerDatabase.readNew( worldDirectory, log.lastSeenId() );
-			if( incoming.isEmpty() )
-				return;
-			List<BlockActivity> accepted = log.add( incoming );
-			if( accepted.isEmpty() )
-				return;
-			// Se repintan los marcadores con TODA la ventana visible, no solo con lo
-			// que acaba de llegar: el fichero se reemplaza entero cada vez
-			WorldMapMarkers.write( WorldMap.directoryFor( worldRepository ), log.recent( WorldMapMarkers.MAX_MARKERS ) );
-			if( listener != null )
+			List<BlockActivity> accepted = incoming.isEmpty() ? List.of() : log.add( incoming );
+			// Se repintan con TODA la ventana visible, no solo con lo que acaba de
+			// llegar: el fichero se reemplaza entero cada vez
+			List<BlockActivity> visible = log.recent( WorldMapMarkers.MAX_MARKERS );
+			if( !visible.isEmpty() || !accepted.isEmpty() )
+				WorldMapMarkers.write( WorldMap.directoryFor( worldRepository ), visible );
+			if( !accepted.isEmpty() && listener != null )
 				listener.accept( accepted );
 		}
 		catch( RuntimeException unexpected )

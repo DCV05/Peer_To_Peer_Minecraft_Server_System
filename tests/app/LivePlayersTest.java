@@ -9,6 +9,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -28,6 +30,21 @@ class LivePlayersTest
 	Path temporary;
 
 	private static final ObjectMapper JSON = new ObjectMapper();
+
+	@BeforeEach
+	void setUp()
+	{
+		System.setProperty( "endershare.dataDirectory", temporary.resolve( "data" ).toString() );
+		// Los tests no salen a internet a por las caras de nadie
+		System.setProperty( "endershare.skinDownloads", "off" );
+	}
+
+	@AfterEach
+	void tearDown()
+	{
+		System.clearProperty( "endershare.dataDirectory" );
+		System.clearProperty( "endershare.skinDownloads" );
+	}
 
 	@Test
 	void readsWhatTheScriptPublishes() throws IOException

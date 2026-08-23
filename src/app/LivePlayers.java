@@ -168,28 +168,19 @@ public final class LivePlayers
 
 	/**
 	 * El visor pide la cara de cada jugador por su identificador y, si no la
-	 * encuentra, no dibuja nada. Quien las descarga de Mojang es el mod dentro
-	 * del servidor, y aqui el renderizador va por fuera: se pone la cara generica
-	 * que ya trae el visor.
+	 * encuentra, no dibuja nada. Se intenta la real de Mojang una sola vez por
+	 * jugador y, si no se puede, la generica que ya trae el visor: es preferible
+	 * un muñeco anonimo a que no aparezca nadie.
 	 */
 	static void ensureHead( Path map, String uuid )
 	{
 		Path head = map.resolve( "assets" ).resolve( "playerheads" ).resolve( uuid + ".png" );
 		if( Files.exists( head ) )
 			return;
-		// web/maps/<mapa>/  ->  web/assets/steve.png
-		Path fallback = map.getParent().getParent().resolve( "assets" ).resolve( "steve.png" );
-		try
-		{
-			if( !Files.isRegularFile( fallback ) )
-				return;
-			Files.createDirectories( head.getParent() );
-			Files.copy( fallback, head, StandardCopyOption.REPLACE_EXISTING );
-		}
-		catch( IOException notCopied )
-		{
-			Log.event( "LIVE_PLAYERS", "No se pudo poner la cara de " + uuid, notCopied );
-		}
+		// map = <mapDirectory>/web/maps/<mapa>  ->  <mapDirectory>
+		Path mapDirectory = map.getParent().getParent().getParent();
+		Path generic = mapDirectory.resolve( "web" ).resolve( "assets" ).resolve( "steve.png" );
+		PlayerSkins.ensureFace( mapDirectory, map.getFileName().toString(), uuid, generic );
 	}
 
 	private static void writeAtomically( Path file, String content )
