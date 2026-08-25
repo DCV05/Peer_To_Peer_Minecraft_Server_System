@@ -191,7 +191,71 @@ class SyncStateTest
 		assertEquals( "", snapshotBranch );
 	}
 
+	// ---- Clon superficial --------------------------------------------------
+
+	/**
+	 * Quien se une descarga sólo el mundo de ahora, sin la historia. Con la
+	 * historia cortada, {@code isMergedInto} podría no encontrar el antepasado
+	 * común y dar una divergencia FALSA, que dispararía un rescate y resetearía
+	 * el mundo de alguien que no tenía ningún problema.
+	 */
+	@Test
+	void aShallowGuestIsClassifiedAsBehindAndNotAsDiverged() throws Exception
+	{
+		Path shallowGuest = shallowCloneOfRemote( "shallow-guest" );
+		commitWorld( hostWorld, "r.0.0.mca", "el host juega el dia 2" );
+		commitWorld( hostWorld, "r.0.0.mca", "el host juega el dia 3" );
+		push( hostWorld );
+
+		assertEquals( GitUtils.SyncState.BEHIND, GitUtils.syncState( shallowGuest ) );
+	}
+
+	/** Y cuando la divergencia es real, el corte de historia no la esconde. */
+	@Test
+	void aShallowGuestStillDetectsARealDivergence() throws Exception
+	{
+		Path shallowGuest = shallowCloneOfRemote( "shallow-guest" );
+		commitWorld( hostWorld, "r.0.0.mca", "el host juega" );
+		push( hostWorld );
+		commitWorld( shallowGuest, "r.0.0.mca", "el invitado juega por su cuenta" );
+
+		assertEquals( GitUtils.SyncState.DIVERGED, GitUtils.syncState( shallowGuest ) );
+	}
+
+	/** Un clon superficial tiene que poder respaldar: si no, no podría jugar. */
+	@Test
+	void aShallowGuestCanStillBackUpItsWorld() throws Exception
+	{
+		Path shallowGuest = shallowCloneOfRemote( "shallow-guest" );
+		Files.writeString( shallowGuest.resolve( "r.0.0.mca" ), "la tarde del invitado" );
+
+		GitUtils.BackupPushResult backup = GitUtils.commitAndPush( shallowGuest, false );
+
+		assertTrue( backup.success(), backup.message() );
+		assertEquals( GitUtils.SyncState.UP_TO_DATE, GitUtils.syncState( shallowGuest ) );
+	}
+
 	// ---- Utilidades --------------------------------------------------------
+
+	/** Igual que worldClonedFromRemote, pero como clona de verdad la aplicación. */
+	private Path shallowCloneOfRemote( String name ) throws Exception
+	{
+		Path world = temporaryDirectory.resolve( name );
+		Git.cloneRepository()
+				.setURI( remote.toUri().toString() )
+				.setDirectory( world.toFile() )
+				.setDepth( 1 )
+				.call()
+				.close();
+		try (Git git = Git.open( world.toFile() ))
+		{
+			StoredConfig config = git.getRepository().getConfig();
+			config.setString( "user", null, "name", name );
+			config.setString( "user", null, "email", name + "@example.test" );
+			config.save();
+		}
+		return world;
+	}
 
 	private Path worldClonedFromRemote( String name ) throws Exception
 	{
