@@ -86,6 +86,15 @@ public final class GitUtils
 	static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 	private static final String BACKUP_IGNORE_START = "# BEGIN Endershare MANAGED BACKUP EXCLUDES";
 	private static final String BACKUP_IGNORE_END = "# END Endershare MANAGED BACKUP EXCLUDES";
+	/**
+	 * Reconoce el bloque gestionado escrito por CUALQUIER version de la aplicacion,
+	 * no solo por la actual. Con el marcador literal, al renombrar P2PMSS a
+	 * Endershare el bloque viejo dejo de casar, se conservo como si fuera una regla
+	 * del usuario y cada peer acabo con un .gitignore distinto: ese fue el conflicto
+	 * que bloqueo un servidor entero.
+	 */
+	private static final Pattern MANAGED_BLOCK_START = Pattern.compile( "^#\\s*BEGIN\\s+\\S+\\s+MANAGED BACKUP EXCLUDES\\s*$" );
+	private static final Pattern MANAGED_BLOCK_END = Pattern.compile( "^#\\s*END\\s+\\S+\\s+MANAGED BACKUP EXCLUDES\\s*$" );
 	private static final List<String> BACKUP_IGNORE_LINES = List.of(
 			BACKUP_IGNORE_START,
 			"# Runtime output and local rollback data are not part of a playable server backup.",
@@ -101,6 +110,13 @@ public final class GitUtils
 			"**/ledger.sqlite-*",
 			"# La RAM del server es por-maquina: compartirla solo genera conflictos.",
 			"/user_jvm_args.txt",
+			"# La configuracion del mapa la reescribe la aplicacion en cada arranque",
+			"# (ServerSideMap): si viaja, dos peers con ajustes distintos chocan en",
+			"# cada sincronizacion y ademas se pisan el valor puesto a mano.",
+			"/config/bluemap/",
+			"# Copia de seguridad que hace Minecraft de level.dat y playerdata: es",
+			"# redundante al 100 % y aparecia en 80 de cada 116 respaldos.",
+			"**/*.dat_old",
 			"**/session.lock",
 			"**/*.tmp",
 			"**/.DS_Store",
@@ -226,16 +242,20 @@ public final class GitUtils
 					result = PrivateBackupSetupResult.alreadyLinkedFailure( "The repository identity could not be configured." );
 					break;
 				}
+				// ANTES del push, no despues. Estando al final, un backup que fallaba
+				// se llevaba por delante la proteccion: la maquina cuyo respaldo no
+				// pasa es justo la que necesita que su server.properties y su RAM
+				// dejen de ensuciar el arbol, y se quedaba sin ella para siempre
+				if( !protectMachineLocalFiles( repoDirectory ) )
+				{
+					result = PrivateBackupSetupResult.alreadyLinkedFailure(
+							"Local-only files could not be protected before the backup." );
+					break;
+				}
 				BackupPushResult backup = commitAndPush( repoDirectory, false );
 				if( !backup.success() )
 				{
 					result = PrivateBackupSetupResult.alreadyLinkedFailure( backup.message() );
-					break;
-				}
-				if( !protectMachineLocalFiles( repoDirectory ) )
-				{
-					result = PrivateBackupSetupResult.alreadyLinkedFailure(
-							"The world was pushed, but local-only files could not be protected." );
 					break;
 				}
 				// Cero lotes no es un fallo: significa que GitHub ya tenia exactamente
@@ -294,64 +314,124 @@ public final class GitUtils
 	}
 
 	/**
-	 * Añade un bloque gestionado sin pisar las reglas de ignore que haya escrito el
-	 * dueño del servidor. Dejar los logs fuera de Git reduce el tamaño de la subida
-	 * inicial y evita que una consola en marcha ensucie el árbol tras cada pull.
+	 * Deja las exclusiones del backup en {@code .git/info/exclude} y saca del
+	 * {@code .gitignore} los bloques gestionados que hubiera escrito cualquier
+	 * versión anterior de la aplicación.
+	 *
+	 * <p>Es idempotente y se puede llamar sin repositorio todavía: en ese caso
+	 * sólo limpia el {@code .gitignore} y las reglas se escriben en la siguiente
+	 * llamada, cuando el {@code .git} ya exista.</p>
 	 */
 	static boolean ensureBackupIgnoreFile( Path repoDirectory )
 	{
 		boolean result;
-		Path ignoreFile = repoDirectory.resolve( ".gitignore" );
 		try
 		{
-			List<String> original = Files.exists( ignoreFile )
-					? new ArrayList<>( Files.readAllLines( ignoreFile ) )
-					: new ArrayList<>();
-			List<String> updated = new ArrayList<>();
-			boolean insideManagedBlock = false;
-			int insertionPoint = -1;
-
-			// Se reescribe el bloque entero en su sitio original: asi las reglas del
-			// usuario conservan su orden aunque el bloque gestionado cambie
-			for( String line : original )
-			{
-				if( BACKUP_IGNORE_START.equals( line ) )
-				{
-					insideManagedBlock = true;
-					if( insertionPoint < 0 )
-						insertionPoint = updated.size();
-					continue;
-				}
-				if( insideManagedBlock && BACKUP_IGNORE_END.equals( line ) )
-				{
-					insideManagedBlock = false;
-					continue;
-				}
-				if( !insideManagedBlock )
-					updated.add( line );
-			}
-			if( insertionPoint < 0 )
-			{
-				if( !updated.isEmpty() && !updated.getLast().isBlank() )
-					updated.add( "" );
-				insertionPoint = updated.size();
-			}
-			updated.addAll( insertionPoint, BACKUP_IGNORE_LINES );
-			Files.write( ignoreFile, updated, StandardCharsets.UTF_8 );
-			result = true;
+			// Las reglas viven en .git/info/exclude, que es LOCAL y no se versiona.
+			// Cuando vivian en el .gitignore, ese fichero viajaba por el backup y lo
+			// reescribia cada peer en cada arranque segun su version de la aplicacion:
+			// dos versiones distintas producian contenidos distintos y el conflicto
+			// estaba servido. Git respeta ambos ficheros igual, asi que no se pierde
+			// nada y el .gitignore vuelve a ser del duenyo del servidor.
+			result = writeManagedExcludes( repoDirectory ) && stripManagedBlockFromGitignore( repoDirectory );
 		}
 		catch( IOException ignoreFileFailure )
 		{
-			app.Log.event( "GIT_BACKUP", "No se pudo escribir el .gitignore gestionado en " + repoDirectory, ignoreFileFailure );
+			app.Log.event( "GIT_BACKUP", "No se pudieron escribir las exclusiones del backup en " + repoDirectory,
+					ignoreFileFailure );
 			result = false;
 		}
 		return result;
 	}
 
+	/**
+	 * Escribe el bloque gestionado en {@code .git/info/exclude}, reemplazando el
+	 * que hubiera de una versión anterior. Sin {@code .git} todavía no es un
+	 * fallo: el alta llama a esto antes de crear el repositorio.
+	 */
+	private static boolean writeManagedExcludes( Path repoDirectory ) throws IOException
+	{
+		Path gitDirectory = repoDirectory.resolve( ".git" );
+		if( !Files.isDirectory( gitDirectory ) )
+			return true;
+
+		Path excludeFile = gitDirectory.resolve( "info" ).resolve( "exclude" );
+		List<String> original = Files.exists( excludeFile )
+				? Files.readAllLines( excludeFile, StandardCharsets.UTF_8 )
+				: new ArrayList<>();
+		List<String> preserved = withoutManagedBlocks( original );
+		if( !preserved.isEmpty() && !preserved.getLast().isBlank() )
+			preserved.add( "" );
+		preserved.addAll( BACKUP_IGNORE_LINES );
+
+		Files.createDirectories( excludeFile.getParent() );
+		Files.write( excludeFile, preserved, StandardCharsets.UTF_8 );
+		return true;
+	}
+
+	/**
+	 * Saca del {@code .gitignore} versionado los bloques gestionados de cualquier
+	 * versión de la aplicación, y borra el fichero si no quedaba nada más suyo.
+	 *
+	 * @return true siempre que el fichero quede en un estado válido
+	 */
+	private static boolean stripManagedBlockFromGitignore( Path repoDirectory ) throws IOException
+	{
+		Path ignoreFile = repoDirectory.resolve( ".gitignore" );
+		if( !Files.exists( ignoreFile ) )
+			return true;
+
+		List<String> original = Files.readAllLines( ignoreFile, StandardCharsets.UTF_8 );
+		List<String> ownerRules = withoutManagedBlocks( original );
+		if( ownerRules.equals( original ) )
+			return true;
+
+		// Todo lo que quedaba era nuestro: el fichero se borra en vez de dejar un
+		// .gitignore vacio que el duenyo no ha pedido y que ademas viaja
+		boolean nothingLeft = ownerRules.stream().allMatch( String::isBlank );
+		if( nothingLeft )
+			Files.deleteIfExists( ignoreFile );
+		else
+			Files.write( ignoreFile, ownerRules, StandardCharsets.UTF_8 );
+		app.Log.event( "GIT_BACKUP", "Bloque gestionado retirado del .gitignore de " + repoDirectory );
+		return true;
+	}
+
+	/** Devuelve las líneas ajenas al bloque gestionado, venga de la versión que venga. */
+	private static List<String> withoutManagedBlocks( List<String> lines )
+	{
+		List<String> kept = new ArrayList<>();
+		boolean insideManagedBlock = false;
+		for( String line : lines )
+		{
+			if( !insideManagedBlock && MANAGED_BLOCK_START.matcher( line ).matches() )
+			{
+				insideManagedBlock = true;
+				continue;
+			}
+			if( insideManagedBlock )
+			{
+				// El cierre puede faltar si alguien edito el fichero a mano: en ese
+				// caso se traga hasta el final antes que dejar reglas nuestras sueltas
+				if( MANAGED_BLOCK_END.matcher( line ).matches() )
+					insideManagedBlock = false;
+				continue;
+			}
+			kept.add( line );
+		}
+		// Sin dejar una cola de lineas en blanco donde estaba el bloque
+		while( !kept.isEmpty() && kept.getLast().isBlank() )
+			kept.removeLast();
+		return kept;
+	}
+
 	static boolean protectMachineLocalFiles( Path repoDirectory )
 	{
 		boolean protectedFiles = protectMachineLocalFile( repoDirectory, Path.of( "server.properties" ) )
-				&& protectMachineLocalFile( repoDirectory, Path.of( "user_jvm_args.txt" ) );
+				&& protectMachineLocalFile( repoDirectory, Path.of( "user_jvm_args.txt" ) )
+				// La reescribe ServerSideMap en cada arranque: trackeada, garantiza un
+				// commit por arranque en cada peer y revierte el valor del duenyo
+				&& protectMachineLocalFile( repoDirectory, Path.of( "config/bluemap/plugin.conf" ) );
 		hideTrackedRuntimeFiles( repoDirectory );
 		return protectedFiles;
 	}
@@ -1215,6 +1295,11 @@ public final class GitUtils
 					.setURI( cloneUrl )
 					.setDirectory( clonePath.toFile() )
 					.setCredentialsProvider( credentials )
+					// Solo el mundo de ahora, no los meses de respaldos que hay detras.
+					// La historia de un mundo vivo crece cientos de MB por dia de juego
+					// y quien se une no necesita ni uno: sin esto, unirse a un servidor
+					// con unas semanas encima se vuelve inviable
+					.setDepth( 1 )
 					.setTimeout( CLONE_TIMEOUT_SECONDS )
 					// Clonar un mundo son minutos y muchos megas: sin barra, el
 					// usuario no sabe si esta pasando algo o se ha colgado
@@ -1309,6 +1394,18 @@ public final class GitUtils
 
 		UsernamePasswordCredentialsProvider credentials = new UsernamePasswordCredentialsProvider( userdata.get( "nickname" ),
 				userdata.get( "token" ) );
+
+		// Puerta ANTES de commitear nada: con historias ya divergentes, crear el
+		// commit es lo que hace irreversible el problema. Un commit local que
+		// GitHub no puede aceptar deja al peer fuera para siempre, porque un mundo
+		// binario no se puede rebasar. Sin commit, basta con rescatar y seguir
+		if( syncState( repoDirectory ) == SyncState.DIVERGED )
+		{
+			app.Log.event( "GIT_BACKUP", "Respaldo detenido: la copia de " + repoDirectory + " diverge de GitHub" );
+			return new BackupPushResult( false, 0,
+					"This copy of the world and the one on GitHub have grown apart, so nothing was committed."
+							+ " Your world is safe on this machine: it will be saved aside and the confirmed world downloaded." );
+		}
 
 		try (Git git = Git.open( repoDirectory.toFile() ))
 		{
@@ -1835,9 +1932,196 @@ public final class GitUtils
 	// ---- FASE 7 — Sincronizacion con el remoto -----------------------------
 
 	/**
+	 * En qué situación está la copia local respecto a GitHub.
+	 *
+	 * <p>{@link #DIVERGED} y {@link #UNREACHABLE} son estados DISTINTOS a
+	 * propósito: {@link #isRemoteRepoHeadFordward} los devolvía a los dos como
+	 * {@code null} y quien llamaba no podía distinguir "hay que rescatar este
+	 * mundo" de "vuelve a intentarlo cuando tengas red".</p>
+	 */
+	public enum SyncState
+	{
+		/** Local y remoto en el mismo commit. */
+		UP_TO_DATE,
+		/** El remoto va por delante: se puede traer con un fast-forward. */
+		BEHIND,
+		/** El local va por delante: el respaldo empujará limpio. */
+		AHEAD,
+		/** Historias incompatibles. Con un mundo binario esto NO se puede fusionar. */
+		DIVERGED,
+		/** Sin red, sin sesión o sin remoto: no se sabe, y no se toca nada. */
+		UNREACHABLE
+	}
+
+	/**
+	 * Clasifica la copia local contra {@code origin/<rama>}, haciendo fetch antes.
+	 *
+	 * <p>Es la puerta que faltaba. El arranque empujaba antes de mirar esto, así
+	 * que una copia desfasada creaba un commit propio ANTES de enterarse de que
+	 * iba por detrás: ese commit es lo que convierte un simple desfase en una
+	 * divergencia irreversible, porque un mundo de Minecraft son ficheros
+	 * binarios y no existe fusión posible.</p>
+	 */
+	public static SyncState syncState( Path repoPath )
+	{
+		SyncState result = SyncState.UNREACHABLE;
+		do
+		{
+			Map<String, String> userdata;
+			try
+			{
+				userdata = TokenStore.getSavedUserData();
+			}
+			catch( Exception invalidSession )
+			{
+				break;
+			}
+			if( !hasRemoteOrigin( repoPath ) )
+				break;
+
+			UsernamePasswordCredentialsProvider credentials = new UsernamePasswordCredentialsProvider( userdata.get( "nickname" ),
+					userdata.get( "token" ) );
+
+			try (Git git = Git.open( repoPath.toFile() ))
+			{
+				git.fetch().setCredentialsProvider( credentials ).setTimeout( REMOTE_GIT_TIMEOUT_SECONDS ).call();
+
+				Repository repo = git.getRepository();
+				String branch = repo.getBranch();
+				ObjectId local = repo.resolve( "HEAD" );
+				ObjectId remote = repo.resolve( "refs/remotes/origin/" + branch );
+				// Un remoto vacio todavia no es un desfase: el primer respaldo lo llena
+				if( remote == null )
+				{
+					result = local == null ? SyncState.UP_TO_DATE : SyncState.AHEAD;
+					break;
+				}
+				if( local == null )
+				{
+					result = SyncState.BEHIND;
+					break;
+				}
+
+				try (RevWalk walk = new RevWalk( repo ))
+				{
+					RevCommit localCommit = walk.parseCommit( local );
+					RevCommit remoteCommit = walk.parseCommit( remote );
+					boolean localIsAncestor = walk.isMergedInto( localCommit, remoteCommit );
+					boolean remoteIsAncestor = walk.isMergedInto( remoteCommit, localCommit );
+
+					if( localIsAncestor && remoteIsAncestor )
+						result = SyncState.UP_TO_DATE;
+					else if( localIsAncestor )
+						result = SyncState.BEHIND;
+					else if( remoteIsAncestor )
+						result = SyncState.AHEAD;
+					else
+						result = SyncState.DIVERGED;
+				}
+			}
+			catch( Exception compareFailure )
+			{
+				// UNREACHABLE, no DIVERGED: sin poder comparar no se rescata nada.
+				// Confundirlos haria que una caida de red disparase un reset del mundo
+				app.Log.event( "GIT_BACKUP", "No se pudo clasificar la sincronia de " + repoPath, compareFailure );
+			}
+		} while( false );
+		return result;
+	}
+
+	/**
+	 * Resultado de alinear una copia con GitHub.
+	 *
+	 * @param ready           si se puede seguir (respaldar, arrancar)
+	 * @param state           en qué situación estaba la copia antes de alinear
+	 * @param snapshotBranch  rama donde quedó lo local, o cadena vacía si no hizo falta
+	 * @param message         explicación para la persona que está delante
+	 */
+	public record AlignmentResult( boolean ready, SyncState state, String snapshotBranch, String message )
+	{
+		static AlignmentResult ready( SyncState state, String message )
+		{
+			return new AlignmentResult( true, state, "", message );
+		}
+
+		static AlignmentResult recovered( SyncState state, String snapshotBranch )
+		{
+			String message = snapshotBranch.isEmpty()
+					? "The confirmed world was restored from GitHub."
+					: "Your copy was kept in branch " + snapshotBranch + " and the confirmed world was restored.";
+			return new AlignmentResult( true, state, snapshotBranch, message );
+		}
+
+		static AlignmentResult blocked( SyncState state, String message )
+		{
+			return new AlignmentResult( false, state, "", message );
+		}
+	}
+
+	/**
+	 * Deja la copia local alineada con GitHub ANTES de respaldar o arrancar nada.
+	 *
+	 * <p>Es la puerta que faltaba. Cuando el respaldo iba primero, una copia
+	 * desfasada commiteaba su disco antes de saber que iba por detrás y ese
+	 * commit separaba las historias para siempre.</p>
+	 *
+	 * <p>Estar por detrás CON cambios sin respaldar se trata igual que una
+	 * divergencia: esos cambios se hicieron sobre un mundo viejo, así que
+	 * conservarlos y subirlos después es exactamente lo que rompe el servidor.
+	 * Se guardan en una rama y se trae el mundo confirmado; no se pierde nada y
+	 * no hay ninguna decisión que trasladar a quien sólo quiere jugar.</p>
+	 */
+	public static AlignmentResult alignWithRemote( Path repoPath )
+	{
+		SyncState state = syncState( repoPath );
+		AlignmentResult result;
+		do
+		{
+			if( state == SyncState.UP_TO_DATE || state == SyncState.AHEAD )
+			{
+				result = AlignmentResult.ready( state, "This world matches GitHub." );
+				break;
+			}
+			if( state == SyncState.UNREACHABLE )
+			{
+				// Nunca se rescata a ciegas: sin poder comparar, un reset destruiria
+				// el mundo de quien juega por una simple caida de conexion
+				result = AlignmentResult.blocked( state,
+						"GitHub could not be reached, so this world could not be checked." );
+				break;
+			}
+			if( state == SyncState.BEHIND && !hasLocalChanges( repoPath ) )
+			{
+				result = pull( repoPath )
+						? AlignmentResult.ready( state, "This world was behind GitHub and has been brought up to date." )
+						: AlignmentResult.blocked( state, "The latest world could not be downloaded from GitHub." );
+				break;
+			}
+
+			String snapshotBranch = snapshotLocalChangesAndTakeRemote( repoPath );
+			if( snapshotBranch == null )
+			{
+				result = AlignmentResult.blocked( state,
+						"This world could not be recovered automatically. Nothing was deleted; your copy is still here." );
+				break;
+			}
+			app.Log.event( "GIT_BACKUP", "Copia alineada con GitHub desde " + state
+					+ ( snapshotBranch.isEmpty() ? " sin nada que guardar" : ", guardada en " + snapshotBranch ) );
+			result = AlignmentResult.recovered( state, snapshotBranch );
+		}
+		while( false );
+		return result;
+	}
+
+	/**
 	 * true si el remoto va por delante, false si es el local, null si divergen o
 	 * la comparación no pudo hacerse.
+	 *
+	 * @deprecated usa {@link #syncState(Path)}: este contrato no distingue una
+	 *             divergencia real de un fallo de red, y esa diferencia decide si
+	 *             hay que rescatar el mundo o simplemente reintentar.
 	 */
+	@Deprecated
 	public static Boolean isRemoteRepoHeadFordward( Path repoPath )
 	{
 		Boolean result = null;
@@ -1959,6 +2243,36 @@ public final class GitUtils
 		return result;
 	}
 
+	/**
+	 * Cierto cuando HEAD ya está contenido en {@code origin/<rama>}, es decir,
+	 * cuando no hay ningún commit local sin subir que un reset fuera a tirar.
+	 * Ante la duda devuelve false: preferimos crear una rama de snapshot que
+	 * sobre a perder trabajo por no haberla creado.
+	 */
+	private static boolean isAncestorOfRemote( Git git, String branch )
+	{
+		boolean result = false;
+		try
+		{
+			Repository repo = git.getRepository();
+			ObjectId local = repo.resolve( "HEAD" );
+			ObjectId remote = repo.resolve( "refs/remotes/origin/" + branch );
+			if( local == null )
+				return true;
+			if( remote == null )
+				return false;
+			try (RevWalk walk = new RevWalk( repo ))
+			{
+				result = walk.isMergedInto( walk.parseCommit( local ), walk.parseCommit( remote ) );
+			}
+		}
+		catch( Exception compareFailure )
+		{
+			app.Log.event( "GIT_BACKUP", "No se pudo comprobar si HEAD ya estaba en el remoto", compareFailure );
+		}
+		return result;
+	}
+
 	/** El pull manual se niega con el árbol sucio; esto deja al llamador explicar el porqué. */
 	public static boolean hasLocalChanges( Path repoPath )
 	{
@@ -2011,17 +2325,26 @@ public final class GitUtils
 				if( repo.resolve( "refs/remotes/origin/" + branch ) == null )
 					break;
 
+				boolean treeIsDirty = !git.status().call().isClean();
+				// Commits propios que nunca llegaron a GitHub. Mirar solo el arbol
+				// sucio no bastaba: tras un respaldo rechazado el arbol queda LIMPIO
+				// con commits por delante, y el reset de abajo los dejaba sin ninguna
+				// rama apuntandolos, es decir, perdidos sin avisar
+				boolean hasUnpushedCommits = !isAncestorOfRemote( git, branch );
 				String snapshotBranch = "";
-				if( !git.status().call().isClean() )
+				if( treeIsDirty || hasUnpushedCommits )
 				{
-					// Todo lo local (nuevo, modificado y borrado) queda en un commit...
-					git.add().addFilepattern( "." ).call();
-					git.add().addFilepattern( "." ).setUpdate( true ).call();
-					git.commit()
-							.setAuthor( userdata.get( "nickname" ), userdata.get( "email" ) )
-							.setCommitter( userdata.get( "nickname" ), userdata.get( "email" ) )
-							.setMessage( "Local snapshot before taking the remote world on " + LocalDate.now() )
-							.call();
+					if( treeIsDirty )
+					{
+						// Todo lo local (nuevo, modificado y borrado) queda en un commit...
+						git.add().addFilepattern( "." ).call();
+						git.add().addFilepattern( "." ).setUpdate( true ).call();
+						git.commit()
+								.setAuthor( userdata.get( "nickname" ), userdata.get( "email" ) )
+								.setCommitter( userdata.get( "nickname" ), userdata.get( "email" ) )
+								.setMessage( "Local snapshot before taking the remote world on " + LocalDate.now() )
+								.call();
+					}
 					// ...apuntado por una rama local que nunca se sube al remoto
 					snapshotBranch = "endershare-local-snapshot-" + java.time.LocalDateTime.now()
 							.format( java.time.format.DateTimeFormatter.ofPattern( "yyyyMMdd-HHmmss" ) );

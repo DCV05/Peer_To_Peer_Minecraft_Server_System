@@ -37,6 +37,32 @@ class WorldMapTest
 	}
 
 	@Test
+	void lookingAtTheMapIsNotTheSameAsWatchingIt() throws IOException
+	{
+		// Servir el mapa desde la aplicacion no redibuja nada. La pantalla decia
+		// "LIVE · al dia, redibujando solo lo que cambie" con solo abrirlo, que es
+		// justo lo contrario de lo que estaba pasando
+		Path repository = temporary.resolve( "farmland_mc" );
+		Path web = WorldMap.directoryFor( repository ).resolve( "web" );
+		Files.createDirectories( web.resolve( "maps" ).resolve( "overworld" ) );
+		Files.writeString( web.resolve( "index.html" ), "<html>el visor</html>" );
+
+		try
+		{
+			WorldMap.startServing( repository, temporary.resolve( "world" ), true );
+
+			assertTrue( WorldMap.currentUrl().isPresent(), "El mapa tiene que quedar servido" );
+			assertFalse( WorldMap.isRenderingFor( repository ), "Mirar el mapa no puede dibujarlo" );
+			assertFalse( WorldMap.isWatchingFor( repository ),
+					"Sin renderizador detras no se redibuja nada: decirlo en pantalla es mentir" );
+		}
+		finally
+		{
+			WorldMap.stopRendering();
+		}
+	}
+
+	@Test
 	void theMapNeverLivesInsideTheWorldRepository()
 	{
 		Path repository = temporary.resolve( "farmland_mc" );

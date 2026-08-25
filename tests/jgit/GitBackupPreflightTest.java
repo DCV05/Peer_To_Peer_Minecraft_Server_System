@@ -126,20 +126,116 @@ class GitBackupPreflightTest
 				batches.get( 1 ).stream().map( GitBackupPreflight.FileEntry::relativePath ).toList() );
 	}
 
+	/**
+	 * Las reglas gestionadas viven en .git/info/exclude, que es local y no viaja.
+	 * Mientras vivieron en el .gitignore versionado, cada peer lo reescribia en
+	 * cada arranque segun su version de la aplicacion y el conflicto era seguro.
+	 */
 	@Test
-	void managedIgnoreBlockPreservesOwnerRulesAndIsIdempotent() throws Exception
+	void managedRulesGoToTheLocalExcludeAndAreIdempotent() throws Exception
+	{
+		try (org.eclipse.jgit.api.Git ignored = org.eclipse.jgit.api.Git.init()
+				.setDirectory( temporaryDirectory.toFile() ).call())
+		{
+			Path ignore = temporaryDirectory.resolve( ".gitignore" );
+			Files.writeString( ignore, "custom-plugin-cache/\n" );
+
+			assertTrue( GitUtils.ensureBackupIgnoreFile( temporaryDirectory ) );
+
+			Path exclude = temporaryDirectory.resolve( ".git" ).resolve( "info" ).resolve( "exclude" );
+			String first = Files.readString( exclude );
+			assertTrue( first.contains( "/logs/" ), first );
+			assertTrue( first.contains( "/config/bluemap/" ), first );
+			assertTrue( first.contains( "**/*.dat_old" ), first );
+
+			// El .gitignore vuelve a ser solo del duenyo del servidor
+			String ownerRules = Files.readString( ignore );
+			assertTrue( ownerRules.contains( "custom-plugin-cache/" ) );
+			assertFalse( ownerRules.contains( "/logs/" ), ownerRules );
+
+			assertTrue( GitUtils.ensureBackupIgnoreFile( temporaryDirectory ) );
+			assertEquals( first, Files.readString( exclude ) );
+			assertEquals( 1, Files.readString( exclude ).split( "BEGIN Endershare", -1 ).length - 1 );
+		}
+	}
+
+	/**
+	 * El caso que bloqueo un servidor entero: el bloque de la version anterior se
+	 * llamaba P2PMSS, el marcador literal no casaba, se conservaba como regla del
+	 * usuario y dos peers acababan con .gitignore distintos.
+	 */
+	@Test
+	void aManagedBlockFromAnyOlderVersionIsCleanedUp() throws Exception
+	{
+		try (org.eclipse.jgit.api.Git ignored = org.eclipse.jgit.api.Git.init()
+				.setDirectory( temporaryDirectory.toFile() ).call())
+		{
+			Path ignore = temporaryDirectory.resolve( ".gitignore" );
+			Files.writeString( ignore, """
+					mi-regla/
+					# BEGIN P2PMSS MANAGED BACKUP EXCLUDES
+					/logs/
+					/.p2pmss-import-*/
+					# END P2PMSS MANAGED BACKUP EXCLUDES
+
+					# BEGIN Endershare MANAGED BACKUP EXCLUDES
+					/logs/
+					# END Endershare MANAGED BACKUP EXCLUDES
+					""" );
+
+			assertTrue( GitUtils.ensureBackupIgnoreFile( temporaryDirectory ) );
+
+			String ownerRules = Files.readString( ignore );
+			assertEquals( "mi-regla/", ownerRules.strip() );
+			assertFalse( ownerRules.contains( "MANAGED BACKUP EXCLUDES" ), ownerRules );
+		}
+	}
+
+	/** Sin reglas propias no se deja un .gitignore vacio que ademas viajaria. */
+	@Test
+	void aGitignoreThatWasOnlyOursIsRemoved() throws Exception
+	{
+		try (org.eclipse.jgit.api.Git ignored = org.eclipse.jgit.api.Git.init()
+				.setDirectory( temporaryDirectory.toFile() ).call())
+		{
+			Path ignore = temporaryDirectory.resolve( ".gitignore" );
+			Files.writeString( ignore, """
+					# BEGIN P2PMSS MANAGED BACKUP EXCLUDES
+					/logs/
+					# END P2PMSS MANAGED BACKUP EXCLUDES
+					""" );
+
+			assertTrue( GitUtils.ensureBackupIgnoreFile( temporaryDirectory ) );
+
+			assertFalse( Files.exists( ignore ), "el .gitignore era enteramente nuestro" );
+		}
+	}
+
+	/** El alta llama a esto antes de crear el repositorio: no puede reventar. */
+	@Test
+	void withoutARepositoryYetItStillCleansTheGitignore() throws Exception
 	{
 		Path ignore = temporaryDirectory.resolve( ".gitignore" );
-		Files.writeString( ignore, "custom-plugin-cache/\n" );
+		Files.writeString( ignore, """
+				mi-regla/
+				# BEGIN Endershare MANAGED BACKUP EXCLUDES
+				/logs/
+				# END Endershare MANAGED BACKUP EXCLUDES
+				""" );
 
 		assertTrue( GitUtils.ensureBackupIgnoreFile( temporaryDirectory ) );
-		String first = Files.readString( ignore );
-		assertTrue( first.contains( "custom-plugin-cache/" ) );
-		assertTrue( first.contains( "/logs/" ) );
 
-		assertTrue( GitUtils.ensureBackupIgnoreFile( temporaryDirectory ) );
-		String second = Files.readString( ignore );
-		assertEquals( first, second );
-		assertEquals( 1, second.split( "BEGIN Endershare", -1 ).length - 1 );
+		assertEquals( "mi-regla/", Files.readString( ignore ).strip() );
+	}
+
+	/** Espejo del exclude: si discrepan, el commit mete lo que el ignore excluye. */
+	@Test
+	void theNewExclusionsAreAlsoRuntimeOnlyForThePreflight()
+	{
+		assertTrue( GitBackupPreflight.isRuntimeOnly( Path.of( "config", "bluemap", "plugin.conf" ) ) );
+		assertTrue( GitBackupPreflight.isRuntimeOnly( Path.of( "world", "level.dat_old" ) ) );
+		assertTrue( GitBackupPreflight.isRuntimeOnly( Path.of( "world", "playerdata", "abc.dat_old" ) ) );
+		assertFalse( GitBackupPreflight.isRuntimeOnly( Path.of( "world", "level.dat" ) ) );
+		assertFalse( GitBackupPreflight.isRuntimeOnly( Path.of( "config", "otro-mod", "ajustes.conf" ) ) );
 	}
 }

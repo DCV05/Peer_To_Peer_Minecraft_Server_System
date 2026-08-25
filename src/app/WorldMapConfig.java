@@ -19,8 +19,10 @@ import java.util.List;
  *   <li><b>Distancias de vision</b>: de fabrica vienen en 100 y 2000 bloques.
  *       Medido a 350 y 7000 el visor seguia a 120 fps, o sea que lo de fabrica
  *       era conservador y se estaba desaprovechando la maquina.</li>
- *   <li><b>Hilos</b>: la mitad de los del equipo, nunca mas de seis, para que
- *       renderizar no deje el ordenador inservible mientras tanto.</li>
+ *   <li><b>Hilos</b>: todos los del equipo menos dos. Era la mitad y nunca mas
+ *       de seis, cifra puesta a ojo que en un equipo de catorce nucleos dejaba
+ *       ocho parados: medido, doce hilos dibujan casi cuatro veces mas rapido
+ *       que dos y sacan un mapa identico tile a tile.</li>
  * </ul>
  */
 public final class WorldMapConfig
@@ -59,13 +61,20 @@ public final class WorldMapConfig
 			new Dimension( "nether", "Nether", "DIM-1", 1, "#290000", 0.6, 0, -10000, 90 ),
 			new Dimension( "end", "End", "DIM1", 2, "#080010", 0.6, 0, -10000, null ) );
 
-	private static final int MAX_RENDER_THREADS = 6;
+	/**
+	 * Tope de hilos. A partir de doce lo que se gana ya casi no se nota (de 8 a 12
+	 * hilos, un 50 % mas de hilos compra un 26 % de tiempo), y el equipo empieza a
+	 * ir a trompicones.
+	 */
+	private static final int MAX_RENDER_THREADS = 12;
+	/** Nucleos que se dejan libres para que el equipo siga usable mientras dibuja. */
+	private static final int CORES_LEFT_FOR_THE_REST = 2;
 
 	private WorldMapConfig()
 	{
 	}
 
-	/** Mitad de los procesadores: renderizar no puede dejar el equipo inservible. */
+	/** Todos los procesadores menos dos: renderizar no puede dejar el equipo inservible. */
 	public static int defaultThreadCount()
 	{
 		return threadCountFor( false );
@@ -74,16 +83,36 @@ public final class WorldMapConfig
 	/**
 	 * Cuantos hilos usar para renderizar.
 	 *
-	 * <p>Con una partida en marcha en este mismo equipo se baja a un par de
-	 * hilos: el juego va primero, y un mapa que tarda el doble pero no da tirones
-	 * es mejor que uno rapido que hace injugable la partida.</p>
+	 * <p>Con una partida en marcha en este mismo equipo, <b>uno</b>. Eran dos y se
+	 * quedo corto: cada hilo no es solo CPU, es otro que escribe al disco a la
+	 * vez, y con el disco ocupado el guardado del mundo paso de 4 a 45 segundos
+	 * hasta que el vigilante de Minecraft tumbo el servidor. Un mapa que tarda el
+	 * doble pero deja jugar es mejor que uno rapido que tira la partida.</p>
+	 *
+	 * <p><b>Sin partida, todo lo que la maquina pueda menos dos nucleos.</b> Antes
+	 * era la mitad y nunca mas de seis, que era una cifra puesta a ojo. Medido
+	 * sobre 3894 tiles del mundo real, en un equipo de catorce nucleos:</p>
+	 *
+	 * <ul>
+	 *   <li>2 hilos &rarr; 208 s</li>
+	 *   <li>4 hilos &rarr; 116 s</li>
+	 *   <li>8 hilos &rarr; 68 s</li>
+	 *   <li>12 hilos &rarr; 54 s (<b>casi cuatro veces</b> mas rapido que con dos)</li>
+	 * </ul>
+	 *
+	 * <p>Y el mapa que sale es el mismo: se compararon los 3849 tiles de las dos
+	 * pasadas y coinciden todos salvo un identificador aleatorio que el
+	 * renderizador estampa en cada uno y que no pinta nada.</p>
+	 *
+	 * <p>Los dos nucleos que se dejan libres son para que el equipo siga usable
+	 * mientras dibuja.</p>
 	 */
 	public static int threadCountFor( boolean gameRunningHere )
 	{
-		int available = Runtime.getRuntime().availableProcessors();
 		if( gameRunningHere )
-			return Math.max( 1, Math.min( 2, available / 4 ) );
-		return Math.max( 1, Math.min( MAX_RENDER_THREADS, available / 2 ) );
+			return 1;
+		int available = Runtime.getRuntime().availableProcessors();
+		return Math.max( 1, Math.min( MAX_RENDER_THREADS, available - CORES_LEFT_FOR_THE_REST ) );
 	}
 
 	/**

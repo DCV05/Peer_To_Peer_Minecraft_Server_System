@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -29,6 +30,21 @@ class WorldEventsChannelTest
 {
 	@TempDir
 	Path temporaryDirectory;
+
+	/**
+	 * La carpeta de datos se aisla ANTES que nada.
+	 *
+	 * <p>Se aislaba dentro del ensayo. Si algo fallaba antes de esa linea, el
+	 * {@code tearDown} se ejecutaba igual y su
+	 * {@link TokenStore#invalidateSession()} borraba la sesion de GitHub <b>de
+	 * verdad</b> de quien estuviera corriendo los tests.</p>
+	 */
+	@BeforeEach
+	void isolateTheDataDirectory() throws Exception
+	{
+		System.setProperty( "endershare.dataDirectory",
+				java.nio.file.Files.createDirectories( temporaryDirectory.resolve( "data" ) ).toString() );
+	}
 
 	@AfterEach
 	void tearDown()

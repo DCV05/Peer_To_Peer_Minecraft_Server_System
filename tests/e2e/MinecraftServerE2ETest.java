@@ -22,6 +22,7 @@ import org.geysermc.mcprotocollib.network.ClientSession;
 import org.geysermc.mcprotocollib.network.factory.ClientNetworkSessionFactory;
 import org.geysermc.mcprotocollib.protocol.MinecraftProtocol;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -59,6 +60,21 @@ class MinecraftServerE2ETest
 
 	private Process serverProcess;
 	private MockGitHub github;
+
+	/**
+	 * La carpeta de datos se aisla ANTES que nada.
+	 *
+	 * <p>Se aislaba dentro del ensayo. Si algo fallaba antes de esa linea, el
+	 * {@code tearDown} se ejecutaba igual y su
+	 * {@link TokenStore#invalidateSession()} borraba la sesion de GitHub <b>de
+	 * verdad</b> de quien estuviera corriendo los tests.</p>
+	 */
+	@BeforeEach
+	void isolateTheDataDirectory() throws Exception
+	{
+		System.setProperty( "endershare.dataDirectory",
+				java.nio.file.Files.createDirectories( temporaryDirectory.resolve( "data" ) ).toString() );
+	}
 
 	@AfterEach
 	void tearDown() throws Exception

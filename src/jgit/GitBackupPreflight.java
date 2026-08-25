@@ -250,6 +250,12 @@ public final class GitBackupPreflight
 				// RAM por-maquina: cada peer tiene la suya y compartirla via backup
 				// fue la causa real de dos conflictos de rebase
 				|| "user_jvm_args.txt".equals( fileName )
+				// La reescribe ServerSideMap en cada arranque: si viaja, cada peer
+				// genera un commit por arranque y se pisan el valor puesto a mano
+				|| portable.startsWith( "config/bluemap/" )
+				// Copia que hace Minecraft de level.dat y playerdata: redundante al
+				// 100 % y presente en 80 de cada 116 respaldos
+				|| portable.endsWith( ".dat_old" )
 				|| portable.endsWith( ".tmp" );
 	}
 

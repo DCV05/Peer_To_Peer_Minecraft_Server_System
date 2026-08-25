@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,23 @@ class RealGitHubE2ETest
 	@TempDir
 	Path temporaryDirectory;
 
+	/**
+	 * Se aisla la carpeta de datos ANTES de nada.
+	 *
+	 * <p>Estaba dentro del ensayo, despues de la suposicion que lo salta cuando no
+	 * hay credenciales. Al saltarse, la carpeta nunca se aislaba, pero el
+	 * {@code tearDown} se ejecuta igual: y ahi
+	 * {@link TokenStore#invalidateSession()} borraba la sesion de GitHub <b>de
+	 * verdad</b> del usuario. Correr los tests te dejaba fuera de tu propia
+	 * cuenta, sin un solo fallo en rojo que lo delatara.</p>
+	 */
+	@BeforeEach
+	void setUp() throws Exception
+	{
+		System.setProperty( "endershare.dataDirectory",
+				Files.createDirectories( temporaryDirectory.resolve( "data" ) ).toString() );
+	}
+
 	@AfterEach
 	void tearDown()
 	{
@@ -48,7 +66,6 @@ class RealGitHubE2ETest
 		Assumptions.assumeTrue( repo != null && nickname != null && token != null,
 				"Sin Endershare_E2E_REPO/NICK/TOKEN este ensayo no corre" );
 
-		System.setProperty( "endershare.dataDirectory", Files.createDirectories( temporaryDirectory.resolve( "data" ) ).toString() );
 		assertTrue( TokenStore.saveUserData( nickname, nickname + "@example.test", token ) );
 
 		// Estado limpio de partida: si otro ensayo dejo el candado cogido y aun

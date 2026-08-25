@@ -85,10 +85,21 @@ class WorldMapConfigTest
 	void neverGrabsEveryProcessorOfTheMachine()
 	{
 		int threads = WorldMapConfig.defaultThreadCount();
+		int cores = Runtime.getRuntime().availableProcessors();
 
 		assertTrue( threads >= 1 );
-		assertTrue( threads <= 6, "Con mas hilos el ordenador se queda inservible mientras renderiza" );
-		assertTrue( threads <= Math.max( 1, Runtime.getRuntime().availableProcessors() / 2 ) );
+		// El tope eran seis, una cifra puesta a ojo que en un equipo de catorce
+		// nucleos dejaba ocho parados. Lo que hay que garantizar no es un numero
+		// magico: es que queden nucleos libres para que el equipo siga usable
+		assertTrue( threads <= Math.max( 1, cores - 2 ),
+			"Con mas hilos el ordenador se queda inservible mientras renderiza" );
+		assertTrue( threads <= 12, "Por encima de doce lo que se gana ya no compensa el trompicon" );
+		// Antes se exigia no pasar de la mitad de los nucleos. Medido sobre 3894
+		// tiles del mundo real, esa regla costaba mas de la mitad del tiempo: 2
+		// hilos 208 s, 4 hilos 116 s, 8 hilos 68 s, 12 hilos 54 s. Y el mapa que
+		// sale es identico tile a tile
+		if( cores >= 8 )
+			assertTrue( threads > cores / 2, "Usar media maquina era una cifra a ojo, no una medida" );
 	}
 
 	@Test

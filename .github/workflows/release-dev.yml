@@ -126,6 +126,11 @@ jobs:
         run: |
           jpackage --type dmg --name "Endershare Dev" --app-version "$APP_VERSION" \
             --icon packaging/Endershare.icns \
+            --java-options "-Xmx192m" --java-options "-Xms16m" \
+            --java-options "-XX:+UseSerialGC" \
+            --java-options "-XX:MinHeapFreeRatio=10" --java-options "-XX:MaxHeapFreeRatio=30" \
+            --java-options "-Xss768k" --java-options "-XX:MaxMetaspaceSize=128m" \
+            --java-options "-XX:TieredStopAtLevel=1" \
             --input stage --main-jar Endershare.jar --main-class view.MainFrame --dest dist
           for built in dist/*.dmg; do
             [ "$built" = "dist/Endershare-Dev-$VERSION.dmg" ] || mv "$built" "dist/Endershare-Dev-$VERSION.dmg"
@@ -144,6 +149,11 @@ jobs:
           jpackage --type exe --name "Endershare Dev" --app-version "$APP_VERSION" \
             --vendor P2PMSS --win-upgrade-uuid 7F3C1E92-4A56-4C1D-9E77-2B8D5A0F6C31 \
             --icon packaging/Endershare.ico \
+            --java-options "-Xmx192m" --java-options "-Xms16m" \
+            --java-options "-XX:+UseSerialGC" \
+            --java-options "-XX:MinHeapFreeRatio=10" --java-options "-XX:MaxHeapFreeRatio=30" \
+            --java-options "-Xss768k" --java-options "-XX:MaxMetaspaceSize=128m" \
+            --java-options "-XX:TieredStopAtLevel=1" \
             --input stage --main-jar Endershare.jar --main-class view.MainFrame \
             --win-shortcut --win-menu --win-per-user-install --dest dist
           for built in dist/*.exe; do

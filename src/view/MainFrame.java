@@ -996,7 +996,7 @@ public final class MainFrame
 			@Override
 			public void buildWorldMap( boolean fullDetail )
 			{
-				startWorldMapBuild( fullDetail );
+				startWorldMapBuildFromButton( fullDetail );
 			}
 			@Override
 			public void stopWorldMap()
@@ -1437,14 +1437,110 @@ public final class MainFrame
 			ForgeUtils.openURL( served.get() );
 		}
 		else
-			startWorldMapBuild( dashboard.wantsFullDetailMap() );
+		{
+			// Ver el mapa es VER el mapa: se levanta el visor sirviendo lo que ya hay
+			// en disco y no se dibuja ni un tile. Antes esto arrancaba el renderizador
+			// con -ruw y la r lanzaba una pasada de dibujo entera
+			startWorldMapServer();
+		}
+	}
+
+	/**
+	 * Levanta el visor para mirar el mapa. No dibuja nada, asi que no hay barra de
+	 * progreso ni espera: o hay tiles en disco y se ven, o no los hay.
+	 */
+	private void startWorldMapServer()
+	{
+		File opened = serverOpenedDirectory;
+		if( opened == null )
+		{
+			JOptionPane.showMessageDialog( frame, "Open a server first and then build its map.", "World map",
+					JOptionPane.INFORMATION_MESSAGE );
+			return;
+		}
+		Path repository = opened.toPath();
+		if( !app.WorldMap.hasBuiltMap( repository ) )
+		{
+			JOptionPane.showMessageDialog( frame,
+					"There is no map yet for this world. Press BUILD MAP to draw it once; after that you can open it "
+							+ "whenever you want and it will not be redrawn.",
+					"World map", JOptionPane.INFORMATION_MESSAGE );
+			return;
+		}
+		java.util.Optional<Path> world = app.WorldMap.locateWorld( repository );
+		if( world.isEmpty() )
+			return;
+		boolean fullDetail = app.WorldMap.wasBuiltWithFullDetail( repository );
+		new SwingWorker<String, Void>()
+		{
+			@Override
+			protected String doInBackground() throws Exception
+			{
+				app.WorldMap.startServing( repository, world.get(), fullDetail );
+				return app.WorldMap.viewerUrlFor( repository ).orElse( app.WorldMap.currentUrl().orElse( null ) );
+			}
+
+			@Override
+			protected void done()
+			{
+				try
+				{
+					String url = get();
+					if( url != null )
+						ForgeUtils.openURL( url );
+				}
+				catch( InterruptedException interrupted )
+				{
+					Thread.currentThread().interrupt();
+				}
+				catch( java.util.concurrent.ExecutionException failure )
+				{
+					Throwable cause = failure.getCause() == null ? failure : failure.getCause();
+					JOptionPane.showMessageDialog( frame, "The map could not be opened.\n\n" + cause.getMessage(),
+							"World map", JOptionPane.ERROR_MESSAGE );
+				}
+				refreshWorldMapState();
+			}
+		}.execute();
+	}
+
+	/**
+	 * El boton del panel. Si no hay mapa, lo construye; si ya lo hay, pulsarlo
+	 * significa rehacerlo entero, y eso se pregunta antes.
+	 *
+	 * <p>Rehacer no es un capricho de la interfaz: es la unica forma de que se
+	 * apliquen cambios en COMO se dibuja el mapa, porque el renderizador solo
+	 * mira si han cambiado los ficheros del mundo, no su configuracion. Pero son
+	 * horas de disco, asi que nadie deberia acabar ahi sin querer.</p>
+	 */
+	private void startWorldMapBuildFromButton( boolean fullDetail )
+	{
+		File opened = serverOpenedDirectory;
+		// Sobre un mundo sin mapa el boton lo construye, y ahi no hay nada que
+		// rehacer ni nada que preguntar
+		boolean redrawEverything = opened != null && app.WorldMap.hasBuiltMap( opened.toPath() );
+		if( redrawEverything )
+		{
+			int answer = JOptionPane.showConfirmDialog( frame,
+					"This redraws the whole map from scratch: hours of work and a busy disk the whole time.\n\n"
+							+ "You only need it if the map looks wrong.\n"
+							+ "To see recent changes you do not need this: the map already updates by itself "
+							+ "wherever you build or mine.\n\nRedraw everything?",
+					"Rebuild map", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE );
+			if( answer != JOptionPane.YES_OPTION )
+				return;
+		}
+		startWorldMapBuild( fullDetail, redrawEverything );
 	}
 
 	/**
 	 * Construye el mapa 3D desde la copia local del mundo. Nunca toca el
 	 * servidor de nadie ni escribe dentro del repositorio.
+	 *
+	 * @param redrawEverything rehacerlo entero. Son horas y todo el disco: solo
+	 *            cuando lo pide una persona a proposito
 	 */
-	private void startWorldMapBuild( boolean fullDetail )
+	private void startWorldMapBuild( boolean fullDetail, boolean redrawEverything )
 	{
 		File opened = serverOpenedDirectory;
 		if( opened == null )
@@ -1469,11 +1565,8 @@ public final class MainFrame
 			@Override
 			protected String doInBackground() throws Exception
 			{
-				// Rehacer sobre un mapa que ya existe significa que ha cambiado COMO
-				// se dibuja, y eso el renderizador no lo detecta solo
-				boolean redrawEverything = app.WorldMap.hasBuiltMap( repository );
-				return app.WorldMap.startRendering( repository, world.get(), fullDetail, serverIsOn,
-						redrawEverything );
+				return app.WorldMap.start( repository, world.get(), fullDetail, serverIsOn,
+						redrawEverything ? app.WorldMap.Mode.REDRAW_EVERYTHING : app.WorldMap.Mode.UPDATE );
 			}
 
 			@Override
@@ -2046,10 +2139,12 @@ public final class MainFrame
 	}
 
 	/**
-	 * Vuelve a poner en marcha el mapa de un mundo que ya lo tiene generado, en
-	 * modo vigilancia: no rehace nada, se queda mirando los ficheros de region y
-	 * redibuja solo lo que cambie. Asi el mapa esta al dia sin que nadie pulse
-	 * nada, que es la gracia del tiempo real.
+	 * Vuelve a dejar servido el mapa de un mundo que ya lo tiene generado.
+	 *
+	 * <p><b>No dibuja</b>. Antes se reanudaba en modo vigilancia (-ruw), que suena
+	 * inofensivo pero empieza recorriendo las 1454 regiones del mundo para ver
+	 * cuales han cambiado: abrir la aplicacion ponia el disco a tope sin que nadie
+	 * hubiera pedido nada. Dibujar es una decision, y la toma el boton.</p>
 	 */
 	private void resumeWorldMapWatch()
 	{
@@ -2076,7 +2171,7 @@ public final class MainFrame
 			@Override
 			protected Void doInBackground() throws Exception
 			{
-				app.WorldMap.startRendering( repository, world.get(), fullDetail, serverIsOn );
+				app.WorldMap.startServing( repository, world.get(), fullDetail );
 				return null;
 			}
 
@@ -2181,6 +2276,17 @@ public final class MainFrame
 						setDashboardFailure( "Sign into GitHub before starting this protected world." );
 						return;
 					}
+					// SINCRONIZAR ANTES DE SUBIR. Hasta aqui se empujaba primero y se
+					// bajaba despues: una copia desfasada commiteaba su disco antes de
+					// enterarse de que iba por detras, y ese commit convertia un desfase
+					// inocuo en una divergencia irreversible (el mundo es binario y no
+					// hay fusion posible). Clasificar primero cuesta un fetch y evita la
+					// clase entera de problemas
+					if( GitUtils.hasRemoteOrigin( serverOpenedDirectory.toPath() )
+							&& !alignWithRemoteBeforeStart( serverOpenedDirectory.toPath() ) )
+					{
+						return;
+					}
 					// El lock de GitHub arbitra el hosting por internet; el discovery UDP de
 					// arriba solo ve peers dentro de la misma LAN virtual
 					if( GitUtils.hasRemoteOrigin( serverOpenedDirectory.toPath() )
@@ -2233,6 +2339,11 @@ public final class MainFrame
 				}
 
 				setDashboardPhase( Phase.STARTING, "Launching the Forge startup script" );
+				// Si el mundo trae dentro su propio renderizador de mapas, que no dibuje
+				// mientras se juega: peleandose por el disco con el guardado del mundo es
+				// lo que tumba el servidor
+				if( app.ServerSideMap.pauseWhileAnyonePlays( serverOpenedDirectory.toPath() ) )
+					appendDashboardActivity( "In-world map renderer paused while anyone is playing" );
 				playerPresence.reset( ForgeUtils.getMaxPlayers( serverOpenedDirectory.toPath() ) );
 				serverProcess = ForgeUtils.executeMinecraftServer( serverOpenedDirectory.toPath() );
 				if( serverProcess == null )
@@ -2326,11 +2437,15 @@ public final class MainFrame
 					appendDashboardActivity( "Latest GitHub world pulled successfully" );
 					setDashboardPhase( Phase.OFFLINE, "World is current and safe to start" );
 				}
-				else if( GitUtils.hasLocalChanges( selectedServer ) )
+				else if( GitUtils.hasLocalChanges( selectedServer )
+						|| GitUtils.syncState( selectedServer ) == GitUtils.SyncState.DIVERGED )
 				{
-					// Cambios locales que nunca se respaldaron (tipico: la sesion anterior
-					// se cerro a las bravas). El usuario decide: apartarlos a un snapshot
-					// local y traer el mundo confirmado, o dejarlo todo como esta
+					// La divergencia cuenta aunque el arbol este LIMPIO: tras un respaldo
+					// rechazado quedan commits por delante sin nada sucio, y mirando solo
+					// hasLocalChanges se caia al else de abajo con un "revisa tu conexion"
+					// que era falso y sin ningun boton capaz de arreglarlo.
+					// El usuario decide: apartar su copia a un snapshot local y traer el
+					// mundo confirmado, o dejarlo todo como esta
 					if( !confirmSnapshotAndTakeRemote() )
 					{
 						syncState = "LOCAL CHANGES";
@@ -2362,6 +2477,40 @@ public final class MainFrame
 				}
 			}, "endershare-manual-sync" ).start();
 		} while( false );
+	}
+
+	/**
+	 * Deja la copia local alineada con GitHub ANTES de respaldar o arrancar nada.
+	 *
+	 * <p>Es la puerta que faltaba: sin ella, un peer desfasado commiteaba su disco
+	 * antes de saber que iba por detrás y creaba una divergencia que ya no se
+	 * podía deshacer. Con una historia divergente no se pregunta nada — se guarda
+	 * la copia local en una rama de snapshot y se trae el mundo confirmado, que es
+	 * la única respuesta correcta y la que nadie puede decidir mirando un
+	 * diálogo.</p>
+	 *
+	 * @return true si se puede seguir arrancando
+	 */
+	private boolean alignWithRemoteBeforeStart( Path server )
+	{
+		setDashboardPhase( Phase.SYNCING, "Checking whether this world matches GitHub" );
+		syncState = "CHECKING";
+		GitUtils.AlignmentResult alignment = GitUtils.alignWithRemote( server );
+
+		if( !alignment.ready() )
+		{
+			syncState = alignment.state() == GitUtils.SyncState.UNREACHABLE ? "OFFLINE" : "FAILED";
+			setDashboardFailure( alignment.message()
+					+ " The server was not started to avoid playing on an outdated world." );
+			return false;
+		}
+		if( alignment.state() != GitUtils.SyncState.UP_TO_DATE && alignment.state() != GitUtils.SyncState.AHEAD )
+		{
+			syncState = "UP TO DATE";
+			lastSync = alignment.snapshotBranch().isEmpty() ? "PULL CONFIRMED" : "RECOVERED";
+			appendDashboardActivity( alignment.message() );
+		}
+		return true;
 	}
 
 	/** Corre fuera del EDT: el dialogo se pide con invokeAndWait y se espera la respuesta. */

@@ -33,6 +33,13 @@ import java.util.stream.Stream;
  * <p>La comunicacion es por su salida de texto, que {@link WorldMapProgress}
  * traduce a la barra de progreso de siempre.</p>
  *
+ * <p><b>El renderizador solo vive mientras dibuja.</b> Terminada la pasada se le
+ * pide parar y el mapa se sigue sirviendo desde {@link MapWebServer}, dentro de
+ * esta misma aplicacion y en el mismo puerto. Antes se quedaba vivo para siempre
+ * con <code>-u</code> vigilando: medido, <b>35 MB y cincuenta hilos</b> parados
+ * para vigilar un mundo que sin partida en marcha no puede cambiar solo. Con
+ * partida si se le deja vigilando, que es cuando sirve de algo.</p>
+ *
  * <p><b>Nunca escribe dentro del repositorio del mundo</b>: el mapa vive en la
  * carpeta de datos de la aplicacion. Son 10 GB de ficheros regenerables y no
  * tienen nada que hacer viajando por GitHub en cada respaldo.</p>
@@ -69,8 +76,22 @@ public final class WorldMap
 	/** Distancia de la camara: lo bastante lejos para ver la zona de una pieza. */
 	private static final int VIEWER_DISTANCE = 1200;
 	private static final Duration DOWNLOAD_TIMEOUT = Duration.ofMinutes( 5 );
+	/** Dibujando. Medido: doce hilos con este tope hacen pico en 624 MB. */
+	static final int RENDER_HEAP_MEGABYTES = 1024;
+	/**
+	 * Sirviendo. Medido: 65 MB de verdad, da igual el tope que se ponga.
+	 *
+	 * <p>Ya no se llega a usar: servir no lanza ningun proceso. Se deja porque es
+	 * la medida que explica por que no se lanza.</p>
+	 */
+	static final int SERVING_HEAP_MEGABYTES = 128;
+
+	/** Lo que se le deja al renderizador para guardar cuando se le pide parar. */
+	private static final int CLEAN_STOP_SECONDS = 120;
 
 	private static final AtomicReference<Process> runningProcess = new AtomicReference<>();
+	/** El servidor propio, cuando solo se esta mirando el mapa. Nunca los dos a la vez. */
+	private static final AtomicReference<MapWebServer> webServer = new AtomicReference<>();
 	private static final AtomicReference<String> runningUrl = new AtomicReference<>();
 	private static volatile Path runningWorld;
 	/** Cierto cuando la pasada completa termino y el proceso solo vigila cambios. */
@@ -236,34 +257,56 @@ public final class WorldMap
 		return result;
 	}
 
-	/** Hay un proceso de mapa vivo para ese mundo, dibujando o vigilando. */
+	/**
+	 * El mapa de ese mundo esta en marcha: dibujandose en un proceso aparte, o
+	 * simplemente servido desde aqui.
+	 */
 	public static boolean isRunningFor( Path worldRepository )
 	{
+		return alive() && worldRepository.equals( runningWorld );
+	}
+
+	/** Hay algo sirviendo el mapa ahora mismo, sea el renderizador o el nuestro. */
+	private static boolean alive()
+	{
 		Process process = runningProcess.get();
-		return process != null && process.isAlive() && worldRepository.equals( runningWorld );
+		if( process != null && process.isAlive() )
+			return true;
+		MapWebServer served = webServer.get();
+		return served != null && served.isRunning();
 	}
 
 	/** Esta dibujando ahora mismo (la pasada aun no ha terminado). */
 	public static boolean isRenderingFor( Path worldRepository )
 	{
-		return isRunningFor( worldRepository ) && !watchingOnly;
+		return hasLiveRenderer( worldRepository ) && !watchingOnly;
 	}
 
 	/**
-	 * Termino la pasada y ahora solo vigila: el mundo entero esta dibujado y se
-	 * redibuja unicamente lo que cambie. Es el estado en el que interesa
-	 * quedarse, y en pantalla no puede confundirse con "construyendo".
+	 * Termino la pasada y el renderizador sigue vivo vigilando: el mundo entero
+	 * esta dibujado y se redibuja unicamente lo que cambie.
+	 *
+	 * <p><b>Solo cuenta si de verdad hay un renderizador detras.</b> Servir el mapa
+	 * desde aqui no es vigilarlo: no se redibuja nada, y decir en pantalla que se
+	 * esta "al dia redibujando lo que cambie" seria mentir. Sin renderizador el
+	 * estado que toca es el de mapa hecho y servido.</p>
 	 */
 	public static boolean isWatchingFor( Path worldRepository )
 	{
-		return isRunningFor( worldRepository ) && watchingOnly;
+		return hasLiveRenderer( worldRepository ) && watchingOnly;
 	}
 
-	/** Direccion del mapa mientras el proceso este vivo; vacio si no lo esta. */
-	public static Optional<String> currentUrl()
+	/** Hay un proceso de dibujo vivo para ese mundo, no solo el mapa servido. */
+	private static boolean hasLiveRenderer( Path worldRepository )
 	{
 		Process process = runningProcess.get();
-		return process != null && process.isAlive() ? Optional.ofNullable( runningUrl.get() ) : Optional.empty();
+		return process != null && process.isAlive() && worldRepository.equals( runningWorld );
+	}
+
+	/** Direccion del mapa mientras se este sirviendo; vacio si no. */
+	public static Optional<String> currentUrl()
+	{
+		return alive() ? Optional.ofNullable( runningUrl.get() ) : Optional.empty();
 	}
 
 	/**
@@ -355,18 +398,31 @@ public final class WorldMap
 	public static String startRendering( Path worldRepository, Path worldDirectory, boolean fullDetail,
 			boolean gameRunningHere ) throws IOException
 	{
-		return startRendering( worldRepository, worldDirectory, fullDetail, gameRunningHere, false );
+		return start( worldRepository, worldDirectory, fullDetail, gameRunningHere, Mode.UPDATE );
 	}
 
 	/**
-	 * @param redrawEverything rehacer el mapa entero en vez de solo lo que haya
-	 *        cambiado en el mundo. Hace falta cuando lo que cambia es COMO se
-	 *        dibuja (calidad, ajustes de una dimension): el renderizador mira los
-	 *        ficheros del mundo, no la configuracion, asi que sin esto no
-	 *        redibujaria nada y el boton de rehacer no haria nada.
+	 * Levanta el visor <b>sin dibujar nada</b>: sirve los tiles que ya estan en
+	 * disco y se acabo.
+	 *
+	 * <p>Es lo que hace ver el mapa. No hay excusa para que mirar algo lo
+	 * reconstruya.</p>
 	 */
-	public static String startRendering( Path worldRepository, Path worldDirectory, boolean fullDetail,
-			boolean gameRunningHere, boolean redrawEverything ) throws IOException
+	public static String startServing( Path worldRepository, Path worldDirectory, boolean fullDetail )
+			throws IOException
+	{
+		return start( worldRepository, worldDirectory, fullDetail, false, Mode.SERVE );
+	}
+
+	/**
+	 * @param mode que se le pide al renderizador. {@link Mode#REDRAW_EVERYTHING}
+	 *        rehace el mapa entero: hace falta cuando lo que cambia es COMO se
+	 *        dibuja (calidad, ajustes de una dimension), porque el renderizador
+	 *        mira los ficheros del mundo y no la configuracion. Son horas de
+	 *        disco, asi que solo lo pide el boton.
+	 */
+	public static String start( Path worldRepository, Path worldDirectory, boolean fullDetail,
+			boolean gameRunningHere, Mode mode ) throws IOException
 	{
 		stopRendering();
 
@@ -375,11 +431,18 @@ public final class WorldMap
 		// Antes de nada, el que dejara colgado una sesion anterior: dos dibujando el
 		// mismo mapa se pisan y el trabajo no termina nunca
 		killOrphanRenderer( mapDirectory );
+
+		// Solo mirar no necesita ni renderizador ni proceso aparte: son ficheros que
+		// ya estan en disco. Se sirven desde aqui mismo
+		if( !mode.draws() )
+			return serveFrom( mapDirectory, worldRepository );
+
 		Path renderer = ensureRenderer();
 
 		int port = freePort();
+		int threads = WorldMapConfig.threadCountFor( gameRunningHere );
 		List<String> dimensions = WorldMapConfig.write( mapDirectory, worldDirectory,
-				new WorldMapConfig.Options( fullDetail, WorldMapConfig.threadCountFor( gameRunningHere ), port ) );
+				new WorldMapConfig.Options( fullDetail, threads, port ) );
 		if( dimensions.isEmpty() )
 			throw new IOException( "That world has no region files to render yet." );
 		rememberQuality( mapDirectory, fullDetail );
@@ -389,13 +452,12 @@ public final class WorldMap
 		WorldMapViewer.install( mapDirectory );
 
 		List<String> command = new ArrayList<>();
-		// -r renderiza, -u se queda vigilando los ficheros de region para
-		// actualizar solo lo que cambie, -w sirve el visor
-		lowPriorityPrefix().ifPresent( command::addAll );
+		lowPriorityPrefix( gameRunningHere ).ifPresent( command::addAll );
 		command.add( javaExecutable() );
+		command.add( "-Xmx" + heapMegabytesFor( mode ) + "m" );
 		command.add( "-jar" );
 		command.add( renderer.toAbsolutePath().toString() );
-		command.add( redrawEverything ? "-ruwf" : "-ruw" );
+		command.add( mode.flags() );
 
 		ProcessBuilder builder = new ProcessBuilder( command );
 		builder.directory( mapDirectory.toFile() );
@@ -407,19 +469,195 @@ public final class WorldMap
 		runningProcess.set( process );
 		runningUrl.set( url );
 		runningWorld = worldRepository;
-		watchingOnly = false;
-		TransferProgress.publish( "Building map", "Starting renderer", -1 );
-		followProgress( process, mapDirectory );
+		// Sirviendo y ya: no hay pasada que esperar, asi que la pantalla no puede
+		// decir "construyendo" ni sacar barra de progreso
+		watchingOnly = !mode.draws();
+		if( mode.draws() )
+			TransferProgress.publish( "Building map", "Starting renderer", -1 );
+		// Sin partida aqui el mundo no puede cambiar solo, asi que en cuanto acabe la
+		// pasada no hay nada que vigilar y el renderizador sobra
+		followProgress( process, mapDirectory, mode.draws(), !gameRunningHere, port );
 		return url;
+	}
+
+	/**
+	 * Releva al renderizador en cuanto termina de dibujar: lo para y deja el mapa
+	 * servido desde aqui, <b>en su mismo puerto</b>.
+	 *
+	 * <p>Terminada la pasada, el renderizador se quedaba vivo para siempre con
+	 * <code>-u</code> vigilando cambios y <code>-w</code> sirviendo ficheros. Pero
+	 * si en este equipo no hay partida, el mundo <b>no puede cambiar solo</b>: no
+	 * habia nada que vigilar y quedaba una maquina virtual de Java entera parada,
+	 * con el monton de dibujar todavia reservado.</p>
+	 *
+	 * <p>Se le pide parar con una señal, no se le mata: el renderizador guarda al
+	 * salir (<i>Stopping... Saving... Stopped.</i>), y cortarle ahi dejaria tiles a
+	 * medio escribir. Solo si no se va por las buenas se le fuerza.</p>
+	 *
+	 * <p>Se reusa su puerto a proposito: la pestaña que el usuario tenga abierta
+	 * sigue funcionando sin enterarse de que ahora le contesta otro.</p>
+	 */
+	private static void handOverToOwnServer( Process renderer, Path mapDirectory, int port )
+	{
+		Thread relay = new Thread( () ->
+		{
+			renderer.destroy();
+			try
+			{
+				if( !renderer.waitFor( CLEAN_STOP_SECONDS, java.util.concurrent.TimeUnit.SECONDS ) )
+				{
+					Log.event( "WORLD_MAP", "El renderizador no se paro solo en " + CLEAN_STOP_SECONDS + " s" );
+					renderer.destroyForcibly();
+				}
+			}
+			catch( InterruptedException interrupted )
+			{
+				Thread.currentThread().interrupt();
+				return;
+			}
+
+			// Si mientras tanto alguien paro el mapa o arranco otro, aqui no hay nada
+			// que hacer: este proceso ya no es el que manda
+			if( !runningProcess.compareAndSet( renderer, null ) )
+				return;
+
+			try
+			{
+				MapWebServer served = new MapWebServer( mapDirectory.resolve( "web" ) );
+				served.start( port );
+				webServer.set( served );
+				// Si mientras arrancaba alguien paro el mapa, este servidor no tiene
+				// dueño: nadie volveria a pararlo y quedaria el puerto cogido
+				if( runningWorld == null )
+				{
+					webServer.compareAndSet( served, null );
+					served.stop();
+					return;
+				}
+				forgetPid( mapDirectory );
+				Log.event( "WORLD_MAP", "Mapa dibujado: releva el servidor propio en el puerto " + port );
+			}
+			catch( IOException notServed )
+			{
+				// El mapa esta dibujado y en disco; lo unico que se pierde es poder
+				// mirarlo sin volver a darle a ver el mapa
+				runningUrl.set( null );
+				runningWorld = null;
+				Log.event( "WORLD_MAP", "No se pudo relevar al renderizador en el puerto " + port, notServed );
+			}
+			announceStateChange();
+		}, "world-map-hand-over" );
+		relay.setDaemon( true );
+		relay.start();
+	}
+
+	/**
+	 * Deja el mapa servido desde dentro de esta misma aplicacion.
+	 *
+	 * <p>Ni renderizador, ni proceso aparte, ni configuracion que escribir: los
+	 * tiles ya estan en disco y lo unico que falta es un socket. El renderizador
+	 * en modo servir eran 65 MB de memoria y una maquina virtual entera para
+	 * hacer esto.</p>
+	 */
+	private static String serveFrom( Path mapDirectory, Path worldRepository ) throws IOException
+	{
+		// El guion del muñeco 3D se deja puesto igual: es lo que espera el visor
+		WorldMapViewer.install( mapDirectory );
+		MapWebServer served = new MapWebServer( mapDirectory.resolve( "web" ) );
+		String url = served.start();
+		webServer.set( served );
+		runningUrl.set( url );
+		runningWorld = worldRepository;
+		// Sirviendo no hay pasada que esperar: la pantalla no puede decir "construyendo"
+		watchingOnly = true;
+		announceStateChange();
+		return url;
+	}
+
+	/**
+	 * Que se le pide al renderizador cuando se arranca.
+	 *
+	 * <p>Los argumentos: <b>-w</b> sirve el visor, <b>-r</b> dibuja, <b>-u</b> se
+	 * queda vigilando los ficheros de region para actualizar lo que cambie
+	 * ("watches for file-changes <i>after rendering</i>", o sea que va atado a la
+	 * -r), y <b>-f</b> rehace el mapa entero.</p>
+	 */
+	public enum Mode
+	{
+		/**
+		 * Solo servir lo que ya hay dibujado. <b>No toca el disco</b>: ni dibuja,
+		 * ni recorre las regiones para ver que ha cambiado.
+		 *
+		 * <p>Es lo que hace falta para ver el mapa, y es lo unico que se hace al
+		 * verlo. Antes se abria con -ruw y la <b>r</b> lanzaba una pasada de
+		 * dibujo: mirar el mapa dejaba el equipo con carga 59.</p>
+		 */
+		SERVE( "-w" ),
+		/** Dibujar lo que haya cambiado en el mundo y quedarse vigilando. */
+		UPDATE( "-ruw" ),
+		/** Rehacerlo entero. Horas de disco: solo desde el boton. */
+		REDRAW_EVERYTHING( "-ruwf" );
+
+		private final String flags;
+
+		Mode( String flags )
+		{
+			this.flags = flags;
+		}
+
+		public String flags()
+		{
+			return flags;
+		}
+
+		/** Cierto cuando este modo puede escribir tiles. */
+		public boolean draws()
+		{
+			return this != SERVE;
+		}
+	}
+
+	/**
+	 * Cuanta memoria se le deja coger al renderizador.
+	 *
+	 * <p>Sin tope, una maquina virtual de Java coge de fabrica hasta un cuarto de
+	 * la memoria del equipo, al lado de un servidor de Minecraft que ya tiene los
+	 * suyos. Con el equipo llevando semanas encendido eso es lo que lo manda al
+	 * disco de intercambio.</p>
+	 *
+	 * <p>Los numeros salen de medir, no de una formula. Dibujando los mismos 3894
+	 * tiles con doce hilos:</p>
+	 *
+	 * <ul>
+	 *   <li>tope de 4 GB &rarr; 76 s, pico real de <b>1040 MB</b></li>
+	 *   <li>tope de 2 GB &rarr; 85 s, pico real de 808 MB</li>
+	 *   <li>tope de 1 GB &rarr; 83 s, pico real de <b>624 MB</b>, sin un solo
+	 *       fallo de memoria</li>
+	 * </ul>
+	 *
+	 * <p>O sea que el tope grande no compra velocidad: compra que el recolector
+	 * de basura se vuelva perezoso. La formula anterior repartia un gigabyte por
+	 * hilo porque es lo que sugiere el renderizador, pero sobre este mundo eso
+	 * era pedir cuatro veces lo que de verdad usa.</p>
+	 *
+	 * <p>Sirviendo no dibuja nada: es un servidor de ficheros y se queda en 65 MB
+	 * midiendolo, le pongas el tope que le pongas.</p>
+	 */
+	static int heapMegabytesFor( Mode mode )
+	{
+		return mode.draws() ? RENDER_HEAP_MEGABYTES : SERVING_HEAP_MEGABYTES;
 	}
 
 	public static void stopRendering()
 	{
 		Process process = runningProcess.getAndSet( null );
+		MapWebServer served = webServer.getAndSet( null );
 		Path was = runningWorld;
 		runningUrl.set( null );
 		runningWorld = null;
 		watchingOnly = false;
+		if( served != null )
+			served.stop();
 		if( was != null )
 			forgetPid( directoryFor( was ) );
 		if( process == null || !process.isAlive() )
@@ -564,15 +802,25 @@ public final class WorldMap
 	 * <p>El registro no es un lujo: cuando el mapa sale raro, lo que dijo el
 	 * renderizador es la unica pista, y sin guardarlo se pierde en cuanto se
 	 * cierra el proceso.</p>
+	 *
+	 * <p><b>Sirviendo no se escribe nada.</b> Abrir el fichero lo truncaba, asi
+	 * que mirar el mapa borraba el registro del ultimo dibujo — que es justo
+	 * cuando hace falta consultarlo. Y sirviendo no hay progreso que registrar:
+	 * son cuatro lineas de arranque del servidor web.</p>
 	 */
-	private static void followProgress( Process process, Path mapDirectory )
+	private static void followProgress( Process process, Path mapDirectory, boolean keepLog, boolean handOver,
+			int port )
 	{
+		// Una pasada en modo vigilancia dice "up-to-date" cada vez que termina de
+		// redibujar algo: el relevo se pide una sola vez
+		java.util.concurrent.atomic.AtomicBoolean relieved = new java.util.concurrent.atomic.AtomicBoolean();
 		Thread reader = new Thread( () ->
 		{
 			Path logFile = mapDirectory.resolve( "render.log" );
 			try (BufferedReader lines = new BufferedReader(
 					new InputStreamReader( process.getInputStream(), StandardCharsets.UTF_8 ) );
-					java.io.BufferedWriter log = Files.newBufferedWriter( logFile ))
+					java.io.Writer log = keepLog ? Files.newBufferedWriter( logFile )
+							: java.io.Writer.nullWriter())
 			{
 				String line;
 				while( (line = lines.readLine()) != null )
@@ -581,7 +829,7 @@ public final class WorldMap
 					try
 					{
 						log.write( current );
-						log.newLine();
+						log.write( System.lineSeparator() );
 						log.flush();
 					}
 					catch( IOException notLogged )
@@ -592,11 +840,13 @@ public final class WorldMap
 					{
 						if( step.finished() )
 						{
-							// Fin de la pasada: de aqui en adelante el proceso solo
-							// vigila, y la pantalla no puede seguir diciendo "construyendo"
+							// Fin de la pasada: de aqui en adelante no se dibuja mas, y la
+							// pantalla no puede seguir diciendo "construyendo"
 							watchingOnly = true;
 							TransferProgress.done();
 							announceStateChange();
+							if( handOver && relieved.compareAndSet( false, true ) )
+								handOverToOwnServer( process, mapDirectory, port );
 						}
 						else
 						{
@@ -633,10 +883,41 @@ public final class WorldMap
 	}
 
 	/** En mac y Linux se baja la prioridad con nice; en Windows no existe. */
-	private static Optional<List<String>> lowPriorityPrefix()
+	/**
+	 * Con que prioridad se lanza el renderizador.
+	 *
+	 * <p><b>Con una partida en marcha</b> se usa <code>taskpolicy -b</code>, que es
+	 * la banda de segundo plano del sistema: ahi tambien se le frena el disco, no
+	 * solo la CPU. Es lo que hace falta, porque lo que tumbo el servidor no fue
+	 * falta de CPU sino que el guardado del mundo tardaba 45 segundos peleandose
+	 * por el disco.</p>
+	 *
+	 * <p><b>Sin partida, jamas.</b> Medido sobre 3894 tiles del mundo real: 68
+	 * segundos a prioridad normal contra <b>ni la mitad del trabajo en 10
+	 * minutos</b> con la banda de fondo. Frenar el disco cuando no hay nada que
+	 * proteger multiplica por casi trece lo que tarda el mapa, y esa espera es
+	 * justo la que hacia pensar que renderizar es carisimo. Se deja
+	 * <code>nice</code>, que baja la CPU para que el equipo siga usable pero
+	 * <b>no toca el disco</b>.</p>
+	 *
+	 * @param gameRunningHere si hay una partida en este mismo equipo
+	 */
+	static Optional<List<String>> lowPriorityPrefix( boolean gameRunningHere )
 	{
+		if( gameRunningHere )
+		{
+			Path taskpolicy = Path.of( "/usr/sbin/taskpolicy" );
+			if( Files.isExecutable( taskpolicy ) )
+				return Optional.of( List.of( taskpolicy.toString(), "-b" ) );
+		}
 		Path nice = Path.of( "/usr/bin/nice" );
 		return Files.isExecutable( nice ) ? Optional.of( List.of( nice.toString(), "-n", "10" ) ) : Optional.empty();
+	}
+
+	/** Cierto si este prefijo mete el proceso en la banda de fondo, que frena el disco. */
+	static boolean throttlesDisk( List<String> prefix )
+	{
+		return prefix.contains( "-b" );
 	}
 
 	private static int freePort() throws IOException
