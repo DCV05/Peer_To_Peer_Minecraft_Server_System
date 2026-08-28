@@ -185,6 +185,7 @@ public final class MainFrame
 	// ---- Escaner de mundos suscritos ---------------------------------------
 
 	private app.WorldStatusScanner worldStatusScanner;
+	private link.LinkSeeker linkSeeker;
 
 	/**
 	 * Arranca el escaner que vigila el candado de todos los mundos del tablero:
@@ -213,6 +214,65 @@ public final class MainFrame
 		worldStatusScanner.setEventsReader( jgit.WorldEvents::fetchNew );
 		worldStatusScanner.setEventListener( this::onWorldEvent );
 		worldStatusScanner.start();
+		startLinkSeeker();
+	}
+
+	/**
+	 * Buscador permanente del canal endershare-link (WebSocket en el puerto del
+	 * juego): la app lo busca aunque el server este cerrado y se conecta sola
+	 * en cuanto alguien levanta el mundo. La UI vive en la pagina Network.
+	 */
+	private void startLinkSeeker()
+	{
+		link.LinkSeeker.Ui ui = new link.LinkSeeker.Ui()
+		{
+			@Override
+			public void status( String line )
+			{
+				SwingUtilities.invokeLater( () ->
+				{
+					if( dashboard != null )
+						dashboard.linkStatus( line );
+				} );
+			}
+
+			@Override
+			public void peers( String line )
+			{
+				SwingUtilities.invokeLater( () ->
+				{
+					if( dashboard != null )
+						dashboard.linkPeers( line );
+				} );
+			}
+
+			@Override
+			public void players( String line )
+			{
+				SwingUtilities.invokeLater( () ->
+				{
+					if( dashboard != null )
+						dashboard.linkPlayers( line );
+				} );
+			}
+
+			@Override
+			public void chat( String line )
+			{
+				SwingUtilities.invokeLater( () ->
+				{
+					if( dashboard != null )
+						dashboard.linkChatAppend( line );
+				} );
+			}
+		};
+		linkSeeker = new link.LinkSeeker(
+				() -> worldStatusScanner == null ? java.util.Map.of() : worldStatusScanner.snapshot(),
+				() -> serverIsOn && actualServerPort > 0 ? "localhost:" + actualServerPort : null,
+				() -> serverOpenedDirectory,
+				MainFrame::quietNickname,
+				ui );
+		linkSeeker.start();
 	}
 
 	/**
@@ -901,6 +961,12 @@ public final class MainFrame
 				toggleServerFromDashboard();
 			}
 			@Override
+			public void sendLinkChat( String text )
+			{
+				if( linkSeeker != null )
+					linkSeeker.sendChat( text );
+			}
+
 			public void refreshNetwork()
 			{
 				refreshNetworkAsync();

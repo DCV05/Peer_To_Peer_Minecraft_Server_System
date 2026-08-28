@@ -248,6 +248,9 @@ public final class MinecraftDashboard extends JPanel
 		default void refreshNetwork()
 		{
 		}
+		default void sendLinkChat( String text )
+		{
+		}
 		default void syncNow()
 		{
 		}
@@ -382,6 +385,13 @@ public final class MinecraftDashboard extends JPanel
 
 	private final JTextArea consoleArea = new JTextArea();
 	private final JTextArea consolePreview = new JTextArea();
+
+	// Live link (canal endershare-link por el puerto del juego)
+	private final JTextArea linkChatArea = new JTextArea();
+	private final JTextField linkChatInput = new JTextField();
+	private final JLabel linkStatusValue = DashboardTheme.label( "BUSCANDO", TEXT, 13, Font.PLAIN );
+	private final JLabel linkPeersValue = DashboardTheme.label( "peers: \u2014", TEXT_MUTED, 11, Font.PLAIN );
+	private final JLabel linkPlayersValue = DashboardTheme.label( "en el juego: \u2014", TEXT_MUTED, 11, Font.PLAIN );
 	private final JTextField commandInput = new JTextField();
 	private final JTextField settingsNetworkInput = new JTextField();
 	private final JTextField settingsPortInput = new JTextField();
@@ -429,6 +439,27 @@ public final class MinecraftDashboard extends JPanel
 	public JTextArea consoleArea()
 	{
 		return consoleArea;
+	}
+
+	public void linkStatus( String value )
+	{
+		linkStatusValue.setText( value );
+	}
+
+	public void linkPeers( String value )
+	{
+		linkPeersValue.setText( "peers: " + value );
+	}
+
+	public void linkPlayers( String value )
+	{
+		linkPlayersValue.setText( "en el juego: " + value );
+	}
+
+	public void linkChatAppend( String line )
+	{
+		linkChatArea.append( line + "\n" );
+		linkChatArea.setCaretPosition( linkChatArea.getDocument().getLength() );
 	}
 
 	public JTextField commandInput()
@@ -1223,6 +1254,43 @@ public final class MinecraftDashboard extends JPanel
 		page.add( address );
 		page.add( Box.createVerticalStrut( 12 ) );
 
+		JPanel liveLink = sectionPanel();
+		liveLink.setLayout( new BoxLayout( liveLink, BoxLayout.Y_AXIS ) );
+		liveLink.add( sectionHeading( "Live link", "World channel on the game port: presence and chat, host or not" ) );
+		linkStatusValue.setAlignmentX( Component.LEFT_ALIGNMENT );
+		linkPeersValue.setAlignmentX( Component.LEFT_ALIGNMENT );
+		linkPlayersValue.setAlignmentX( Component.LEFT_ALIGNMENT );
+		liveLink.add( linkStatusValue );
+		liveLink.add( Box.createVerticalStrut( 5 ) );
+		liveLink.add( linkPeersValue );
+		liveLink.add( Box.createVerticalStrut( 3 ) );
+		liveLink.add( linkPlayersValue );
+		liveLink.add( Box.createVerticalStrut( 10 ) );
+		configureConsoleArea( linkChatArea );
+		JScrollPane linkScroll = new JScrollPane( linkChatArea );
+		linkScroll.setBackground( PANEL_BACKGROUND );
+		linkScroll.getViewport().setBackground( PANEL_BACKGROUND );
+		linkScroll.setBorder( BorderFactory.createMatteBorder( 1, 0, 0, 0, HAIRLINE ) );
+		linkScroll.setAlignmentX( Component.LEFT_ALIGNMENT );
+		linkScroll.setPreferredSize( new Dimension( 100, 150 ) );
+		liveLink.add( linkScroll );
+		JPanel linkCommand = new JPanel( new BorderLayout( 8, 0 ) );
+		linkCommand.setBackground( PANEL_BACKGROUND );
+		linkCommand.setBorder( BorderFactory.createCompoundBorder(
+				BorderFactory.createMatteBorder( 1, 0, 0, 0, HAIRLINE ),
+				BorderFactory.createEmptyBorder( 9, 12, 9, 12 ) ) );
+		DashboardTheme.styleInput( linkChatInput );
+		linkChatInput.setBorder( BorderFactory.createEmptyBorder( 4, 0, 4, 0 ) );
+		linkChatInput.setToolTipText( "Chat with everyone on the world channel" );
+		linkCommand.add( DashboardTheme.label( ">", GREEN, 13, Font.PLAIN ), BorderLayout.WEST );
+		linkCommand.add( linkChatInput, BorderLayout.CENTER );
+		linkCommand.setAlignmentX( Component.LEFT_ALIGNMENT );
+		liveLink.add( linkCommand );
+		liveLink.setAlignmentX( Component.LEFT_ALIGNMENT );
+		liveLink.setMaximumSize( new Dimension( Integer.MAX_VALUE, 380 ) );
+		page.add( liveLink );
+		page.add( Box.createVerticalStrut( 12 ) );
+
 		JPanel guidance = sectionPanel();
 		guidance.setLayout( new BoxLayout( guidance, BoxLayout.Y_AXIS ) );
 		guidance.add( DashboardTheme.eyebrow( "Connection checklist" ) );
@@ -1537,6 +1605,13 @@ public final class MinecraftDashboard extends JPanel
 			if( !command.isBlank() )
 				actions.sendCommand( command );
 			commandInput.setText( "" );
+		} );
+		linkChatInput.addActionListener( event ->
+		{
+			String message = linkChatInput.getText().trim();
+			if( !message.isBlank() )
+				actions.sendLinkChat( message );
+			linkChatInput.setText( "" );
 		} );
 	}
 

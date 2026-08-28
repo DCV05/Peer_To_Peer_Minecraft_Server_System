@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Endershare Link</title>
+<style>
+:root { --bg:#0d1117; --panel:#161b22; --line:#30363d; --fg:#c9d1d9; --dim:#8b949e; --ok:#3fb950; --warn:#d29922; --err:#f85149; }
+* { box-sizing:border-box; margin:0; padding:0; }
+body { background:var(--bg); color:var(--fg); font:13px/1.5 "JetBrains Mono","SF Mono",Menlo,monospace; padding:16px; }
+h1 { font-size:14px; letter-spacing:1px; margin-bottom:2px; }
+.sub { color:var(--dim); margin-bottom:14px; }
+.grid { display:grid; grid-template-columns:1fr 320px; gap:12px; }
+@media (max-width:800px){ .grid { grid-template-columns:1fr; } }
+.panel { background:var(--panel); border:1px solid var(--line); padding:10px 12px; }
+.panel h2 { font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--dim); margin-bottom:8px; }
+#log { height:320px; overflow-y:auto; }
+#log div { margin-bottom:2px; word-break:break-word; }
+#log .sys { color:var(--dim); }
+#log .me { color:var(--ok); }
+table { width:100%; border-collapse:collapse; }
+td,th { text-align:left; padding:2px 6px 2px 0; color:var(--fg); font-weight:normal; }
+th { color:var(--dim); }
+input,button { background:var(--bg); color:var(--fg); border:1px solid var(--line); font:inherit; padding:5px 8px; }
+button { cursor:pointer; }
+button:hover { border-color:var(--dim); }
+.row { display:flex; gap:6px; margin-top:8px; }
+.row input { flex:1; }
+#status { float:right; }
+.on { color:var(--ok); } .off { color:var(--err); } .ro { color:var(--warn); }
+.peer { display:flex; justify-content:space-between; }
+.peer span:last-child { color:var(--dim); }
+</style>
+</head>
+<body>
+<h1>ENDERSHARE LINK <span id="status" class="off">desconectado</span></h1>
+<div class="sub" id="world">&nbsp;</div>
+<div class="grid">
+  <div>
+    <div class="panel">
+      <h2>Chat</h2>
+      <div id="log"></div>
+      <div class="row">
+        <input id="text" placeholder="mensaje..." maxlength="500">
+        <button id="send">enviar</button>
+      </div>
+    </div>
+    <div class="row">
+      <input id="nick" placeholder="nick" maxlength="24" style="max-width:160px">
+      <input id="token" placeholder="token (vacio = solo lectura)" style="max-width:280px">
+      <button id="join">conectar</button>
+    </div>
+  </div>
+  <div>
+    <div class="panel" style="margin-bottom:12px">
+      <h2>En el juego</h2>
+      <table id="players"><tr><th>nick</th><th>pos</th><th>dim</th></tr></table>
+    </div>
+    <div class="panel">
+      <h2>Peers conectados</h2>
+      <div id="peers"></div>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var ws = null, authed = false;
+  var $ = function(id){ return document.getElementById(id); };
+  try { $('nick').value = localStorage.getItem('es_nick') || ''; $('token').value = localStorage.getItem('es_token') || ''; } catch(e){}
+
+  function log(text, cls){
+    var line = document.createElement('div');
+    if( cls ) line.className = cls;
+    line.textContent = text;
+    $('log').appendChild(line);
+    $('log').scrollTop = $('log').scrollHeight;
+  }
+
+  function setStatus(text, cls){ var s = $('status'); s.textContent = text; s.className = cls; }
+
+  function connect(){
+    if( ws ) { try { ws.close(); } catch(e){} }
+    var url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+    ws = new WebSocket(url);
+    ws.onopen = function(){
+      var nick = $('nick').value.trim() || 'anon';
+      var token = $('token').value.trim();
+      try { localStorage.setItem('es_nick', nick); localStorage.setItem('es_token', token); } catch(e){}
+      ws.send(JSON.stringify({ type:'hello', from:nick, ts:Date.now(), payload:{ token:token, client:'web' } }));
+    };
+    ws.onclose = function(){ setStatus('desconectado', 'off'); setTimeout(connect, 5000); };
+    ws.onmessage = function(raw){
+      var m; try { m = JSON.parse(raw.data); } catch(e){ return; }
+      if( m.type === 'hello' ){
+        authed = m.payload.authed;
+        setStatus(authed ? 'conectado' : 'solo lectura', authed ? 'on' : 'ro');
+        $('world').textContent = 'mundo: ' + (m.payload.world || '?');
+        log('-- conectado' + (authed ? '' : ' (solo lectura: sin token valido)'), 'sys');
+      }
+      else if( m.type === 'chat' ) log('<' + m.from + '> ' + m.payload.text);
+      else if( m.type === 'event' ) log('-- ' + m.payload.event + (m.payload.who ? ': ' + m.payload.who : ''), 'sys');
+      else if( m.type === 'error' ) log('-- error: ' + m.payload.reason, 'sys');
+      else if( m.type === 'presence' ){
+        $('peers').innerHTML = '';
+        m.payload.peers.forEach(function(p){
+          var row = document.createElement('div');
+          row.className = 'peer';
+          row.innerHTML = '<span></span><span></span>';
+          row.children[0].textContent = p.nick + (p.authed ? '' : ' (ro)');
+          row.children[1].textContent = p.client + ' · ' + p.state;
+          $('peers').appendChild(row);
+        });
+      }
+      else if( m.type === 'players' ){
+        var table = $('players');
+        table.innerHTML = '<tr><th>nick</th><th>pos</th><th>dim</th></tr>';
+        m.payload.players.forEach(function(p){
+          var row = table.insertRow();
+          row.insertCell().textContent = p.nick;
+          row.insertCell().textContent = p.x + ', ' + p.y + ', ' + p.z;
+          row.insertCell().textContent = String(p.dim).replace('minecraft:', '');
+        });
+      }
+    };
+  }
+
+  function send(){
+    var text = $('text').value.trim();
+    if( !text || !ws || ws.readyState !== 1 ) return;
+    ws.send(JSON.stringify({ type:'chat', ts:Date.now(), payload:{ text:text } }));
+    $('text').value = '';
+  }
+
+  $('send').onclick = send;
+  $('text').addEventListener('keydown', function(e){ if( e.key === 'Enter' ) send(); });
+  $('join').onclick = connect;
+  connect();
+})();
+</script>
+</body>
+</html>

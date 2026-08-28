@@ -1,0 +1,20 @@
+{
+	"schemaVersion": 1,
+	"id": "endershare-link",
+	"version": "${version}",
+	"name": "Endershare Link",
+	"description": "Canal de comunicaciones HTTP/WebSocket en el propio puerto del juego: presencia, chat y posiciones para los peers del mundo, con o sin Endershare.",
+	"authors": [ "Daniel Correa" ],
+	"license": "MIT",
+	"environment": "*",
+	"entrypoints": {
+		"main": [ "endershare.link.EndershareLink" ]
+	},
+	"mixins": [ "endershare-link.mixins.json" ],
+	"depends": {
+		"fabricloader": ">=0.14.0",
+		"fabric": "*",
+		"minecraft": "1.19.x",
+		"java": ">=17"
+	}
+}
