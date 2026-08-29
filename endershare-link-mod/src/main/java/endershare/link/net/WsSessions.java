@@ -22,6 +22,7 @@ public final class WsSessions
 		public volatile boolean authed = false;
 		public volatile boolean helloReceived = false;
 		public volatile String state = "conectado";
+		public volatile boolean chunksSynced = false;
 		volatile ScheduledFuture<?> keepalive = null;
 
 		Session( Channel channel )

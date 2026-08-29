@@ -62,6 +62,16 @@ button:hover { border-color:var(--dim); }
     </div>
   </div>
 </div>
+<div class="panel" style="margin-top:12px">
+  <h2>Mapa live &middot; solo chunks cargados <span id="mapinfo" style="float:right;color:var(--dim)"></span></h2>
+  <div class="row" style="margin:0 0 8px 0">
+    <button class="dimbtn" data-dim="overworld">overworld</button>
+    <button class="dimbtn" data-dim="the_nether">nether</button>
+    <button class="dimbtn" data-dim="the_end">end</button>
+    <span style="color:var(--dim);align-self:center">arrastra para mover &middot; rueda para zoom &middot; gris=borde &middot; verde=ticking</span>
+  </div>
+  <canvas id="livemap" style="width:100%;height:380px;display:block;background:#0a0e13;border:1px solid var(--line)"></canvas>
+</div>
 <script>
 (function(){
   var ws = null, authed = false;
@@ -111,9 +121,12 @@ button:hover { border-color:var(--dim); }
           $('peers').appendChild(row);
         });
       }
+      else if( m.type === 'chunks' ) applyChunks(m.payload);
       else if( m.type === 'players' ){
         var table = $('players');
         table.innerHTML = '<tr><th>nick</th><th>pos</th><th>dim</th></tr>';
+        livePlayers = m.payload.players;
+        requestDraw();
         m.payload.players.forEach(function(p){
           var row = table.insertRow();
           row.insertCell().textContent = p.nick;
@@ -123,6 +136,106 @@ button:hover { border-color:var(--dim); }
       }
     };
   }
+
+  // ---- Mapa live ----
+  var chunks = { overworld:new window.Map(), the_nether:new window.Map(), the_end:new window.Map() };
+  var livePlayers = [];
+  var currentDim = 'overworld';
+  var cam = { x:0, z:0, scale:6 };
+  var centered = false;
+  var canvas = $('livemap');
+  var drawPending = false;
+
+  function applyChunks(payload){
+    var store = chunks[payload.dim];
+    if( !store ) { store = new window.Map(); chunks[payload.dim] = store; }
+    if( payload.mode === 'full' ){
+      store.clear();
+      payload.set.forEach(function(c){ store.set(c[0] + ',' + c[1], c[2] || 1); });
+      if( !centered && payload.dim === currentDim ) centerOnContent();
+    } else {
+      payload.add.forEach(function(c){ store.set(c[0] + ',' + c[1], c[2] || 1); });
+      payload.del.forEach(function(c){ store.delete(c[0] + ',' + c[1]); });
+    }
+    requestDraw();
+  }
+
+  function centerOnContent(){
+    var store = chunks[currentDim];
+    if( !store.size ) return;
+    var sx = 0, sz = 0;
+    store.forEach(function(level, key){
+      var parts = key.split(',');
+      sx += Number(parts[0]); sz += Number(parts[1]);
+    });
+    cam.x = sx / store.size; cam.z = sz / store.size;
+    centered = true;
+  }
+
+  function requestDraw(){
+    if( drawPending ) return;
+    drawPending = true;
+    requestAnimationFrame(function(){ drawPending = false; drawMap(); });
+  }
+
+  var LEVEL_COLORS = { 1:'#39424e', 2:'#2ea043', 3:'#57d364' };
+
+  function drawMap(){
+    if( !canvas ) return;
+    var dpr = window.devicePixelRatio || 1;
+    var w = canvas.clientWidth, h = canvas.clientHeight;
+    if( canvas.width !== w * dpr ) { canvas.width = w * dpr; canvas.height = h * dpr; }
+    var ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    var s = cam.scale;
+    var store = chunks[currentDim];
+    store.forEach(function(level, key){
+      var parts = key.split(',');
+      var px = (Number(parts[0]) - cam.x) * s + w / 2;
+      var pz = (Number(parts[1]) - cam.z) * s + h / 2;
+      if( px < -s || pz < -s || px > w || pz > h ) return;
+      ctx.fillStyle = LEVEL_COLORS[level] || '#39424e';
+      ctx.fillRect(px, pz, Math.max(s - 1, 1), Math.max(s - 1, 1));
+    });
+    ctx.font = '11px "JetBrains Mono", monospace';
+    livePlayers.forEach(function(p){
+      if( String(p.dim).indexOf(currentDim) < 0 ) return;
+      var px = (p.x / 16 - cam.x) * s + w / 2;
+      var pz = (p.z / 16 - cam.z) * s + h / 2;
+      ctx.fillStyle = '#e3b341';
+      ctx.beginPath(); ctx.arc(px, pz, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillText(p.nick, px + 7, pz + 4);
+    });
+    $('mapinfo').textContent = currentDim + ' \u00b7 ' + store.size + ' chunks';
+  }
+
+  if( canvas ){
+    var dragging = false, lastX = 0, lastY = 0;
+    canvas.addEventListener('mousedown', function(e){ dragging = true; lastX = e.clientX; lastY = e.clientY; });
+    window.addEventListener('mouseup', function(){ dragging = false; });
+    window.addEventListener('mousemove', function(e){
+      if( !dragging ) return;
+      cam.x -= (e.clientX - lastX) / cam.scale;
+      cam.z -= (e.clientY - lastY) / cam.scale;
+      lastX = e.clientX; lastY = e.clientY;
+      requestDraw();
+    });
+    canvas.addEventListener('wheel', function(e){
+      e.preventDefault();
+      cam.scale = Math.min(24, Math.max(2, cam.scale * (e.deltaY > 0 ? 0.85 : 1.18)));
+      requestDraw();
+    }, { passive:false });
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('.dimbtn'), function(btn){
+    btn.onclick = function(){
+      currentDim = btn.getAttribute('data-dim');
+      centered = false;
+      centerOnContent();
+      requestDraw();
+    };
+  });
 
   function send(){
     var text = $('text').value.trim();

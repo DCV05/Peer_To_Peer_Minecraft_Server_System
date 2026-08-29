@@ -38,6 +38,7 @@ public final class EndershareLink implements ModInitializer
 		{
 			WsSessions.broadcast( Messages.event( "server-stopping", null ) );
 			WsSessions.closeAll();
+			endershare.link.net.ChunkFeed.reset();
 			server = null;
 		} );
 
@@ -46,6 +47,7 @@ public final class EndershareLink implements ModInitializer
 			if( ++tickCounter % 20 != 0 || WsSessions.count() == 0 )
 				return;
 			WsSessions.broadcast( Messages.players( tickingServer ) );
+			endershare.link.net.ChunkFeed.tick( tickingServer );
 		} );
 
 		ServerPlayConnectionEvents.JOIN.register( ( handler, sender, joinedServer ) ->

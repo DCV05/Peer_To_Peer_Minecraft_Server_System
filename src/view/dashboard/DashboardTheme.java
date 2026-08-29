@@ -191,16 +191,22 @@ public final class DashboardTheme
 	// ---- FASE 5 — Deteccion de entorno --------------------------------------
 
 	/**
-	 * JetBrains Mono si esta instalada; si no, el monoespaciado del sistema. Las
-	 * cifras del dashboard se alinean en columnas, y una fuente proporcional las
-	 * descuadraria al cambiar de valor.
+	 * Helvetica en toda la interfaz. En macOS la familia buena es
+	 * "Helvetica Neue"; donde no exista ninguna variante se cae a Arial, que es
+	 * la metrica mas parecida, y en ultima instancia a la sans del sistema.
 	 */
 	private static String detectFontFamily()
 	{
-		String result = Font.MONOSPACED;
+		String result = Font.SANS_SERIF;
 		String[] available = GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames();
-		if( Arrays.asList( available ).contains( "JetBrains Mono" ) )
-			result = "JetBrains Mono";
+		for( String candidate : new String[] { "Helvetica Neue", "Helvetica", "Arial" } )
+		{
+			if( Arrays.asList( available ).contains( candidate ) )
+			{
+				result = candidate;
+				break;
+			}
+		}
 		return result;
 	}
 
