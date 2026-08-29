@@ -2,6 +2,17 @@ package endershare.link.net;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Locale;
+import java.util.Map;
+
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+
+import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.network.ServerPlayerEntity;
 
 import endershare.link.EndershareLink;
 import io.netty.buffer.Unpooled;
@@ -34,6 +45,12 @@ public final class HttpRouter extends SimpleChannelInboundHandler<FullHttpReques
 
 		do
 		{
+			if( uri.startsWith( "/map" ) )
+			{
+				serveMap( context, uri );
+				break;
+			}
+
 			if( "/ping".equals( uri ) )
 			{
 				respond( context, HttpResponseStatus.OK, "application/json; charset=utf-8",
@@ -55,6 +72,115 @@ public final class HttpRouter extends SimpleChannelInboundHandler<FullHttpReques
 					"endershare-link: not found".getBytes( StandardCharsets.UTF_8 ) );
 
 		} while( false );
+	}
+
+	private static final Map<String, String> CONTENT_TYPES = Map.ofEntries(
+			Map.entry( "html", "text/html; charset=utf-8" ),
+			Map.entry( "js", "application/javascript; charset=utf-8" ),
+			Map.entry( "css", "text/css; charset=utf-8" ),
+			Map.entry( "json", "application/json" ),
+			Map.entry( "png", "image/png" ),
+			Map.entry( "svg", "image/svg+xml" ),
+			Map.entry( "ttf", "font/ttf" ),
+			Map.entry( "ico", "image/x-icon" ) );
+
+	/**
+	 * Sirve el visor 3D de BlueMap (bluemap/web) por el puerto del juego. Los
+	 * .gz de disco viajan tal cual con Content-Encoding: gzip, como hace el
+	 * MapWebServer de la aplicacion. players.json se genera al vuelo para que
+	 * el visor tenga a los jugadores en vivo aunque BlueMap no lo refresque.
+	 */
+	private static void serveMap( ChannelHandlerContext context, String uri )
+	{
+		String inside = uri.substring( "/map".length() );
+		if( inside.isEmpty() || "/".equals( inside ) )
+			inside = "/index.html";
+
+		if( inside.matches( "/maps/[^/]+/live/players\\.json" ) )
+		{
+			String mapId = inside.split( "/" )[2];
+			respond( context, HttpResponseStatus.OK, "application/json",
+					livePlayers( mapId ).getBytes( StandardCharsets.UTF_8 ) );
+			return;
+		}
+
+		Path webroot = FabricLoader.getInstance().getGameDir().resolve( "bluemap" ).resolve( "web" ).normalize();
+		Path file = webroot.resolve( inside.substring( 1 ) ).normalize();
+		byte[] body;
+		if( !file.startsWith( webroot ) || !Files.isRegularFile( file ) )
+		{
+			// Un tile sin renderizar no es un error: 204 como el webserver de
+			// BlueMap, para no llenar la consola del navegador de 404
+			if( inside.contains( "/tiles/" ) )
+				respond( context, HttpResponseStatus.NO_CONTENT, "application/octet-stream", new byte[0] );
+			else
+				respond( context, HttpResponseStatus.NOT_FOUND, "text/plain; charset=utf-8",
+						"map: not found".getBytes( StandardCharsets.UTF_8 ) );
+			return;
+		}
+		try
+		{
+			body = Files.readAllBytes( file );
+		}
+		catch( Exception unreadable )
+		{
+			respond( context, HttpResponseStatus.NOT_FOUND, "text/plain; charset=utf-8",
+					"map: unreadable".getBytes( StandardCharsets.UTF_8 ) );
+			return;
+		}
+
+		String name = file.getFileName().toString().toLowerCase( Locale.ROOT );
+		String encoding = null;
+		if( name.endsWith( ".gz" ) )
+		{
+			encoding = "gzip";
+			name = name.substring( 0, name.length() - 3 );
+		}
+		int dot = name.lastIndexOf( '.' );
+		String contentType = CONTENT_TYPES.getOrDefault( dot < 0 ? "" : name.substring( dot + 1 ),
+				"application/octet-stream" );
+
+		FullHttpResponse response = new DefaultFullHttpResponse( HttpVersion.HTTP_1_1, HttpResponseStatus.OK,
+				Unpooled.wrappedBuffer( body ) );
+		response.headers().set( HttpHeaderNames.CONTENT_TYPE, contentType );
+		if( encoding != null )
+			response.headers().set( HttpHeaderNames.CONTENT_ENCODING, encoding );
+		response.headers().set( HttpHeaderNames.CONTENT_LENGTH, body.length );
+		response.headers().set( HttpHeaderNames.CONNECTION, "close" );
+		response.headers().set( HttpHeaderNames.CACHE_CONTROL, "no-cache" );
+		context.writeAndFlush( response ).addListener( ChannelFutureListener.CLOSE );
+	}
+
+	/** players.json con el formato que espera el visor de BlueMap. */
+	private static String livePlayers( String mapId )
+	{
+		JsonArray players = new JsonArray();
+		MinecraftServer server = EndershareLink.server;
+		if( server != null )
+		{
+			for( ServerPlayerEntity player : server.getPlayerManager().getPlayerList() )
+			{
+				JsonObject entry = new JsonObject();
+				entry.addProperty( "uuid", player.getUuidAsString() );
+				entry.addProperty( "name", player.getGameProfile().getName() );
+				String dimension = player.getWorld().getRegistryKey().getValue().getPath().replace( "the_", "" );
+				entry.addProperty( "foreign", !dimension.equals( mapId ) );
+				JsonObject position = new JsonObject();
+				position.addProperty( "x", player.getX() );
+				position.addProperty( "y", player.getY() );
+				position.addProperty( "z", player.getZ() );
+				entry.add( "position", position );
+				JsonObject rotation = new JsonObject();
+				rotation.addProperty( "pitch", player.getPitch() );
+				rotation.addProperty( "yaw", player.getYaw() );
+				rotation.addProperty( "roll", 0 );
+				entry.add( "rotation", rotation );
+				players.add( entry );
+			}
+		}
+		JsonObject body = new JsonObject();
+		body.add( "players", players );
+		return body.toString();
 	}
 
 	private static byte[] loadPage()
