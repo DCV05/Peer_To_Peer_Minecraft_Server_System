@@ -17,7 +17,11 @@
 
 	function connect()
 	{
-		var url = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
+		// En https (GitHub Pages) el unico ws:// permitido es localhost: le vale
+		// al host que mira su propio server; los demas ven el mapa estatico
+		var url = location.protocol === "https:"
+				? "ws://localhost:25565/ws"
+				: "ws://" + location.host + "/ws";
 		var socket;
 		try
 		{
