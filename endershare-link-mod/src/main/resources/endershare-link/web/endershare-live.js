@@ -157,6 +157,41 @@
 		}
 	}
 
+	/**
+	 * En GitHub Pages los tiles hires que no caben en el sitio principal viven
+	 * en repos hermanos: el service worker (sw.js) los busca alli. El SW no
+	 * controla la primerisima carga; una recarga unica lo deja al mando.
+	 */
+	function registerShardWorker()
+	{
+		if( !location.hostname.endsWith( "github.io" ) || !( "serviceWorker" in navigator ) )
+			return;
+		navigator.serviceWorker.register( "sw.js" ).then( function ()
+		{
+			return navigator.serviceWorker.ready;
+		} ).then( function ()
+		{
+			window.setTimeout( function ()
+			{
+				try
+				{
+					if( !navigator.serviceWorker.controller && !sessionStorage.getItem( "es_sw_reload" ) )
+					{
+						sessionStorage.setItem( "es_sw_reload", "1" );
+						location.reload();
+					}
+				}
+				catch( sinStorage )
+				{
+				}
+			}, 500 );
+		} ).catch( function ( failed )
+		{
+			console.warn( "[endershare-live] sw:", failed );
+		} );
+	}
+
 	connect();
 	hookPlayers();
+	registerShardWorker();
 })();
