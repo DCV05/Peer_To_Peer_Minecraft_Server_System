@@ -32,6 +32,11 @@ public final class LinkClient implements WebSocket.Listener
 
 		void onEvent( String description );
 
+		/** Chunks cargados en una dimension (foto completa o delta con altas). */
+		default void onChunks( String dimension, java.util.List<int[]> chunkCoords )
+		{
+		}
+
 		void onClosed();
 	}
 
@@ -157,6 +162,16 @@ public final class LinkClient implements WebSocket.Listener
 								.append( player.path( "z" ).asInt() ).append( ")" );
 					}
 					listener.onPlayers( count == 0 ? "nadie dentro" : line.toString() );
+				}
+				case "chunks" ->
+				{
+					java.util.List<int[]> coords = new java.util.ArrayList<>();
+					JsonNode entries = payload.has( "set" ) ? payload.path( "set" ) : payload.path( "add" );
+					for( JsonNode entry : entries )
+						if( entry.size() >= 2 )
+							coords.add( new int[] { entry.get( 0 ).asInt(), entry.get( 1 ).asInt() } );
+					if( !coords.isEmpty() )
+						listener.onChunks( payload.path( "dim" ).asText( "overworld" ), coords );
 				}
 				case "event" -> listener.onEvent( payload.path( "event" ).asText( "" )
 						+ (payload.hasNonNull( "who" ) ? ": " + payload.path( "who" ).asText() : "") );

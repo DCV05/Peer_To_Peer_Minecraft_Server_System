@@ -2362,8 +2362,10 @@ public final class MainFrame
 					}
 					setDashboardPhase( Phase.SYNCING, "Confirming the automatic private GitHub backup" );
 					syncState = GitUtils.hasRemoteOrigin( serverOpenedDirectory.toPath() ) ? "PUSHING" : "INITIALIZING";
+					// Con autoridad de host: el alineamiento de arriba ya paso y el lock
+					// de GitHub es nuestro, asi que esta maquina manda sobre el mundo
 					GitUtils.PrivateBackupSetupResult setup = GitUtils.configurePrivateBackup( serverOpenedDirectory.toPath(),
-							getServerName() );
+							getServerName(), true );
 					if( !setup.success() )
 					{
 						syncState = "FAILED";
@@ -3014,7 +3016,9 @@ public final class MainFrame
 				setDashboardPhase( Phase.SAVING, "Creating verified GitHub backup batches before exit" );
 				if( TokenStore.sessionIsOpened() )
 				{
-					backup = GitUtils.configurePrivateBackup( serverOpenedDirectory.toPath(), getServerName() );
+					// El server de esta sesion acaba de parar: seguimos siendo el host
+					// y nuestro estado final manda sobre el remoto
+					backup = GitUtils.configurePrivateBackup( serverOpenedDirectory.toPath(), getServerName(), true );
 				}
 				else
 				{
@@ -3379,8 +3383,9 @@ public final class MainFrame
 			String gitBackupMessage = "World saved locally.";
 			if( isGitHubSelected() )
 			{
+				// El server que acaba de parar era el nuestro: backup con autoridad de host
 				GitUtils.PrivateBackupSetupResult backup = TokenStore.sessionIsOpened()
-						? GitUtils.configurePrivateBackup( serverOpenedDirectory.toPath(), getServerName() )
+						? GitUtils.configurePrivateBackup( serverOpenedDirectory.toPath(), getServerName(), true )
 						: new GitUtils.PrivateBackupSetupResult( false, false, false,
 								"The GitHub session is invalid. Sign in again and retry the backup." );
 				gitBackupSucceeded = backup.success();
@@ -3505,6 +3510,7 @@ public final class MainFrame
 		if( repoFullName != null )
 		{
 			stopHostLockHeartbeat();
+			link.MapPublisher.start( serverOpenedDirectory );
 			hostLockHeartbeatTimer = new java.util.Timer( "endershare-host-lock-heartbeat", true );
 			hostLockHeartbeatTimer.scheduleAtFixedRate( new java.util.TimerTask()
 			{
@@ -3691,6 +3697,7 @@ public final class MainFrame
 		}
 		// Sin hosting activo no hay foto que publicar en el siguiente lease
 		HostLock.clearPublishedDetails();
+		link.MapPublisher.stop();
 	}
 
 	/** Levanta el tunel publico opcional de playit.gg si este mundo lo tiene activado. */

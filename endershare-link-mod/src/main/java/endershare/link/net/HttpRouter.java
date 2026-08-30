@@ -148,6 +148,9 @@ public final class HttpRouter extends SimpleChannelInboundHandler<FullHttpReques
 		response.headers().set( HttpHeaderNames.CONTENT_LENGTH, body.length );
 		response.headers().set( HttpHeaderNames.CONNECTION, "close" );
 		response.headers().set( HttpHeaderNames.CACHE_CONTROL, "no-cache" );
+		// El visor alojado en GitHub Pages (https) puede pedir tiles frescos a
+		// localhost: sin esta cabecera el navegador descarta la respuesta
+		response.headers().set( HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*" );
 		context.writeAndFlush( response ).addListener( ChannelFutureListener.CLOSE );
 	}
 
@@ -209,6 +212,7 @@ public final class HttpRouter extends SimpleChannelInboundHandler<FullHttpReques
 		response.headers().set( HttpHeaderNames.CONTENT_LENGTH, body.length );
 		response.headers().set( HttpHeaderNames.CONNECTION, "close" );
 		response.headers().set( HttpHeaderNames.CACHE_CONTROL, "no-store" );
+		response.headers().set( HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*" );
 		context.writeAndFlush( response ).addListener( ChannelFutureListener.CLOSE );
 	}
 

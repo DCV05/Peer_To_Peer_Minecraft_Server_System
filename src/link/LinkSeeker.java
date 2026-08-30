@@ -201,6 +201,14 @@ public final class LinkSeeker
 				}
 
 				@Override
+				public void onChunks( String dimension, java.util.List<int[]> chunkCoords )
+				{
+					// Solo cuenta lo que carga el server propio: es lo que se publica
+					if( address.startsWith( "localhost" ) )
+						MapPublisher.noteLoadedChunks( dimension, chunkCoords );
+				}
+
+				@Override
 				public void onClosed()
 				{
 					active = null;
