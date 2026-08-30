@@ -9,7 +9,7 @@ This application allows a group of players to **share the responsibility of host
 
 ## Key Features
 
-- Create and manage a Minecraft server easily (currently **Forge**, with **Fabric** and **NeoForge** planned for the future)
+- Create and manage a Minecraft server easily (currently **Forge** and **Fabric**, with **NeoForge** planned for the future)
 - Start and stop the server directly from the application
 - Access the server console to view logs and execute commands
 - Configure common server settings such as:

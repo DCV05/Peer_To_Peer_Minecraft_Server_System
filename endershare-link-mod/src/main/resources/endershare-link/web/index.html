@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Endershare Link</title>
+<style>
+:root { --bg:#0d1117; --panel:#161b22; --line:#30363d; --fg:#c9d1d9; --dim:#8b949e; --ok:#3fb950; --warn:#d29922; --err:#f85149; }
+* { box-sizing:border-box; margin:0; padding:0; }
+body { background:var(--bg); color:var(--fg); font:13px/1.5 "JetBrains Mono","SF Mono",Menlo,monospace; padding:16px; }
+h1 { font-size:14px; letter-spacing:1px; margin-bottom:2px; }
+.sub { color:var(--dim); margin-bottom:14px; }
+.grid { display:grid; grid-template-columns:1fr 320px; gap:12px; }
+@media (max-width:800px){ .grid { grid-template-columns:1fr; } }
+.panel { background:var(--panel); border:1px solid var(--line); padding:10px 12px; }
+.panel h2 { font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--dim); margin-bottom:8px; }
+#log { height:320px; overflow-y:auto; }
+#log div { margin-bottom:2px; word-break:break-word; }
+#log .sys { color:var(--dim); }
+#log .me { color:var(--ok); }
+table { width:100%; border-collapse:collapse; }
+td,th { text-align:left; padding:2px 6px 2px 0; color:var(--fg); font-weight:normal; }
+th { color:var(--dim); }
+input,button { background:var(--bg); color:var(--fg); border:1px solid var(--line); font:inherit; padding:5px 8px; }
+button { cursor:pointer; }
+button:hover { border-color:var(--dim); }
+.row { display:flex; gap:6px; margin-top:8px; }
+.row input { flex:1; }
+#status { float:right; }
+.on { color:var(--ok); } .off { color:var(--err); } .ro { color:var(--warn); }
+.peer { display:flex; justify-content:space-between; }
+.peer span:last-child { color:var(--dim); }
+</style>
+</head>
+<body>
+<h1>ENDERSHARE LINK <a href="/map/" style="color:var(--ok);font-size:11px;text-decoration:none;margin-left:10px">[MAPA 3D]</a> <span id="status" class="off">desconectado</span></h1>
+<div class="sub" id="world">&nbsp;</div>
+<div class="grid">
+  <div>
+    <div class="panel">
+      <h2>Chat</h2>
+      <div id="log"></div>
+      <div class="row">
+        <input id="text" placeholder="mensaje..." maxlength="500">
+        <button id="send">enviar</button>
+      </div>
+    </div>
+    <div class="row">
+      <input id="nick" placeholder="nick" maxlength="24" style="max-width:160px">
+      <input id="token" placeholder="token (vacio = solo lectura)" style="max-width:280px">
+      <button id="join">conectar</button>
+    </div>
+  </div>
+  <div>
+    <div class="panel" style="margin-bottom:12px">
+      <h2>En el juego</h2>
+      <table id="players"><tr><th>nick</th><th>pos</th><th>dim</th></tr></table>
+    </div>
+    <div class="panel">
+      <h2>Peers conectados</h2>
+      <div id="peers"></div>
+    </div>
+  </div>
+</div>
+<div class="panel" style="margin-top:12px">
+  <h2>Mapa live &middot; solo chunks cargados <span id="mapinfo" style="float:right;color:var(--dim)"></span></h2>
+  <div class="row" style="margin:0 0 8px 0">
+    <button class="dimbtn" data-dim="overworld">overworld</button>
+    <button class="dimbtn" data-dim="the_nether">nether</button>
+    <button class="dimbtn" data-dim="the_end">end</button>
+    <span style="color:var(--dim);align-self:center">arrastra para mover &middot; rueda para zoom &middot; gris=borde &middot; verde=ticking</span>
+  </div>
+  <canvas id="livemap" style="width:100%;height:380px;display:block;background:#0a0e13;border:1px solid var(--line)"></canvas>
+</div>
+<script>
+(function(){
+  var ws = null, authed = false;
+  var $ = function(id){ return document.getElementById(id); };
+  try { $('nick').value = localStorage.getItem('es_nick') || ''; $('token').value = localStorage.getItem('es_token') || ''; } catch(e){}
+
+  function log(text, cls){
+    var line = document.createElement('div');
+    if( cls ) line.className = cls;
+    line.textContent = text;
+    $('log').appendChild(line);
+    $('log').scrollTop = $('log').scrollHeight;
+  }
+
+  function setStatus(text, cls){ var s = $('status'); s.textContent = text; s.className = cls; }
+
+  function connect(){
+    if( ws ) { try { ws.close(); } catch(e){} }
+    var url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+    ws = new WebSocket(url);
+    ws.onopen = function(){
+      var nick = $('nick').value.trim() || 'anon';
+      var token = $('token').value.trim();
+      try { localStorage.setItem('es_nick', nick); localStorage.setItem('es_token', token); } catch(e){}
+      ws.send(JSON.stringify({ type:'hello', from:nick, ts:Date.now(), payload:{ token:token, client:'web' } }));
+    };
+    ws.onclose = function(){ setStatus('desconectado', 'off'); setTimeout(connect, 5000); };
+    ws.onmessage = function(raw){
+      var m; try { m = JSON.parse(raw.data); } catch(e){ return; }
+      if( m.type === 'hello' ){
+        authed = m.payload.authed;
+        setStatus(authed ? 'conectado' : 'solo lectura', authed ? 'on' : 'ro');
+        $('world').textContent = 'mundo: ' + (m.payload.world || '?');
+        log('-- conectado' + (authed ? '' : ' (solo lectura: sin token valido)'), 'sys');
+      }
+      else if( m.type === 'chat' ) log('<' + m.from + '> ' + m.payload.text);
+      else if( m.type === 'event' ) log('-- ' + m.payload.event + (m.payload.who ? ': ' + m.payload.who : ''), 'sys');
+      else if( m.type === 'error' ) log('-- error: ' + m.payload.reason, 'sys');
+      else if( m.type === 'presence' ){
+        $('peers').innerHTML = '';
+        m.payload.peers.forEach(function(p){
+          var row = document.createElement('div');
+          row.className = 'peer';
+          row.innerHTML = '<span></span><span></span>';
+          row.children[0].textContent = p.nick + (p.authed ? '' : ' (ro)');
+          row.children[1].textContent = p.client + ' · ' + p.state;
+          $('peers').appendChild(row);
+        });
+      }
+      else if( m.type === 'chunks' ) applyChunks(m.payload);
+      else if( m.type === 'players' ){
+        var table = $('players');
+        table.innerHTML = '<tr><th>nick</th><th>pos</th><th>dim</th></tr>';
+        livePlayers = m.payload.players;
+        requestDraw();
+        m.payload.players.forEach(function(p){
+          var row = table.insertRow();
+          row.insertCell().textContent = p.nick;
+          row.insertCell().textContent = p.x + ', ' + p.y + ', ' + p.z;
+          row.insertCell().textContent = String(p.dim).replace('minecraft:', '');
+        });
+      }
+    };
+  }
+
+  // ---- Mapa live ----
+  var chunks = { overworld:new window.Map(), the_nether:new window.Map(), the_end:new window.Map() };
+  var livePlayers = [];
+  var currentDim = 'overworld';
+  var cam = { x:0, z:0, scale:6 };
+  var centered = false;
+  var canvas = $('livemap');
+  var drawPending = false;
+
+  function applyChunks(payload){
+    var store = chunks[payload.dim];
+    if( !store ) { store = new window.Map(); chunks[payload.dim] = store; }
+    if( payload.mode === 'full' ){
+      store.clear();
+      payload.set.forEach(function(c){ store.set(c[0] + ',' + c[1], c[2] || 1); });
+      if( !centered && payload.dim === currentDim ) centerOnContent();
+    } else {
+      payload.add.forEach(function(c){ store.set(c[0] + ',' + c[1], c[2] || 1); });
+      payload.del.forEach(function(c){ store.delete(c[0] + ',' + c[1]); });
+    }
+    requestDraw();
+  }
+
+  function centerOnContent(){
+    var store = chunks[currentDim];
+    if( !store.size ) return;
+    var sx = 0, sz = 0;
+    store.forEach(function(level, key){
+      var parts = key.split(',');
+      sx += Number(parts[0]); sz += Number(parts[1]);
+    });
+    cam.x = sx / store.size; cam.z = sz / store.size;
+    centered = true;
+  }
+
+  function requestDraw(){
+    if( drawPending ) return;
+    drawPending = true;
+    requestAnimationFrame(function(){ drawPending = false; drawMap(); });
+  }
+
+  var LEVEL_COLORS = { 1:'#39424e', 2:'#2ea043', 3:'#57d364' };
+
+  function drawMap(){
+    if( !canvas ) return;
+    var dpr = window.devicePixelRatio || 1;
+    var w = canvas.clientWidth, h = canvas.clientHeight;
+    if( canvas.width !== w * dpr ) { canvas.width = w * dpr; canvas.height = h * dpr; }
+    var ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    var s = cam.scale;
+    var store = chunks[currentDim];
+    store.forEach(function(level, key){
+      var parts = key.split(',');
+      var px = (Number(parts[0]) - cam.x) * s + w / 2;
+      var pz = (Number(parts[1]) - cam.z) * s + h / 2;
+      if( px < -s || pz < -s || px > w || pz > h ) return;
+      ctx.fillStyle = LEVEL_COLORS[level] || '#39424e';
+      ctx.fillRect(px, pz, Math.max(s - 1, 1), Math.max(s - 1, 1));
+    });
+    ctx.font = '11px "JetBrains Mono", monospace';
+    livePlayers.forEach(function(p){
+      if( String(p.dim).indexOf(currentDim) < 0 ) return;
+      var px = (p.x / 16 - cam.x) * s + w / 2;
+      var pz = (p.z / 16 - cam.z) * s + h / 2;
+      ctx.fillStyle = '#e3b341';
+      ctx.beginPath(); ctx.arc(px, pz, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillText(p.nick, px + 7, pz + 4);
+    });
+    $('mapinfo').textContent = currentDim + ' \u00b7 ' + store.size + ' chunks';
+  }
+
+  if( canvas ){
+    var dragging = false, lastX = 0, lastY = 0;
+    canvas.addEventListener('mousedown', function(e){ dragging = true; lastX = e.clientX; lastY = e.clientY; });
+    window.addEventListener('mouseup', function(){ dragging = false; });
+    window.addEventListener('mousemove', function(e){
+      if( !dragging ) return;
+      cam.x -= (e.clientX - lastX) / cam.scale;
+      cam.z -= (e.clientY - lastY) / cam.scale;
+      lastX = e.clientX; lastY = e.clientY;
+      requestDraw();
+    });
+    canvas.addEventListener('wheel', function(e){
+      e.preventDefault();
+      cam.scale = Math.min(24, Math.max(2, cam.scale * (e.deltaY > 0 ? 0.85 : 1.18)));
+      requestDraw();
+    }, { passive:false });
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('.dimbtn'), function(btn){
+    btn.onclick = function(){
+      currentDim = btn.getAttribute('data-dim');
+      centered = false;
+      centerOnContent();
+      requestDraw();
+    };
+  });
+
+  function send(){
+    var text = $('text').value.trim();
+    if( !text || !ws || ws.readyState !== 1 ) return;
+    ws.send(JSON.stringify({ type:'chat', ts:Date.now(), payload:{ text:text } }));
+    $('text').value = '';
+  }
+
+  $('send').onclick = send;
+  $('text').addEventListener('keydown', function(e){ if( e.key === 'Enter' ) send(); });
+  $('join').onclick = connect;
+  connect();
+})();
+</script>
+</body>
+</html>
