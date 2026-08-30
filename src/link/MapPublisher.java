@@ -158,10 +158,22 @@ public final class MapPublisher
 				return new Report( 0, 0, 0, 0 );
 
 			GitHub github = new GitHub( token );
-			Map<String, Long> mainSizes = github.treeSizes( mainRepo );
+			Map<String, Map<String, String[]>> known = new LinkedHashMap<>();
+			known.put( mainRepo, github.treeInfo( mainRepo ) );
+			for( String shard : shards )
+				known.put( shard, github.treeInfo( shard ) );
+			Map<String, Long> mainSizes = new HashMap<>();
+			for( Map.Entry<String, String[]> entry : known.get( mainRepo ).entrySet() )
+				mainSizes.put( entry.getKey(), Long.parseLong( entry.getValue()[1] ) );
 			Map<String, Map<String, Long>> shardSizes = new LinkedHashMap<>();
 			for( String shard : shards )
-				shardSizes.put( shard, github.treeSizes( shard ) );
+			{
+				Map<String, Long> sizes = new HashMap<>();
+				for( Map.Entry<String, String[]> entry : known.get( shard ).entrySet() )
+					sizes.put( entry.getKey(), Long.parseLong( entry.getValue()[1] ) );
+				shardSizes.put( shard, sizes );
+			}
+			int unchanged = 0;
 
 			Map<String, List<Path>> byRepo = new LinkedHashMap<>();
 			int skippedHires = 0;
@@ -179,6 +191,20 @@ public final class MapPublisher
 				if( hires && !isVisited( rel ) && !mainSizes.containsKey( rel ) )
 				{
 					skippedHires++;
+					continue;
+				}
+				// Identico a lo que ya hay en algun repo: no se resube
+				String localSha = blobSha( file );
+				boolean same = false;
+				for( Map<String, String[]> repoInfo : known.values() )
+				{
+					String[] remote = repoInfo.get( rel );
+					if( remote != null && remote[0].equals( localSha ) )
+						same = true;
+				}
+				if( same )
+				{
+					unchanged++;
 					continue;
 				}
 				if( files >= MAX_FILES_PER_RUN || bytes >= MAX_BYTES_PER_RUN )
@@ -228,7 +254,7 @@ public final class MapPublisher
 			Files.writeString( configFile( folder ).toPath(), JSON.writerWithDefaultPrettyPrinter().writeValueAsString( config ),
 					StandardCharsets.UTF_8 );
 			Log.event( "MAP_PUBLISH", "Subidos " + files + " ficheros (" + bytes / 1048576 + " MB), "
-					+ skippedHires + " hires no visitados omitidos, " + pending + " pendientes" );
+					+ unchanged + " sin cambios, " + skippedHires + " hires no visitados omitidos, " + pending + " pendientes" );
 			return new Report( files, bytes, skippedHires, pending );
 		}
 	}
@@ -298,6 +324,19 @@ public final class MapPublisher
 		{
 			return false;
 		}
+	}
+
+	/** sha1 de git para un blob: "blob <len>\0" + contenido. */
+	private static String blobSha( Path file ) throws Exception
+	{
+		byte[] content = Files.readAllBytes( file );
+		java.security.MessageDigest digest = java.security.MessageDigest.getInstance( "SHA-1" );
+		digest.update( ( "blob " + content.length + "\0" ).getBytes( StandardCharsets.UTF_8 ) );
+		digest.update( content );
+		StringBuilder hex = new StringBuilder();
+		for( byte b : digest.digest() )
+			hex.append( String.format( "%02x", b ) );
+		return hex.toString();
 	}
 
 	// ---- FASE 3 — Persistencia -------------------------------------------
@@ -383,11 +422,21 @@ public final class MapPublisher
 		Map<String, Long> treeSizes( String repo ) throws Exception
 		{
 			Map<String, Long> sizes = new HashMap<>();
+			for( Map.Entry<String, String[]> entry : treeInfo( repo ).entrySet() )
+				sizes.put( entry.getKey(), Long.parseLong( entry.getValue()[1] ) );
+			return sizes;
+		}
+
+		/** Ruta → { sha del blob, tamaño }: con el sha se evita resubir lo identico. */
+		Map<String, String[]> treeInfo( String repo ) throws Exception
+		{
+			Map<String, String[]> info = new HashMap<>();
 			JsonNode tree = call( "GET", "/repos/" + repo + "/git/trees/main?recursive=1", null );
 			for( JsonNode entry : tree.path( "tree" ) )
 				if( "blob".equals( entry.path( "type" ).asText() ) )
-					sizes.put( entry.path( "path" ).asText(), entry.path( "size" ).asLong( 0 ) );
-			return sizes;
+					info.put( entry.path( "path" ).asText(),
+							new String[] { entry.path( "sha" ).asText(), String.valueOf( entry.path( "size" ).asLong( 0 ) ) } );
+			return info;
 		}
 
 		private static final int SLICE = 100;

@@ -6,7 +6,7 @@
  * 2. Si no, se pide al sitio principal; y si este responde 404, a los repos
  *    shard bajo el mismo origen (Pages corta en ~1 GB por sitio).
  */
-var SHARDS = [ "/farmland-map-t1/" ];
+var SHARDS = [ "/farmland-map-t1/", "/farmland-map-t2/" ];
 var LOCAL = "http://localhost:25565/map/";
 var localAlive = false;
 var localCheckedAt = 0;
