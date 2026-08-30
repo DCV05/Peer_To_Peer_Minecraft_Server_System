@@ -411,7 +411,26 @@ public final class MapPublisher
 			else
 				request.header( "Content-Type", "application/json" )
 						.method( method, HttpRequest.BodyPublishers.ofString( body.toString() ) );
-			HttpResponse<String> response = http.send( request.build(), HttpResponse.BodyHandlers.ofString() );
+			// GitHub suelta 5xx transitorios con cierta frecuencia en subidas
+			// largas: tres intentos con espera creciente antes de rendirse
+			HttpResponse<String> response = null;
+			for( int attempt = 1; attempt <= 3; attempt++ )
+			{
+				try
+				{
+					response = http.send( request.build(), HttpResponse.BodyHandlers.ofString() );
+				}
+				catch( java.io.IOException network )
+				{
+					if( attempt == 3 )
+						throw network;
+					Thread.sleep( 2000L * attempt );
+					continue;
+				}
+				if( response.statusCode() / 100 != 5 || attempt == 3 )
+					break;
+				Thread.sleep( 3000L * attempt );
+			}
 			if( response.statusCode() / 100 != 2 )
 				throw new IllegalStateException( method + " " + path + " → " + response.statusCode() + ": "
 						+ response.body().substring( 0, Math.min( 200, response.body().length() ) ) );
