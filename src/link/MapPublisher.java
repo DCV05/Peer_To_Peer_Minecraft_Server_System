@@ -375,7 +375,39 @@ public final class MapPublisher
 			return sizes;
 		}
 
+		private static final int SLICE = 100;
+
+		/**
+		 * GitHub rechaza arboles grandes de golpe (422 "input too large"): se
+		 * commitea en rebanadas encadenadas, y si una rebanada aun es demasiado
+		 * se parte por la mitad hasta un minimo de 10.
+		 */
 		void commitFiles( String repo, Map<String, byte[]> files, String message ) throws Exception
+		{
+			List<Map.Entry<String, byte[]>> all = new ArrayList<>( files.entrySet() );
+			int size = SLICE;
+			int from = 0;
+			while( from < all.size() )
+			{
+				int to = Math.min( all.size(), from + size );
+				Map<String, byte[]> slice = new LinkedHashMap<>();
+				for( Map.Entry<String, byte[]> entry : all.subList( from, to ) )
+					slice.put( entry.getKey(), entry.getValue() );
+				try
+				{
+					commitSlice( repo, slice, message + " (" + ( to ) + "/" + all.size() + ")" );
+					from = to;
+				}
+				catch( IllegalStateException failed )
+				{
+					if( !failed.getMessage().contains( "422" ) || size <= 10 )
+						throw failed;
+					size = Math.max( 10, size / 2 );
+				}
+			}
+		}
+
+		private void commitSlice( String repo, Map<String, byte[]> files, String message ) throws Exception
 		{
 			JsonNode ref = call( "GET", "/repos/" + repo + "/git/ref/heads/main", null );
 			String parent = ref.path( "object" ).path( "sha" ).asText();
