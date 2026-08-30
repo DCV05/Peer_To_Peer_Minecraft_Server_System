@@ -165,6 +165,9 @@ public final class MapPublisher
 			int pending = 0;
 			long bytes = 0;
 			int files = 0;
+			// Los ficheros van en orden de mtime: cuando se llena la ronda, el
+			// umbral avanza hasta el ultimo subido y la siguiente sigue desde ahi
+			long cutoff = startedAt;
 			List<Path> changed = changedFiles( maps, since );
 			for( Path file : changed )
 			{
@@ -177,6 +180,8 @@ public final class MapPublisher
 				}
 				if( files >= MAX_FILES_PER_RUN || bytes >= MAX_BYTES_PER_RUN )
 				{
+					if( pending == 0 )
+						cutoff = Files.getLastModifiedTime( file ).toMillis() - 1;
 					pending++;
 					continue;
 				}
@@ -216,12 +221,9 @@ public final class MapPublisher
 						"Mapa: " + contents.size() + " tiles actualizados por Endershare" );
 			}
 
-			if( pending == 0 )
-			{
-				config.put( "lastPublishMillis", startedAt );
-				Files.writeString( configFile( folder ).toPath(), JSON.writerWithDefaultPrettyPrinter().writeValueAsString( config ),
-						StandardCharsets.UTF_8 );
-			}
+			config.put( "lastPublishMillis", pending == 0 ? startedAt : cutoff );
+			Files.writeString( configFile( folder ).toPath(), JSON.writerWithDefaultPrettyPrinter().writeValueAsString( config ),
+					StandardCharsets.UTF_8 );
 			Log.event( "MAP_PUBLISH", "Subidos " + files + " ficheros (" + bytes / 1048576 + " MB), "
 					+ skippedHires + " hires no visitados omitidos, " + pending + " pendientes" );
 			return new Report( files, bytes, skippedHires, pending );
@@ -245,8 +247,18 @@ public final class MapPublisher
 					result.add( file );
 			}
 		}
-		// Primero lowres y ajustes (pequeños y utiles para todos), luego hires
-		result.sort( ( a, b ) -> Boolean.compare( a.toString().contains( "/tiles/0/" ), b.toString().contains( "/tiles/0/" ) ) );
+		// Orden por mtime: permite avanzar el umbral entre rondas sin repetir
+		result.sort( ( a, b ) ->
+		{
+			try
+			{
+				return Long.compare( Files.getLastModifiedTime( a ).toMillis(), Files.getLastModifiedTime( b ).toMillis() );
+			}
+			catch( Exception unreadable )
+			{
+				return 0;
+			}
+		} );
 		return result;
 	}
 
