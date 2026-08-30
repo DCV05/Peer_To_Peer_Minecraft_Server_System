@@ -143,6 +143,9 @@ public final class MapPublisher
 			if( token == null || token.isBlank() )
 				return new Report( 0, 0, 0, 0 );
 
+			// Los visitados se releen en cada publicacion: valen tambien fuera
+			// del ciclo start/stop (pruebas, publicacion manual)
+			loadVisited( folder );
 			String mainRepo = config.path( "main" ).asText();
 			List<String> shards = new ArrayList<>();
 			for( JsonNode shard : config.path( "shards" ) )
